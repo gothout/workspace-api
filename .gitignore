@@ -1,0 +1,20 @@
+# Config local (nunca versionar)
+configs.json
+
+# Binários e artefatos de build
+/bin/
+/dist/
+*.exe
+workspace-api
+
+# Documentação gerada localmente por ferramentas (swag, pkgsite)
+/docs_tmp/
+
+# Testes e cobertura
+*.out
+coverage.html
+
+# IDE/SO
+.idea/
+.vscode/
+.DS_Store
