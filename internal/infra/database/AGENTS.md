@@ -5,9 +5,9 @@ Camada de persistência: conexão (Postgres) e evolução de esquema
 
 ## Convenções de tabelas
 
-- Nome: **`identidade_{subdominio}_{entidade}`** (ex.:
-  `identidade_workspace_workspace`) — o prefixo do domínio evita colisão
-  quando novos domínios chegarem.
+- Nome: **`{dominio}_{subdominio}_{entidade}`** (hoje `{dominio}` =
+  `identidade`; ex.: `identidade_workspace_workspace`) — o prefixo do
+  domínio evita colisão quando novos domínios chegarem.
 - Colunas obrigatórias em toda tabela de negócio: `uuid` (PK),
   `organization_uuid`, `workspace_uuid`, `created_at`, `updated_at`,
   `deleted_at` (soft delete). Timestamps sempre em UTC.
@@ -16,8 +16,10 @@ Camada de persistência: conexão (Postgres) e evolução de esquema
   não começa por elas não serve às queries reais.
 - **Exceção precisa de motivo documentado** no `AGENTS.md` do subdomínio e
   na migration: tabela acima do workspace (só `organization_uuid`), tabela
-  raiz sem escopo (organization), unicidade global (slug de workspace).
-  Exceção sem motivo escrito é reprovada.
+  raiz sem escopo (organization), **globais da plataforma sem escopo**
+  (`papel`/`papel_permissao` — papéis seed), unicidade **total** (slug de
+  workspace, `dominio` custom — valor removido não se libera). Exceção sem
+  motivo escrito é reprovada.
 
 ## Regras
 
@@ -28,5 +30,6 @@ Camada de persistência: conexão (Postgres) e evolução de esquema
 
 ## Definição de pronto
 
-- Toda tabela criada segue as convenções acima, verificadas no teste
-  `up → down → up` do runner.
+- Toda tabela criada segue as convenções acima, conferidas na **revisão da
+  migration** (checklist do `agents/05`) — o teste `up → down → up` prova
+  reversibilidade, não convenção de modelagem.

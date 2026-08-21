@@ -1,17 +1,24 @@
-# AGENTS.md — `internal/domain`
+# AGENTS.md — `internal/identidade/domain`
 
-Subdomínios de negócio. Hoje: `identidade` (organization, workspace, user).
+Subdomínios do domínio **identidade**: `organization`, `workspace`, `user`.
 
 ## Regras
 
 - Importa `pkg`, `infra` e `middleware` — **NUNCA** `application`, `cmd` nem
-  **subdomínio irmão** (regras 4 e 5 de `internal/AGENTS.md`). Dependência
+  **subdomínio irmão** (regras 3 e 4 de `agents/01`). Dependência
   entre subdomínios entra por interface declarada no consumidor, ligada no
   `cmd/bootstrap`.
 - Todo subdomínio segue a anatomia de **8 arquivos + `permissions.go`**
-  (templates em `agents/05`): `model.go`, `dto.go`, `repository.go`,
-  `service.go`, `controller.go`, `routes.go`, `errors.go`, `singleton.go`,
-  `permissions.go`.
+  (templates em `agents/05`): `model.go`, `dto_request.go`,
+  `dto_response.go`, `errors.go`, `permissions.go`, `repository.go`,
+  `service.go`, `controller.go`, `singleton.go`.
+- **Cada subdomínio hospeda um agregado** (ou poucos, com raiz explícita no
+  `model.go`): a raiz é a única porta de entrada; referência a outro agregado
+  **só por uuid** — nunca join de escrita.
+- **Repositório é por agregado**, com métodos em linguagem de negócio.
+- **Invariantes vivem no construtor `NewX` e nos métodos de comportamento**
+  da entidade — struct literal de entidade fora do pacote é proibida.
+  Padrões táticos completos em `agents/01`, templates em `agents/05`.
 - **Auth declarada rota a rota** no `Routes()` do controller
   (`RequirePermission("dominio:subdominio:acao")`), nunca no grupo.
 - **Auditoria em toda escrita**: quem, quando, o quê, de onde. Leitura não

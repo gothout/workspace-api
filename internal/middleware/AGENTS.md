@@ -16,15 +16,30 @@ A ordem é sempre essa: `ResolveWorkspace` precisa da identidade que o
 `SetContextAuthorization` injetou, e a exigência de permissão precisa das
 duas. Declarada **rota a rota** pelos controllers, nunca no grupo.
 
-## Regra que define o desenho: NÃO importa `internal/domain`
+## Regra que define o desenho: NÃO importa nenhum `internal/{dominio}/domain`
 
-Os controllers de `domain/...` importam **este** pacote para montar rotas —
-um import de volta fecharia ciclo. Então:
+Os controllers de `internal/{dominio}/domain/...` importam **este** pacote
+para montar rotas — um import de volta fecharia ciclo. Então:
 
 - toda dependência entra por **interface declarada em `contratos.go`**;
 - quem implementa é `cmd/bootstrap/middleware.go`, resolvendo os singletons
   **no momento da chamada** e traduzindo o erro do vizinho;
 - os tipos deste pacote são o mínimo da autorização — sem hash, sem senha.
+
+## API pública do singleton
+
+- **`Use()`** devolve a cadeia inicializada; sem `middleware.New` no boot,
+  devolve uma **cadeia fechada** — nunca erro nem pânico.
+- **Funções de pacote** `SetContextAuthorization()`, `ResolveWorkspace()`,
+  `RequirePermission(perm)` — é o que os controllers usam no `Routes()`:
+  sem inicialização, cada uma devolve handler que responde **403**
+  (fail-closed testável: engine de teste sobe sem boot).
+- **`MustUse()` é restrito ao `cmd/bootstrap`** — panic fora do boot é
+  proibido.
+- **Resolvedor de permissões provisório**: na F1 o adaptador do
+  `cmd/bootstrap` consulta as tabelas de autorização (`papel`,
+  `papel_permissao`, `atribuicao`) diretamente; na F4 passa a delegar ao
+  service do `user` — a interface do contrato não muda.
 
 ## Decisões que não devem ser "simplificadas"
 

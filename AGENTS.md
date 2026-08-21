@@ -25,19 +25,24 @@ go test -race ./...
 
 ## Estrutura e regras de dependência
 
-Layout de pastas e regras invioláveis: `agents/01`. Resumo do fluxo permitido:
+Layout de pastas e regras invioláveis: `agents/01`. O **domínio é pasta direta
+de `internal/`** (hoje só `identidade`): os subdomínios moram em
+`internal/identidade/domain/{subdominio}` e as orquestrações que atravessam
+2+ subdomínios em `internal/identidade/application/{nome}`. Resumo do fluxo
+permitido:
 
 ```
-pkg ← infra ← domain ← application ← cmd
+pkg ← infra ← {dominio}/domain ← {dominio}/application ← cmd
 ```
 
 - `internal/pkg` é **folha**: não importa nada de `internal/` fora de `pkg`.
 - `internal/infra` importa só `pkg` + libs externas — **nunca outro `infra`**.
-- Um subdomínio **não importa irmão**; dependência entra por interface declarada
-  no consumidor e ligada no `cmd/bootstrap`.
+- Um subdomínio **não importa irmão** nem `application`; dependência entra por
+  interface declarada no consumidor e ligada no `cmd/bootstrap`.
 - Dentro do subdomínio: `controller → service → repository`, nunca o contrário.
-- `internal/middleware` **não importa `domain`** (seria ciclo): as dependências
-  entram por interfaces em `contratos.go`, ligadas no bootstrap.
+- `internal/middleware` **não importa nenhum `internal/{dominio}/domain`**
+  (seria ciclo): as dependências entram por interfaces em `contratos.go`,
+  ligadas no bootstrap.
 
 Validação dupla da arquitetura:
 
@@ -73,7 +78,8 @@ do processo** (detalhes e templates em `agents/05`):
 
 ## Migrations
 
-SQL puro em `db/migrations/NNNN_identidade_{subdominio}_{desc}.{up,down}.sql`.
+SQL puro em `db/migrations/NNNN_{dominio}_{subdominio}_{desc}.{up,down}.sql`
+(hoje `{dominio}` = `identidade`).
 **Todo `up` tem `down`** no mesmo commit, exercitado por `up → down → up` em
 banco efêmero; migration aplicada nunca é editada (correção = migration nova);
 `up` roda automaticamente no boot (advisory lock), rollback é manual via CLI.
@@ -104,11 +110,14 @@ Especificação completa em `agents/02` e `db/migrations/AGENTS.md`.
 
 1. Abrir `agents/README.md` e seguir o protocolo.
 2. **Uma issue por vez**, na ordem das fases; nunca pular fase.
-3. Antes de codar, reler `agents/01`, `agents/05` e o `AGENTS.md` da pasta.
+3. Antes de codar, reler `agents/01`, `agents/04`, `agents/05` e o
+   `AGENTS.md` da pasta.
 4. Fechar a issue só com build/vet/test verdes e checklist do `agents/05`
    cumprido. Nunca deixar o build quebrado.
 
 ## Idioma
 
-Comentários, docs e mensagens de erro em **PT-BR**; identificadores de código
-em inglês/snake_case conforme os templates do `agents/05`.
+Comentários, docs e mensagens de erro em **PT-BR**; tipos e APIs técnicas em
+inglês; vocabulário de negócio (campos, métodos de comportamento, sentinelas,
+permissões, helpers de DTO) em **PT-BR**, conforme os templates do
+`agents/05`.

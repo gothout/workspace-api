@@ -15,6 +15,8 @@
 | Swagger | `github.com/swaggo/swag`, `github.com/swaggo/gin-swagger`, `github.com/swaggo/files` | UI em `/doc/index.html` |
 | Migrations | `github.com/golang-migrate/migrate/v4` | SQL puro em `db/migrations` |
 | Testes | `github.com/stretchr/testify` | Table-driven |
+| Senha/hash | `golang.org/x/crypto` | bcrypt para credenciais |
+| Testes de integração | `github.com/testcontainers/testcontainers-go` | Banco efêmero do teste `up → down → up` |
 
 Sem Redis, ClickHouse ou errobserve no núcleo — evoluções futuras (fim deste doc), cada uma com issue própria.
 
@@ -47,7 +49,7 @@ Sem Redis, ClickHouse ou errobserve no núcleo — evoluções futuras (fim dest
   "databases": {
     "postgres": {
       "host": "localhost",
-      "port": "5432",
+      "port": 5432,
       "user": "workspace",
       "pass": "workspace",
       "name": "workspace",
@@ -84,11 +86,11 @@ Sem Redis, ClickHouse ou errobserve no núcleo — evoluções futuras (fim dest
 
 ## Convenção de tabelas
 
-- Nome: `identidade_{subdominio}_{entidade}`, snake_case — ex.: `identidade_workspace_workspace`, `identidade_user_atribuicao`.
+- Nome: `{dominio}_{subdominio}_{entidade}`, snake_case (hoje `{dominio}` = `identidade`) — ex.: `identidade_workspace_workspace`, `identidade_user_atribuicao`.
 - PK `uuid` (uuid v4 gerado no app ou `gen_random_uuid()`).
 - Colunas obrigatórias: `uuid`, `organization_uuid`, `workspace_uuid` (nas tabelas de negócio), `created_at`, `updated_at`, `deleted_at` (remoção lógica).
-- **Índice de escopo**: toda tabela de negócio nasce com índice cuja RAIZ é `(organization_uuid, workspace_uuid)`. As tabelas acima do workspace usam a raiz que couber — `(organization_uuid)` em `identidade_workspace_workspace`, nenhuma em `identidade_organization_organization` (raiz da hierarquia) — sempre com o motivo escrito no `AGENTS.md` do pacote. Tabela sem nenhuma coluna de escopo precisa de motivo documentado.
-- Único em tabela com `deleted_at` é índice único **parcial** (`WHERE deleted_at IS NULL`) — senão a linha removida reserva a chave para sempre e a recriação responde 409 apontando para um registro invisível.
+- **Índice de escopo**: toda tabela de negócio nasce com índice cuja RAIZ é `(organization_uuid, workspace_uuid)`. As tabelas acima do workspace usam a raiz que couber — `(organization_uuid)` em `identidade_workspace_workspace`, nenhuma em `identidade_organization_organization` (raiz da hierarquia) — sempre com o motivo escrito no `AGENTS.md` do pacote. Tabela sem nenhuma coluna de escopo precisa de motivo documentado — é o caso das **globais da plataforma** `identidade_user_papel` e `identidade_user_papel_permissao` (papéis seed globais).
+- Único em tabela com `deleted_at` é índice único **parcial** (`WHERE deleted_at IS NULL`) — senão a linha removida reserva a chave para sempre e a recriação responde 409 apontando para um registro invisível. **Exceção documentada**: `slug` de workspace e `dominio` custom de organization usam índice único **TOTAL** — o valor removido **não se libera**, para evitar takeover de endereço/domínio por outro tenant (o Postgres aceita múltiplos NULLs, então o único total funciona com `dominio` opcional).
 
 ## Migrations — especificação completa
 
@@ -96,7 +98,7 @@ Ferramenta: `golang-migrate/migrate/v4`, SQL puro, tabela de controle `schema_mi
 
 ### Arquivos
 
-- Par obrigatório: `db/migrations/NNNN_identidade_{subdominio}_{descricao}.up.sql` + `.down.sql`.
+- Par obrigatório: `db/migrations/NNNN_{dominio}_{subdominio}_{descricao}.up.sql` + `.down.sql` (hoje `{dominio}` = `identidade`).
 - `NNNN` sequencial a partir de `0001`, **sem buracos** — o `validate` reprova buraco e número duplicado.
 - Um par por tabela ou grupo pequeno de tabelas do subdomínio.
 - Cabeçalho comentado em todo arquivo: o que cria/altera e, nos downs com dado, o que é ou não reversível.
@@ -105,6 +107,11 @@ Ferramenta: `golang-migrate/migrate/v4`, SQL puro, tabela de controle `schema_mi
 
 - Todo `up` nasce com o `down` **no mesmo commit**.
 - `TestMigrationsSobemEDescem` aplica **`up → down → up`** em banco efêmero (docker/testcontainers) e **pula sozinho** (`t.Skip`) quando não há docker disponível — o `go test ./...` continua verde sem docker, mas com docker a migration cujo down não desfaz o up reprova a suíte.
+- A **CI do template instala arch-go e docker**: o `t.Skip` dos testes é para o **dev local** — na CI os gates rodam de verdade.
+
+### Seeds
+
+Seeds rodam via **`workspace-api seed`**, são **idempotentes** e **nunca automáticos no boot** — subir o processo nunca grava dado de negócio sozinho.
 
 ### Validate sem conexão
 
@@ -128,11 +135,11 @@ Ferramenta: `golang-migrate/migrate/v4`, SQL puro, tabela de controle `schema_mi
 | `force V` | marca a versão manualmente (recuperação de estado "dirty") |
 | `status` | versão atual + pendentes |
 | `validate` | confere pares/sequência/SQL não vazio — sem conexão |
-| `create {descricao}` | gera o par `NNNN_{descricao}.{up,down}.sql` com o número seguinte; a descrição já deve vir no padrão `identidade_{subdominio}_{desc}` (o comando valida) |
+| `create {descricao}` | gera o par `NNNN_{descricao}.{up,down}.sql` com o número seguinte; a descrição já deve vir no padrão `{dominio}_{subdominio}_{desc}` (o comando valida) |
 
 ### Regras invioláveis
 
-1. **Transacional por padrão**: cada arquivo roda numa transação (o DDL do Postgres é transacional); falha = rollback automático, sem meio-termo. Exceção única, documentada no cabeçalho do arquivo: `CREATE INDEX CONCURRENTLY` (não aceita transação) — isolado num arquivo próprio, um comando só, executado manualmente em produção.
+1. **Transacional por padrão**: cada arquivo roda numa transação (o DDL do Postgres é transacional); falha = rollback automático, sem meio-termo. Exceção única: `CREATE INDEX CONCURRENTLY` (não aceita transação) — isolado num arquivo próprio, um comando só, **marcado com `-- manual` no cabeçalho**: o `auto_run` do boot **ignora** arquivos manuais (segue com log de alerta), o `status` os lista como **pendente-manual** e a execução é manual em produção.
 2. **Migration aplicada nunca é editada.** Correção = migration nova (fix forward).
 3. **Expand-and-contract** para mudança destrutiva (renomear/dropar coluna, mudar tipo): *expand* cria a coluna nova + dual-write/backfill numa release; *contract* remove a antiga numa migration posterior. Proibido `DROP COLUMN`, `RENAME` ou `NOT NULL` sem default na mesma release do código que depende deles.
 4. **Compatibilidade retroativa**: migration N funciona com o código N-1 em produção (deploy e migração não são atômicos).
@@ -155,7 +162,7 @@ Cada uma tem **issue própria no GitHub** (label `evolucao`) e só entra no loop
 
 | Evolução | Para quê | Desenho acordado |
 |---|---|---|
-| **Redis** | Cache de permissões e de workspace por slug, locks de concorrência, denylist de JWT | Cliente **degradável**: `Connect` nunca erra — devolve cliente **nulo** com log `[DEGRADADO]` e o consumidor é obrigado a tratar a ausência. A denylist entra por interface declarada no `infra/jwt`, ligada no bootstrap. |
+| **Redis** | Cache de permissões e de workspace por slug, locks de concorrência, denylist de JWT | Cliente **degradável**: `Connect` nunca erra — devolve cliente **nulo** com log `[DEGRADADO]` e o consumidor é obrigado a tratar a ausência. A denylist entra por interface declarada no `infra/jwt`, ligada no bootstrap, e é **só cache da revogação persistida** no Postgres. Cache com **TTL curto obrigatório** + **invalidação ativa** em inativação de organization/workspace e troca de `dominio`; a invariante "filho nunca mais vivo que o pai" ganha teste na evolução. |
 | **ClickHouse** | Logs assíncronos (auditoria, acesso, erro) fora do caminho síncrono do request | Writer em lote (flush por tamanho/intervalo); log nunca entra no caminho síncrono; com o banco fora, o lote cai no **stdout** em vez de sumir — nunca bloqueia nem derruba a API. |
 | **errobserve** | Observador de erros por subdomínio: todo erro vira evento estruturado consultável | Uma linha por subdomínio no `singleton.go`; sinks plugáveis (slog sempre ativo, ClickHouse quando existir); o catálogo de erros do `errors.go` (doc 05) é a fonte dos códigos. |
 

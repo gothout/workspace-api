@@ -22,7 +22,7 @@ var (
     repositoryInstance Repository
     once               sync.Once
     initErr            error
-    ErrNotInitialized  = errors.New("workspace controller not initialized")
+    ErrNotInitialized  = errors.New("controller workspace não inicializado")
 )
 
 // UseWorkspace agrupa todas as camadas (Repository, Service, Controller).
@@ -68,6 +68,8 @@ func MustUse() *UseWorkspace {
 
 Variação permitida: subdomínio que depende de um vizinho recebe a **interface do contrato** como parâmetro extra do `New` (ligada no bootstrap) — nunca o pacote do vizinho.
 
+O singleton **não é seguro para inicialização concorrente nem re-inicialização** — a garantia é a ordem sequencial do `cmd/bootstrap` (um `New` por processo, na ordem de dependência). Testes de service **nunca** passam por `New`: montam `NewService(repoFake)` direto, sem singleton.
+
 ## Templates de arquivo
 
 ### model.go
@@ -75,10 +77,14 @@ Variação permitida: subdomínio que depende de um vizinho recebe a **interface
 ```go
 // Package workspace implementa o subdomínio workspace do domínio identidade:
 // unidade de trabalho de uma organization, endereçada por slug DNS único global.
-// Entidades: Workspace. Dependências: pkg (orgctx, rest_err, pagination), infra (gorm/pgx).
+// Entidades: Workspace. Dependências: pkg (orgctx, rest_err, pagination) + libs
+// (gorm/pgx); a conexão *gorm.DB é injetada pelo bootstrap (infra/postgres) —
+// o subdomínio não importa o pacote infra.
 package workspace
 
 import (
+    "regexp"
+    "strings"
     "time"
 
     "github.com/google/uuid"
@@ -110,12 +116,32 @@ func (s StatusWorkspace) Valido() bool {
     return false
 }
 
-// Workspace é a entidade raiz do subdomínio.
+// Slug é um VALUE OBJECT: imutável, definido pelo valor, válido desde o nascimento.
+// VO em Go = tipo nomeado + construtor que valida + métodos de comportamento —
+// nunca uma string solta viajando pelos inputs.
+type Slug string
+
+var slugRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{1,61}[a-z0-9])$`)
+
+// ParseSlug valida o formato DNS e devolve o VO; inválido = ErrSlugInvalido.
+// (A tag `slugdns` do DTO é a primeira linha de defesa; aqui é a garantia de domínio.)
+func ParseSlug(s string) (Slug, error) {
+    if !slugRe.MatchString(s) {
+        return "", ErrSlugInvalido
+    }
+    return Slug(s), nil
+}
+
+func (s Slug) String() string { return string(s) }
+
+// Workspace é a ENTIDADE raiz do agregado do subdomínio: tem identidade (uuid)
+// e ciclo de vida. Campos exportados são concessão ao GORM — MUTAÇÃO DIRETA
+// fora dos métodos de comportamento é proibida: toda transição passa por eles.
 type Workspace struct {
     UUID             uuid.UUID       `gorm:"column:uuid;type:uuid;primaryKey" json:"uuid"`
     OrganizationUUID uuid.UUID       `gorm:"column:organization_uuid;type:uuid;not null;index:idx_workspace_scope,priority:1" json:"organization_uuid"`
     Nome             string          `gorm:"column:nome;not null" json:"nome"`
-    Slug             string          `gorm:"column:slug;not null" json:"slug"`
+    Slug             Slug            `gorm:"column:slug;type:text;not null" json:"slug"`
     Status           StatusWorkspace `gorm:"column:status;not null;default:'ativo'" json:"status"`
     CreatedAt        time.Time       `gorm:"column:created_at;autoCreateTime" json:"created_at"`
     UpdatedAt        time.Time       `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
@@ -124,10 +150,53 @@ type Workspace struct {
 
 func (Workspace) TableName() string { return "identidade_workspace_workspace" }
 
+// NewWorkspace é o CONSTRUTOR do agregado: valida as invariantes antes de
+// devolver a entidade. Entidade ≠ DTO ≠ input: o input carrega dado cru, o
+// construtor devolve entidade VÁLIDA (ou a sentinela do invariante violado).
+// Controller e service nunca montam entidade campo a campo.
+func NewWorkspace(in CreateInput) (*Workspace, error) {
+    slug, err := ParseSlug(in.Slug)
+    if err != nil {
+        return nil, err
+    }
+    nome := strings.TrimSpace(in.Nome)
+    if len(nome) < 2 {
+        return nil, ErrInvalidInput
+    }
+    return &Workspace{
+        UUID: uuid.New(), OrganizationUUID: in.OrganizationUUID,
+        Nome: nome, Slug: slug, Status: StatusAtivo,
+    }, nil
+}
+
+// Inativar — transição de estado com invariante: workspace inativo não inativa de novo.
+func (w *Workspace) Inativar() error {
+    if w.Status == StatusInativo {
+        return ErrJaInativo
+    }
+    w.Status = StatusInativo
+    return nil
+}
+
+// Renomear — comportamento com invariante de tamanho; o service chama este
+// método em vez de atribuir w.Nome direto.
+func (w *Workspace) Renomear(nome string) error {
+    nome = strings.TrimSpace(nome)
+    if len(nome) < 2 {
+        return ErrInvalidInput
+    }
+    w.Nome = nome
+    return nil
+}
+
 // CreateInput e UpdateInput carregam só o que a regra permite escrever.
+// OrganizationUUID é preenchido pelo SERVICE a partir do ctx, NUNCA do corpo.
+// O service traduz UpdateInput em chamadas aos métodos de comportamento —
+// nunca atribui w.Status direto.
 type CreateInput struct {
-    Nome string
-    Slug string
+    OrganizationUUID uuid.UUID
+    Nome             string
+    Slug             string
 }
 
 type UpdateInput struct {
@@ -164,6 +233,19 @@ type UpdateWorkspaceRequestDto struct {
     Nome   *string `json:"nome" binding:"omitempty,min=2,max=120"`
     Status *string `json:"status" binding:"omitempty,oneof=ativo inativo"`
 }
+
+// ParaEntrada valida e converte para UpdateInput; status fora do conjunto = ErrInvalidInput.
+func (d UpdateWorkspaceRequestDto) ParaEntrada() (UpdateInput, error) {
+    in := UpdateInput{Nome: d.Nome}
+    if d.Status != nil {
+        s := StatusWorkspace(*d.Status)
+        if !s.Valido() {
+            return UpdateInput{}, ErrInvalidInput
+        }
+        in.Status = &s
+    }
+    return in, nil
+}
 ```
 
 ### dto_response.go
@@ -193,7 +275,7 @@ type WorkspaceResponseDto struct {
 func NovoWorkspaceResponseDto(w *Workspace) WorkspaceResponseDto {
     return WorkspaceResponseDto{
         UUID: w.UUID, OrganizationUUID: w.OrganizationUUID, Nome: w.Nome,
-        Slug: w.Slug, Status: string(w.Status),
+        Slug: w.Slug.String(), Status: string(w.Status),
         CreatedAt: w.CreatedAt, UpdatedAt: w.UpdatedAt,
     }
 }
@@ -220,12 +302,15 @@ import (
 )
 
 // Sentinelas do subdomínio — comparadas com errors.Is, nunca por texto.
+// Regra de mapeamento sentinela → status: entrada inválida = 400; não encontrado = 404;
+// conflito de UNICIDADE = 409; INVARIANTE de domínio violada = 422; desconhecido = 500.
 var (
     ErrNotFound      = errors.New("workspace não encontrado")
     ErrInvalidInput  = errors.New("dados de entrada inválidos")
     ErrSlugEmUso     = errors.New("slug já está em uso por outro workspace")
     ErrSlugReservado = errors.New("slug reservado pela plataforma")
     ErrSlugInvalido  = errors.New("slug fora do formato DNS")
+    ErrJaInativo     = errors.New("workspace já está inativo")
 )
 
 // errorCatalog é o contrato público de cada sentinela: código estável, mensagem PT-BR, status.
@@ -237,6 +322,7 @@ var errorCatalog = map[error]rest_err.ErroCatalogado{
     ErrSlugEmUso:     {Codigo: "identidade.workspace.slug_em_uso", Mensagem: "Slug já está em uso por outro workspace.", Status: http.StatusConflict},
     ErrSlugReservado: {Codigo: "identidade.workspace.slug_reservado", Mensagem: "Slug reservado pela plataforma.", Status: http.StatusUnprocessableEntity},
     ErrSlugInvalido:  {Codigo: "identidade.workspace.slug_invalido", Mensagem: "Slug fora do formato DNS.", Status: http.StatusBadRequest},
+    ErrJaInativo:     {Codigo: "identidade.workspace.ja_inativo", Mensagem: "Workspace já está inativo.", Status: http.StatusUnprocessableEntity},
 }
 
 func init() {
@@ -256,28 +342,33 @@ const (
     PermCriar   = "identidade:workspace:criar"
     PermLer     = "identidade:workspace:ler"
     PermEditar  = "identidade:workspace:editar"
-    PermExcluir = "identidade:workspace:excluir"
+    PermRemover = "identidade:workspace:remover"
 )
 
 // PermissaoMeta — metadados da permissão para o catálogo consultável (doc 03).
 // Mesma forma em todos os subdomínios; o bootstrap agrega os Catalogo() no registro
-// único do application/identidade/catalogo (domain não importa application — regra 3).
+// único do identidade/application/catalogo (domain não importa application — regra 3).
 type PermissaoMeta struct {
-    Permissao string   // valor exato exigido pela rota
-    Descricao string   // PT-BR: o que a permissão libera
-    Rotas     []string // paths que exigem esta permissão
-    Metodo    string   // método HTTP
-    GrupoMenu string   // agrupamento sugerido para o menu do front-end
+    Permissao string     // valor exato exigido pela rota
+    Descricao string     // PT-BR: o que a permissão libera
+    Rotas     []RotaMeta // pares rota+método que exigem esta permissão
+    GrupoMenu string     // agrupamento sugerido para o menu do front-end
+}
+
+// RotaMeta — UM par rota+método; a árvore do endpoint emite uma ação por par.
+type RotaMeta struct {
+    Rota   string // path com {uuid} onde couber
+    Metodo string // método HTTP
 }
 
 // Catalogo devolve TODAS as permissões do subdomínio com metadados.
 // Sem ele o subdomínio não aparece no endpoint de permissões e o checklist não fecha.
 func Catalogo() []PermissaoMeta {
     return []PermissaoMeta{
-        {Permissao: PermCriar, Descricao: "Criar workspace na organization", Rotas: []string{"/api/domain/identidade/workspaces"}, Metodo: http.MethodPost, GrupoMenu: "Identidade · Workspaces"},
-        {Permissao: PermLer, Descricao: "Listar e consultar workspaces da organization", Rotas: []string{"/api/domain/identidade/workspaces", "/api/domain/identidade/workspaces/{uuid}"}, Metodo: http.MethodGet, GrupoMenu: "Identidade · Workspaces"},
-        {Permissao: PermEditar, Descricao: "Editar dados do workspace", Rotas: []string{"/api/domain/identidade/workspaces/{uuid}"}, Metodo: http.MethodPatch, GrupoMenu: "Identidade · Workspaces"},
-        {Permissao: PermExcluir, Descricao: "Remover workspace", Rotas: []string{"/api/domain/identidade/workspaces/{uuid}"}, Metodo: http.MethodDelete, GrupoMenu: "Identidade · Workspaces"},
+        {Permissao: PermCriar, Descricao: "Criar workspace na organization", Rotas: []RotaMeta{{Rota: "/api/domain/identidade/workspaces", Metodo: http.MethodPost}}, GrupoMenu: "Identidade · Workspaces"},
+        {Permissao: PermLer, Descricao: "Listar e consultar workspaces da organization", Rotas: []RotaMeta{{Rota: "/api/domain/identidade/workspaces", Metodo: http.MethodGet}, {Rota: "/api/domain/identidade/workspaces/{uuid}", Metodo: http.MethodGet}}, GrupoMenu: "Identidade · Workspaces"},
+        {Permissao: PermEditar, Descricao: "Editar dados do workspace", Rotas: []RotaMeta{{Rota: "/api/domain/identidade/workspaces/{uuid}", Metodo: http.MethodPatch}}, GrupoMenu: "Identidade · Workspaces"},
+        {Permissao: PermRemover, Descricao: "Remover workspace", Rotas: []RotaMeta{{Rota: "/api/domain/identidade/workspaces/{uuid}", Metodo: http.MethodDelete}}, GrupoMenu: "Identidade · Workspaces"},
     }
 }
 ```
@@ -298,10 +389,14 @@ import (
     "workspace-api/internal/pkg/orgctx"
 )
 
+// Repository é UM POR AGREGADO: declara, em linguagem de negócio, o que o
+// subdomínio precisa perguntar/gravar — nunca um "CRUD genérico". Finders
+// carregam o vocabulário do negócio (FindBySlug, SlugOcupado); Create/Update/
+// Delete são as primitivas de persistência da raiz.
 type Repository interface {
     Create(ctx context.Context, w *Workspace) error
     FindByUUID(ctx context.Context, id uuid.UUID) (*Workspace, error)
-    FindBySlug(ctx context.Context, slug string) (*Workspace, error)
+    FindBySlug(ctx context.Context, slug Slug) (*Workspace, error)
     List(ctx context.Context, f ListFilter) ([]Workspace, int64, error)
     Update(ctx context.Context, w *Workspace) error
     Delete(ctx context.Context, id uuid.UUID) error
@@ -311,10 +406,11 @@ type repositoryImpl struct{ db *gorm.DB }
 
 func NewRepository(db *gorm.DB) Repository { return &repositoryImpl{db: db} }
 
-// Toda query passa pelo escopo — sem escopo no ctx, orgctx.Scope FALHA (fail-closed).
+// Toda query de administração passa por ScopeOrganization — esta tabela está ACIMA
+// do workspace que ela define; sem organization no ctx, o escopo FALHA (fail-closed).
 func (r *repositoryImpl) FindByUUID(ctx context.Context, id uuid.UUID) (*Workspace, error) {
     var w Workspace
-    err := orgctx.Scope(r.db.WithContext(ctx), ctx).
+    err := orgctx.ScopeOrganization(r.db.WithContext(ctx), ctx).
         Where("uuid = ?", id).First(&w).Error
     if errors.Is(err, gorm.ErrRecordNotFound) {
         return nil, ErrNotFound
@@ -325,13 +421,50 @@ func (r *repositoryImpl) FindByUUID(ctx context.Context, id uuid.UUID) (*Workspa
     return &w, nil
 }
 
+// FindBySlug é a EXCEÇÃO de escopo documentada: query GLOBAL usada na resolução
+// pelo Host (antes de existir escopo). Resultado nunca exposto em rota de administração.
+func (r *repositoryImpl) FindBySlug(ctx context.Context, slug Slug) (*Workspace, error) {
+    var w Workspace
+    err := r.db.WithContext(ctx).Where("slug = ?", slug).First(&w).Error
+    if errors.Is(err, gorm.ErrRecordNotFound) {
+        return nil, ErrNotFound
+    }
+    if err != nil {
+        return nil, err
+    }
+    return &w, nil
+}
+
+func (r *repositoryImpl) List(ctx context.Context, f ListFilter) ([]Workspace, int64, error) {
+    var items []Workspace
+    var total int64
+    q := orgctx.ScopeOrganization(r.db.WithContext(ctx), ctx).Model(&Workspace{})
+    if f.Nome != "" {
+        q = q.Where("nome ILIKE ?", "%"+f.Nome+"%")
+    }
+    if f.Status != nil {
+        q = q.Where("status = ?", *f.Status)
+    }
+    if err := q.Count(&total).Error; err != nil {
+        return nil, 0, err
+    }
+    err := q.Order("created_at DESC").
+        Offset(f.Pagination.Offset()).Limit(f.Pagination.Limit()). // helpers do pkg/pagination (teto 100)
+        Find(&items).Error
+    return items, total, err
+}
+
 func (r *repositoryImpl) Create(ctx context.Context, w *Workspace) error {
-    return traduzirErroDriver(orgctx.Scope(r.db.WithContext(ctx), ctx).Create(w).Error)
+    return traduzirErroDriver(orgctx.ScopeOrganization(r.db.WithContext(ctx), ctx).Create(w).Error)
+}
+
+func (r *repositoryImpl) Update(ctx context.Context, w *Workspace) error {
+    return orgctx.ScopeOrganization(r.db.WithContext(ctx), ctx).Save(w).Error
 }
 
 // Update e Delete conferem RowsAffected: 0 linhas = registro inexistente ou fora do escopo.
 func (r *repositoryImpl) Delete(ctx context.Context, id uuid.UUID) error {
-    res := orgctx.Scope(r.db.WithContext(ctx), ctx).
+    res := orgctx.ScopeOrganization(r.db.WithContext(ctx), ctx).
         Where("uuid = ?", id).Delete(&Workspace{})
     if res.Error != nil {
         return res.Error
@@ -359,8 +492,11 @@ package workspace
 
 import (
     "context"
+    "log/slog"
 
     "github.com/google/uuid"
+
+    "workspace-api/internal/pkg/orgctx"
 )
 
 type Service interface {
@@ -374,9 +510,62 @@ type Service interface {
 type serviceImpl struct{ repo Repository }
 
 func NewService(repo Repository) Service { return &serviceImpl{repo: repo} }
+
+// slugsReservados — endereços fixos da plataforma; a lista mora no subdomínio
+// (o middleware pergunta a ele, nunca o contrário).
+var slugsReservados = map[Slug]bool{
+    "www": true, "api": true, "app": true, "admin": true, "docs": true,
+    "status": true, "mail": true, "suporte": true, "painel": true,
+}
+
+// Create: input cru → escopo do ctx → entidade VÁLIDA pelo construtor → regras → persistência.
+func (s *serviceImpl) Create(ctx context.Context, in CreateInput) (*Workspace, error) {
+    in.OrganizationUUID = orgctx.OrganizationUUID(ctx) // escopo vem do ctx, NUNCA do corpo
+    w, err := NewWorkspace(in) // invariantes validadas aqui — nunca struct literal à mão
+    if err != nil {
+        return nil, err
+    }
+    if slugsReservados[w.Slug] {
+        return nil, ErrSlugReservado
+    }
+    // unicidade amigável: checagem prévia além do 23505 traduzido pelo repository
+    if err := s.repo.Create(ctx, w); err != nil {
+        return nil, err
+    }
+    // Toda escrita audita (doc 04): payload fechado, montado à mão — nunca texto livre.
+    slog.InfoContext(ctx, "workspace.criar",
+        "dominio", Dominio, "subdominio", Subdominio, "acao", "criar",
+        "workspace_uuid", w.UUID.String(), "organization_uuid", w.OrganizationUUID.String(),
+        "user_uuid", orgctx.UserUUID(ctx).String(), "ray_trace", orgctx.RayTrace(ctx),
+        "success", true)
+    return w, nil
+}
+
+// Update traduz o input em chamadas aos métodos de comportamento — nunca atribui campo direto.
+func (s *serviceImpl) Update(ctx context.Context, id uuid.UUID, in UpdateInput) (*Workspace, error) {
+    w, err := s.repo.FindByUUID(ctx, id)
+    if err != nil {
+        return nil, err
+    }
+    if in.Nome != nil {
+        if err := w.Renomear(*in.Nome); err != nil {
+            return nil, err
+        }
+    }
+    if in.Status != nil && *in.Status == StatusInativo {
+        if err := w.Inativar(); err != nil {
+            return nil, err
+        }
+    }
+    // reativação é ação de negócio própria (POST .../acoes/reativar), não PATCH de campo
+    if err := s.repo.Update(ctx, w); err != nil {
+        return nil, err
+    }
+    return w, nil
+}
 ```
 
-TODA a regra de negócio vive aqui: normalização do slug, lista de reservados, formato DNS, unicidade amigável (checagem prévia além do 23505). O controller nunca tem regra. **Toda escrita audita** (doc 04) com payload montado à mão — identificadores e vocabulário fechado, nunca texto livre.
+O `Service` do subdomínio é o **domain service** do agregado: TODA a regra de negócio que não cabe num método da entidade vive aqui — lista de reservados, unicidade amigável, cascatas. Formato de slug NÃO mora aqui: é invariante do VO (`ParseSlug`). O controller nunca tem regra. **Referência a outro agregado só por uuid ou por interface** ligada no bootstrap (regra 4) — domain service nunca importa subdomínio irmão. Orquestração que cruza subdomínios não é domain service: é **service de aplicação** e mora em `internal/{dominio}/application/`. **Toda escrita audita** (doc 04) com payload montado à mão — identificadores e vocabulário fechado, nunca texto livre.
 
 ### controller.go
 
@@ -388,8 +577,10 @@ import (
     "net/http"
 
     "github.com/gin-gonic/gin"
+    "github.com/google/uuid"
 
     "workspace-api/internal/middleware"
+    "workspace-api/internal/pkg/pagination"
     "workspace-api/internal/pkg/rest_err"
 )
 
@@ -410,17 +601,32 @@ type controllerImpl struct{ service Service }
 func NewController(service Service) Controller { return &controllerImpl{service: service} }
 
 // Routes declara a cadeia ROTA A ROTA — nunca no grupo (doc 03).
+// As funções de PACOTE do middleware falham FECHADAS (403) quando a cadeia não
+// foi inicializada no boot — Routes() nunca panica; MustUse() é do bootstrap.
 func (ctrl *controllerImpl) Routes(routes gin.IRouter) {
     g := routes.Group(PrefixoRotas)
-    mw := middleware.MustUse().Middleware
-    g.POST("", mw.SetContextAuthorization(), mw.ResolveWorkspace(), mw.RequirePermission(PermCriar), ctrl.Create)
-    g.GET("", mw.SetContextAuthorization(), mw.ResolveWorkspace(), mw.RequirePermission(PermLer), ctrl.List)
-    g.GET("/:uuid", mw.SetContextAuthorization(), mw.ResolveWorkspace(), mw.RequirePermission(PermLer), ctrl.Read)
-    g.PATCH("/:uuid", mw.SetContextAuthorization(), mw.ResolveWorkspace(), mw.RequirePermission(PermEditar), ctrl.Update)
-    g.DELETE("/:uuid", mw.SetContextAuthorization(), mw.ResolveWorkspace(), mw.RequirePermission(PermExcluir), ctrl.Delete)
+    g.POST("", middleware.SetContextAuthorization(), middleware.ResolveWorkspace(), middleware.RequirePermission(PermCriar), ctrl.Create)
+    g.GET("", middleware.SetContextAuthorization(), middleware.ResolveWorkspace(), middleware.RequirePermission(PermLer), ctrl.List)
+    g.GET("/:uuid", middleware.SetContextAuthorization(), middleware.ResolveWorkspace(), middleware.RequirePermission(PermLer), ctrl.Read)
+    g.PATCH("/:uuid", middleware.SetContextAuthorization(), middleware.ResolveWorkspace(), middleware.RequirePermission(PermEditar), ctrl.Update)
+    g.DELETE("/:uuid", middleware.SetContextAuthorization(), middleware.ResolveWorkspace(), middleware.RequirePermission(PermRemover), ctrl.Delete)
 }
 
 // Handlers finos: bind → service → c.JSON. Erro sai SÓ por rest_err.WriteError.
+
+// @Summary      Cria um workspace
+// @Description  Cria workspace na organization autenticada, validando slug único global e reservados
+// @Tags         Identidade · Workspace
+// @Accept       json
+// @Produce      json
+// @Security     BearerAuth
+// @Param        X-Workspace-Id header string false "UUID do workspace (fallback quando o host não tem subdomínio)"
+// @Param        request body CreateWorkspaceRequestDto true "Dados do workspace"
+// @Success      201 {object} WorkspaceResponseDto
+// @Failure      400 {object} rest_err.RestErr
+// @Failure      403 {object} rest_err.RestErr
+// @Failure      409 {object} rest_err.RestErr "Slug em uso"
+// @Router       /api/domain/identidade/workspaces [post]
 func (ctrl *controllerImpl) Create(c *gin.Context) {
     var dto CreateWorkspaceRequestDto
     if err := c.ShouldBindJSON(&dto); err != nil {
@@ -433,6 +639,123 @@ func (ctrl *controllerImpl) Create(c *gin.Context) {
         return
     }
     c.JSON(http.StatusCreated, NovoWorkspaceResponseDto(w))
+}
+
+// @Summary      Consulta um workspace
+// @Description  Devolve o workspace no escopo resolvido
+// @Tags         Identidade · Workspace
+// @Produce      json
+// @Security     BearerAuth
+// @Param        X-Workspace-Id header string false "UUID do workspace (fallback quando o host não tem subdomínio)"
+// @Param        uuid path string true "UUID do workspace"
+// @Success      200 {object} WorkspaceResponseDto
+// @Failure      400 {object} rest_err.RestErr "UUID malformado"
+// @Failure      403 {object} rest_err.RestErr
+// @Failure      404 {object} rest_err.RestErr
+// @Router       /api/domain/identidade/workspaces/{uuid} [get]
+func (ctrl *controllerImpl) Read(c *gin.Context) {
+    id, err := uuid.Parse(c.Param("uuid"))
+    if err != nil {
+        rest_err.WriteError(c, traduzir(ErrInvalidInput))
+        return
+    }
+    w, err := ctrl.service.Read(c.Request.Context(), id)
+    if err != nil {
+        rest_err.WriteError(c, traduzir(err))
+        return
+    }
+    c.JSON(http.StatusOK, NovoWorkspaceResponseDto(w))
+}
+
+// @Summary      Lista workspaces
+// @Description  Lista paginada dos workspaces da organization, com filtros
+// @Tags         Identidade · Workspace
+// @Produce      json
+// @Security     BearerAuth
+// @Param        X-Workspace-Id header string false "UUID do workspace (fallback quando o host não tem subdomínio)"
+// @Param        page query int false "Página (default 1)"
+// @Param        pageSize query int false "Itens por página (teto 100)"
+// @Param        nome query string false "Filtro por nome"
+// @Success      200 {object} pagination.Response[WorkspaceResponseDto]
+// @Failure      403 {object} rest_err.RestErr
+// @Router       /api/domain/identidade/workspaces [get]
+func (ctrl *controllerImpl) List(c *gin.Context) {
+    var f ListFilter
+    if err := c.ShouldBindQuery(&f); err != nil {
+        rest_err.WriteError(c, traduzir(ErrInvalidInput))
+        return
+    }
+    f.Pagination = pagination.DoQuery(c) // lê page/pageSize aplicando o teto de 100 (doc 04)
+    items, total, err := ctrl.service.List(c.Request.Context(), f)
+    if err != nil {
+        rest_err.WriteError(c, traduzir(err))
+        return
+    }
+    c.JSON(http.StatusOK, NovoWorkspaceListaResponseDto(items, total, f.Pagination))
+}
+
+// @Summary      Atualiza um workspace
+// @Description  Atualização parcial; transição de status passa pelos métodos de comportamento do agregado
+// @Tags         Identidade · Workspace
+// @Accept       json
+// @Produce      json
+// @Security     BearerAuth
+// @Param        X-Workspace-Id header string false "UUID do workspace (fallback quando o host não tem subdomínio)"
+// @Param        uuid path string true "UUID do workspace"
+// @Param        request body UpdateWorkspaceRequestDto true "Campos a atualizar"
+// @Success      200 {object} WorkspaceResponseDto
+// @Failure      400 {object} rest_err.RestErr
+// @Failure      403 {object} rest_err.RestErr
+// @Failure      404 {object} rest_err.RestErr
+// @Failure      422 {object} rest_err.RestErr "Transição de estado proibida"
+// @Router       /api/domain/identidade/workspaces/{uuid} [patch]
+func (ctrl *controllerImpl) Update(c *gin.Context) {
+    id, err := uuid.Parse(c.Param("uuid"))
+    if err != nil {
+        rest_err.WriteError(c, traduzir(ErrInvalidInput))
+        return
+    }
+    var dto UpdateWorkspaceRequestDto
+    if err := c.ShouldBindJSON(&dto); err != nil {
+        rest_err.WriteError(c, traduzir(ErrInvalidInput))
+        return
+    }
+    in, err := dto.ParaEntrada()
+    if err != nil {
+        rest_err.WriteError(c, traduzir(err))
+        return
+    }
+    w, err := ctrl.service.Update(c.Request.Context(), id, in)
+    if err != nil {
+        rest_err.WriteError(c, traduzir(err))
+        return
+    }
+    c.JSON(http.StatusOK, NovoWorkspaceResponseDto(w))
+}
+
+// @Summary      Remove um workspace
+// @Description  Remoção lógica do workspace no escopo resolvido
+// @Tags         Identidade · Workspace
+// @Produce      json
+// @Security     BearerAuth
+// @Param        X-Workspace-Id header string false "UUID do workspace (fallback quando o host não tem subdomínio)"
+// @Param        uuid path string true "UUID do workspace"
+// @Success      204
+// @Failure      400 {object} rest_err.RestErr "UUID malformado"
+// @Failure      403 {object} rest_err.RestErr
+// @Failure      404 {object} rest_err.RestErr
+// @Router       /api/domain/identidade/workspaces/{uuid} [delete]
+func (ctrl *controllerImpl) Delete(c *gin.Context) {
+    id, err := uuid.Parse(c.Param("uuid"))
+    if err != nil {
+        rest_err.WriteError(c, traduzir(ErrInvalidInput))
+        return
+    }
+    if err := ctrl.service.Delete(c.Request.Context(), id); err != nil {
+        rest_err.WriteError(c, traduzir(err))
+        return
+    }
+    c.Status(http.StatusNoContent)
 }
 
 // traduzir converte a sentinela no rest_err do catálogo do subdomínio; desconhecido = 500.
@@ -448,6 +771,8 @@ func traduzir(err error) *rest_err.RestErr {
         return rest_err.DoCatalogo(ErrSlugReservado)
     case errors.Is(err, ErrSlugInvalido):
         return rest_err.DoCatalogo(ErrSlugInvalido)
+    case errors.Is(err, ErrJaInativo):
+        return rest_err.DoCatalogo(ErrJaInativo)
     default:
         return rest_err.Interno(err)
     }
@@ -459,12 +784,14 @@ func traduzir(err error) *rest_err.RestErr {
 ## Convenções Go
 
 - Comentário de pacote em todo `model.go`: propósito do subdomínio + entidades + dependências.
+- **Entidade nasce por `NewX(input)`** e só muda por método de comportamento — campos exportados são concessão ao GORM, não convite à mutação; struct literal de entidade fora do pacote é reprovada.
+- **Value Object** = tipo nomeado com `ParseX(...)` que valida; dado de negócio com formato/invariante nunca viaja como string solta.
 - **Interfaces sempre** (`Repository`, `Service`, `Controller`) — implementação `xxxImpl` **privada**, construtor `NewX(...)` exportado.
 - `ctx context.Context` é o **primeiro parâmetro** de service e repository; dele saem `organization_uuid`/`workspace_uuid`/`user_uuid`/`ray_trace` (via `orgctx`).
 - Erros: sentinela + `errors.Is/As`; **panic só no boot** (`MustUse`, config inválida).
 - Log de boot: `[BOOTSTRAP-DI] Contêiner Identidade/<Subdominio> inicializado.`
 - Credencial (senha, hash de chave) não sai do subdomínio: `json:"-"`, fora de DTO, comparação como método do service.
-- Métodos e funções em PT-BR nos comentários; identificadores em inglês.
+- **Idioma dos identificadores**: tipos e APIs técnicas em inglês (`Repository`, `ParseSlug`, `TableName`); **vocabulário de negócio em PT-BR** — campos, métodos de comportamento (`Inativar`, `Renomear`), sentinelas, permissões e helpers de DTO (`ParaEntrada`). Comentários e mensagens sempre em PT-BR.
 
 ## Testes
 
@@ -476,13 +803,18 @@ func traduzir(err error) *rest_err.RestErr {
 ## Checklist de pronto por subdomínio
 
 - [ ] 8 arquivos criados + `permissions.go` (em `application/`: sem `model.go`/`repository.go`, com `contratos.go`)
+- [ ] **VOs com validação no construtor** (`ParseX`) — dado com formato/invariante não viaja como string solta
+- [ ] **Entidade nasce por `NewX`** (construtor que valida invariantes), nunca por struct literal fora do pacote; transições de estado por métodos de comportamento
+- [ ] **Comentário de pacote** no `model.go`: propósito, entidades, dependências
+- [ ] **Pacote descrito no `arch-go.yml`** no mesmo commit (coverage 100 reprova pacote sem regra)
+- [ ] Termo de negócio novo entra no **glossário do `agents/00`** no mesmo commit
 - [ ] Migration up/down criada e **testada** (`up → down → up` em banco efêmero; `migrate validate` sem conexão)
 - [ ] Singleton registrado no `cmd/bootstrap` na ordem de dependência, com log `[BOOTSTRAP-DI]`
 - [ ] Rotas registradas em `cmd/server/routes`, com a cadeia de auth declarada **rota a rota**
 - [ ] Anotações Swagger completas + `swag init -g main.go -o docs` regenerado
 - [ ] Auditoria em toda escrita (payload montado à mão)
-- [ ] **Catálogo de erros registrado** no `rest_err`: toda sentinela com código estável + mensagem PT-BR + status
-- [ ] **`Catalogo()` de permissões** com metadados completos (descrição, rotas, método, grupo de menu)
-- [ ] Escopo `orgctx.Scope` em todas as queries (ou exceção documentada no `AGENTS.md` do pacote)
-- [ ] Testes de service verdes (table-driven, repo fake)
-- [ ] `go build ./... && go vet ./... && go test ./...` verdes
+- [ ] **Catálogo de erros registrado** no `rest_err` via `init()`: toda sentinela com código estável + mensagem PT-BR + status
+- [ ] **`Catalogo()` de permissões** com metadados completos (descrição, pares rota+método, grupo de menu), registrado no **agregador do bootstrap**
+- [ ] Escopo `orgctx.Scope`/`ScopeOrganization` em todas as queries (ou exceção documentada no `AGENTS.md` do pacote)
+- [ ] Testes de service verdes (table-driven, repo fake, sem passar por `New`)
+- [ ] `go build ./... && go vet ./... && go test ./...` verdes; **`go test -race ./...`** quando tocar invariante disputada (slug, documento, estado, unicidade)

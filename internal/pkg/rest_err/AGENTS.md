@@ -12,10 +12,13 @@ Convenções de status e payload em `agents/04`.
 - **`WriteError` é a ÚNICA forma de responder erro num controller.**
   `c.JSON(...)` com corpo improvisado é reprovado em revisão — fora do
   padrão o front-end não consegue mapear.
-- **Registro global de erros**: cada subdomínio inscreve seu catálogo
-  (`code` estável + mensagem + status HTTP, declarado no `errors.go` dele)
-  neste pacote, e o registro alimenta a rota `GET /api/system/errors`.
-  Sentinela sem entrada no catálogo não fecha o checklist do `agents/05`.
+- **Registro global de erros com auto-registro**: o `init()` de cada
+  subdomínio inscreve o catálogo dele (`code` estável + mensagem + status
+  HTTP, declarado no `errors.go`) neste pacote — **code duplicado no
+  registro = panic no boot** (nunca sobrescrita). O bootstrap garante o
+  import de todos os subdomínios antes de montar a aplicação `catalogo`,
+  e o registro alimenta a rota `GET /api/system/errors`. Sentinela sem
+  entrada no catálogo não fecha o checklist do `agents/05`.
 - Construtores padronizados: `NewBadRequestError`, `NewUnauthorizedError`,
   `NewForbiddenError`, `NewNotFoundError`, `NewConflictError`,
   `NewUnprocessableEntityError`, `NewInternalServerError`... — todos com

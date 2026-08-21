@@ -9,9 +9,9 @@ do outro (regras em `agents/01`).
 - `cmd/cli` define os comandos (cobra), `cmd/bootstrap` monta e liga tudo,
   `cmd/server` sobe o HTTP. O `main.go` da raiz só chama o CLI.
 - Aqui se **pode** importar todas as camadas
-  (`pkg ← infra ← domain ← application ← cmd`); e aqui se **deve** fazer toda
-  ligação de interfaces entre pacotes — sempre por adaptadores, nunca
-  ensinando um pacote a importar o outro.
+  (`pkg ← infra ← {dominio}/domain ← {dominio}/application ← cmd`); e aqui se
+  **deve** fazer toda ligação de interfaces entre pacotes — sempre por
+  adaptadores, nunca ensinando um pacote a importar o outro.
 - Nenhuma regra de negócio mora em `cmd`: só montagem, ordem de boot e
   encerramento. Se um `if` de negócio aparecer aqui, ele está no pacote
   errado.

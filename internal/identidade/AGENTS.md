@@ -1,7 +1,10 @@
-# AGENTS.md — `internal/domain/identidade`
+# AGENTS.md — `internal/identidade`
 
 Domínio de identidade: a hierarquia **organization → workspace → user**
-(especificação completa em `agents/03`).
+(especificação completa em `agents/03`). Domínio é **pasta direta de
+`internal/`**: os subdomínios moram em `domain/` e as orquestrações que os
+atravessam em `application/` (hoje: `application/catalogo` e
+`application/auth`).
 
 ## Subdomínios
 
@@ -26,6 +29,11 @@ Domínio de identidade: a hierarquia **organization → workspace → user**
   `FindBySlug`/verificação de slug são globais porque a resolução parte do
   Host, antes de existir escopo — resultado nunca exposto em rota de
   administração.
+- **user**: administração escopa por organization (`ScopeOrganization`) —
+  `identidade_user_user` não tem `workspace_uuid`; listagem por workspace é
+  via `atribuicao`. As tabelas `papel`/`papel_permissao` são **globais da
+  plataforma** (sem coluna de escopo — exceção documentada: papéis seed
+  globais, criados na F1).
 - Detalhes e demais exceções no `AGENTS.md` de cada subdomínio — exceção
   nova sem motivo escrito aqui e lá é reprovada.
 

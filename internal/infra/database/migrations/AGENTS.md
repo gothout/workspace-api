@@ -21,8 +21,11 @@ Runner de migrations (golang-migrate) sobre os arquivos SQL de
   `down` não desfaz o `up` reprova a suíte. **Sem docker o teste pula
   sozinho** (`t.Skip`), nunca falha por ausência de ambiente.
 - **Transacional por padrão**: cada arquivo roda numa transação. Exceção:
-  `CREATE INDEX CONCURRENTLY`, isolado num arquivo próprio marcado, sem tx —
-  um comando por arquivo.
+  `CREATE INDEX CONCURRENTLY`, isolado num arquivo próprio **marcado com
+  `-- manual` no cabeçalho**, sem tx — um comando por arquivo. Arquivo
+  manual é **ignorado pelo `auto_run`** (o boot segue com log de alerta) e
+  listado pelo `status` como **pendente-manual**; a execução é manual em
+  produção.
 - O runner recebe a conexão por interface (não importa
   `infra/database/postgres`); quem liga é o bootstrap.
 

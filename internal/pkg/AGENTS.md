@@ -2,7 +2,7 @@
 
 Utilidades transversais da aplicação. **Folha do grafo de dependências**:
 não importa nada de `internal/` fora de `pkg` — nem `infra`, nem `domain`,
-nem `middleware` (regra 1 de `internal/AGENTS.md`).
+nem `middleware` (regra 1 de `agents/01`).
 
 ## Regras
 
@@ -18,6 +18,7 @@ nem `middleware` (regra 1 de `internal/AGENTS.md`).
 
 ## Definição de pronto
 
-- `go list -deps ./internal/pkg/...` não contém `internal/infra`,
-  `internal/domain`, `internal/application` nem `internal/middleware`.
+- `go list -deps ./internal/pkg/...` não contém `internal/infra`, nenhum
+  `internal/{dominio}/domain` ou `internal/{dominio}/application`, nem
+  `internal/middleware`.
 - Todo subpacote tem testes próprios, sem depender do boot do processo.

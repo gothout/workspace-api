@@ -8,15 +8,18 @@ Emissão e validação de tokens JWT (golang-jwt, stack em `agents/02`).
   `sync.Once`. JWT é **FATAL**: chave ausente/fraca no boot derruba o
   processo — API que assina token sem chave confiável não pode subir.
 - **Claims**: `sub` (user_uuid), `org` (organization_uuid), `wks`
-  (workspace_uuid), `name`, `email`, `typ` (access/refresh). Claim nova
+  (workspace_uuid), `name`, `email`, `typ` (access/refresh) e `jti`
+  (**único por refresh** — é a chave da revogação persistida). Claim nova
   entra com motivo — o token atravessa a fronteira e tudo nele é público
   para quem o carrega (assinado, não cifrado).
 - **TTL vem do config** (access e refresh separados), nunca constante no
   código.
-- **Denylist por interface declarada AQUI** (logout/revogação consultam a
-  interface; o validador trata ausência da implementação como "nada
-  revogado"). A implementação Redis é **evolução futura**, ligada no
-  `cmd/bootstrap` — mesmo desenho dos caches de slug do atila.
+- **Revogação persistida no Postgres**: cada refresh tem `jti` único
+  gravado em `identidade_user_refresh_token` (subdomínio `user`); o logout
+  marca `revogado_em` e o validador confere a revogação via **interface
+  declarada AQUI** (ausência da implementação = "nada revogado"). A
+  implementação Redis é **evolução futura**, ligada no `cmd/bootstrap`, e
+  vira só **cache dessa revogação** — nunca a fonte da verdade.
 - A chave secreta nunca aparece em log, erro ou resposta.
 - Erros de validação distinguem internamente (expirado, assinatura,
   formato) para log, mas a resposta ao cliente é o 401 genérico do

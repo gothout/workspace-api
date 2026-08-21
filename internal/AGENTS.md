@@ -11,28 +11,34 @@ completa em `agents/01`.
 | `pkg` | utilidades transversais, **folha** do grafo |
 | `infra` | adaptadores técnicos (Postgres, JWT, migrations) |
 | `middleware` | cadeia de autenticação/autorização/resolução |
-| `domain` | subdomínios de negócio (`identidade/...`) |
-| `application` | orquestrações entre subdomínios (`identidade/catalogo`) |
+| `identidade/` | **domínio** do negócio (bounded context) — pasta direta de `internal/` |
+| `identidade/domain/` | subdomínios do domínio (`organization`, `workspace`, `user`) |
+| `identidade/application/` | orquestrações entre os subdomínios do domínio (`catalogo`) |
 
-Fluxo permitido: `pkg ← infra ← domain ← application ← cmd`.
+Fluxo permitido: `pkg ← infra ← {dominio}/domain ← {dominio}/application ← cmd`.
 
-## As 8 regras de dependência (espelhadas no arch-go.yml)
+## As 8 regras de dependência (mesma numeração de `agents/01` — fonte única)
 
 1. `pkg` **não importa** nada de `internal/` fora de `pkg` — é folha.
 2. `infra` importa só `pkg` + libs externas — **nunca outro `infra`**, nem
    em testes.
-3. `middleware` **não importa `domain` nem `application`** (seria ciclo: os
-   controllers importam ele): dependências por interfaces em `contratos.go`,
-   ligadas no `cmd/bootstrap`.
-4. `domain` importa `pkg`, `infra` e `middleware` — **nunca** `application`
-   nem `cmd`.
-5. Um subdomínio **não importa irmão**: dependência entra por interface
+3. `internal/{dominio}/domain` importa `pkg`, `infra` e `middleware` —
+   **nunca** `application` nem `cmd`.
+4. Um subdomínio **não importa irmão**: dependência entra por interface
    declarada no consumidor e ligada no bootstrap.
+5. `application` importa `pkg`, `infra` e `middleware` — **nunca os pacotes
+   de `domain/` do próprio domínio**: orquestra os subdomínios por
+   interfaces estreitas em `contratos.go`, não persiste nada próprio.
 6. Dentro do subdomínio: `controller → service → repository`, nunca o
    contrário.
-7. `application` orquestra subdomínios por interfaces estreitas em
-   `contratos.go`; não persiste nada próprio e não é importada por `domain`.
-8. Só `cmd` importa todas as camadas — toda ligação concreta acontece lá.
+7. Controller **nunca toca `*gorm.DB`** — recebe o `Service` pela interface.
+8. Todo método de repository recebe `ctx` e aplica `orgctx.Scope` ou
+   `ScopeOrganization` (fail-closed).
+
+Fora da numeração, duas notas estruturais: `middleware` **não importa
+nenhum `internal/{dominio}/domain` nem `application`** (seria ciclo: os
+controllers importam ele — dependências por `contratos.go`); e só `cmd`
+importa todas as camadas — toda ligação concreta acontece lá.
 
 ## Conferência
 

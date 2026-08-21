@@ -1,4 +1,4 @@
-# AGENTS.md — `internal/domain/identidade/workspace`
+# AGENTS.md — `internal/identidade/domain/workspace`
 
 Filho da organization, dono do endereço público `{slug}.{base_domain}`.
 Tabela `identidade_workspace_workspace`, rotas em
@@ -15,7 +15,10 @@ Tabela `identidade_workspace_workspace`, rotas em
   endereço da plataforma inteira (e `*.{dominio-custom}` o do parceiro).
   Regex de formato + **lista de reservados**: `www`, `api`, `app`, `admin`,
   `docs`, `status`, `mail`, `suporte`, `painel`. A lista mora aqui — o
-  middleware pergunta a este subdomínio, não o contrário.
+  middleware pergunta a este subdomínio, não o contrário. Unicidade por
+  índice único **TOTAL**: slug removido (soft delete) **não** se libera —
+  evita takeover de endereço por outro tenant (exceção documentada ao
+  `agents/02`, mesma política do `dominio` custom da organization).
 - **`FindBySlug`/`SlugOcupado` são a exceção de escopo — obrigatória.** A
   resolução parte do `Host`, que não diz de qual organization o slug é:
   o `ResolveWorkspace` precisa descobrir isso *antes* de existir escopo, e
@@ -24,7 +27,10 @@ Tabela `identidade_workspace_workspace`, rotas em
   O resultado dessas consultas nunca é exposto em rota de administração.
 - **Cache de slug futuro entra por interface** declarada aqui
   (implementação Redis na evolução, ligada no bootstrap) — ausência de cache
-  é operação normal, só mais cara.
+  é operação normal, só mais cara. Cache com **TTL curto obrigatório** e
+  **invalidação ativa** em inativação de organization/workspace e troca de
+  `dominio`; a invariante "filho nunca mais vivo que o pai" ganha teste na
+  evolução (ver `agents/02`).
 
 ## Permissões (`permissions.go` + `Catalogo()`)
 

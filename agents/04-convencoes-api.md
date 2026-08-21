@@ -12,8 +12,10 @@ Duas famílias, espelhando as camadas:
 
 ```
 /api/domain/identidade/{subdominio}/...        ← recursos do bounded context (camada domain)
-/api/application/identidade/{subdominio}/...   ← casos de uso cross-domain (camada application)
+/api/application/identidade/{nome}/...         ← casos de uso entre subdomínios do mesmo domínio (camada application)
 ```
+
+Fora das duas famílias ficam as **rotas de sistema**: `GET /api/status` (sondas, montada no `cmd/server/routes`) e `GET /api/system/errors` (mapa de erros, registrada pela aplicação `catalogo`) — exceção de prefixo, decidida e documentada.
 
 - Diretório do pacote Go = **singular snake_case** (`organization`, `user`); rota = **plural kebab-case** (`organizations`, `users`).
 - A auth é declarada **rota a rota** pelo `Routes()` do controller (doc 03) — nunca escondida no grupo.
@@ -76,12 +78,14 @@ GET    /api/system/errors
 
 ```json
 {
-  "code": 409,
+  "code": "identidade.workspace.slug_em_uso",
   "error": "conflict",
   "message": "Slug já está em uso por outro workspace.",
   "ray_trace": "01J2K4..."
 }
 ```
+
+`code` é **sempre a string estável** do catálogo de erros (é o mapping do front-end); o **status HTTP vai no header da resposta, nunca no corpo**.
 
 | HTTP | Uso |
 |---|---|
@@ -98,6 +102,7 @@ O controller traduz **sentinela → status** num `switch` (template `traduzir()`
 ## Paginação
 
 - Query: `page` (>= 1, default 1), `pageSize` (<= 100, default 10) — teto de 100 aplicado pelo `pkg/pagination`.
+- Convenção de nomes: **query em camelCase** (`page`, `pageSize`), **corpo da resposta em snake_case** (`page`, `page_size`, `total`).
 - Resposta de lista: `{ "items": [...], "page": 1, "page_size": 10, "total": 137 }`.
 - Filtros do subdomínio como query params extras, documentados no Swagger.
 
@@ -156,7 +161,7 @@ Devolve a árvore `dominio → subdominio → ações` **já filtrada pelas perm
 }
 ```
 
-Regras do contrato: `permissao` é o valor exato exigido pela rota; `descricao` em PT-BR; `rota` é o path com `{uuid}` onde couber; `grupo_menu` é o agrupamento sugerido para o menu do front. Fonte dos dados: `Catalogo()` de cada subdomínio, agregado no bootstrap (doc 03).
+Regras do contrato: `permissao` é o valor exato exigido pela rota; `descricao` em PT-BR; `rota` é o path com `{uuid}` onde couber; `grupo_menu` é o agrupamento sugerido para o menu do front. **Cada ação da árvore corresponde a UM par rota+método** do `Catalogo()` (`RotaMeta`) — permissão com N rotas emite N ações. Fonte dos dados: `Catalogo()` de cada subdomínio, agregado no bootstrap (doc 03).
 
 ## CONTRATO — mapa de erros
 

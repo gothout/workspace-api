@@ -6,7 +6,7 @@ regra de negócio — sabe conectar, executar e fechar.
 ## Regras
 
 - Importa só `internal/pkg` + libs externas — **NUNCA outro pacote de
-  `infra`**, nem em arquivo de teste (regra 2 de `internal/AGENTS.md`).
+  `infra`**, nem em arquivo de teste (regra 2 de `agents/01`).
 - Quando um infra precisar do outro (ex.: migrations precisam do pool do
   Postgres), a dependência entra por **interface declarada no consumidor** e
   a ligação acontece no `cmd/bootstrap` — nunca por import direto.
