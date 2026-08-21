@@ -26,13 +26,15 @@ go test -race ./...
 ## Estrutura e regras de dependência
 
 Layout de pastas e regras invioláveis: `agents/01`. O **domínio é pasta direta
-de `internal/`** (hoje só `identidade`): os subdomínios moram em
+de `internal/`** (hoje só `identidade`): os modelos expostos (entidades, VOs,
+invariantes) moram em `internal/identidade/model/{subdominio}` (folha,
+importável por qualquer camada), os subdomínios em
 `internal/identidade/domain/{subdominio}` e as orquestrações que atravessam
 2+ subdomínios em `internal/identidade/application/{nome}`. Resumo do fluxo
 permitido:
 
 ```
-pkg ← infra ← {dominio}/domain ← {dominio}/application ← cmd
+pkg ← infra ← {dominio}/model ← {dominio}/domain ← {dominio}/application ← cmd
 ```
 
 - `internal/pkg` é **folha**: não importa nada de `internal/` fora de `pkg`.

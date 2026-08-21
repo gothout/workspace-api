@@ -67,6 +67,7 @@ internal/
   infra/         database (postgres, migrations), jwt
   middleware/    cadeia de auth/autorização (fail-closed)
   identidade/    DOMÍNIO
+    model/       modelos expostos: entidades, VOs, invariantes (folha, importável por todas as camadas)
     domain/      subdomínios: organization, workspace, user
     application/ aplicações: auth, catalogo
 db/migrations/   SQL puro up/down

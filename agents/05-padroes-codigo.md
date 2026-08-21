@@ -792,7 +792,7 @@ func traduzir(err error) *rest_err.RestErr {
 
 ## Convenções Go
 
-- Comentário de pacote em todo `model.go`: propósito do subdomínio + entidades + dependências.
+- Comentário de pacote no arquivo do modelo (`model.go` do pacote `model/`): propósito do subdomínio + entidades + dependências.
 - **Entidade nasce por `NewX(input)`** e só muda por método de comportamento — campos exportados são concessão ao GORM, não convite à mutação; struct literal de entidade fora do pacote é reprovada.
 - **Value Object** = tipo nomeado com `ParseX(...)` que valida; dado de negócio com formato/invariante nunca viaja como string solta.
 - **Interfaces sempre** (`Repository`, `Service`, `Controller`) — implementação `xxxImpl` **privada**, construtor `NewX(...)` exportado.
@@ -811,10 +811,10 @@ func traduzir(err error) *rest_err.RestErr {
 
 ## Checklist de pronto por subdomínio
 
-- [ ] 8 arquivos criados + `permissions.go` (em `application/`: sem `model.go`/`repository.go`, com `contratos.go`)
+- [ ] **8 arquivos do subdomínio** criados + `permissions.go` + **pacote `model/` do domínio** (entidades/VOs em `internal/{dominio}/model/{subdominio}`) — em `application/`: sem `model.go`/`repository.go`, com `contratos.go`
 - [ ] **VOs com validação no construtor** (`ParseX`) — dado com formato/invariante não viaja como string solta
 - [ ] **Entidade nasce por `NewX`** (construtor que valida invariantes), nunca por struct literal fora do pacote; transições de estado por métodos de comportamento
-- [ ] **Comentário de pacote** no `model.go`: propósito, entidades, dependências
+- [ ] **Comentário de pacote** no arquivo do modelo (`model.go` do pacote `model/`): propósito, entidades, dependências
 - [ ] **Pacote descrito no `arch-go.yml`** no mesmo commit (coverage 100 reprova pacote sem regra)
 - [ ] Termo de negócio novo entra no **glossário do `agents/00`** no mesmo commit
 - [ ] Migration up/down criada e **testada** (`up → down → up` em banco efêmero; `migrate validate` sem conexão)

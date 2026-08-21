@@ -9,12 +9,16 @@ Subdomínios do domínio **identidade**: `organization`, `workspace`, `user`.
   entre subdomínios entra por interface declarada no consumidor, ligada no
   `cmd/bootstrap`.
 - Todo subdomínio segue a anatomia de **8 arquivos + `permissions.go`**
-  (templates em `agents/05`): `model.go`, `dto_request.go`,
-  `dto_response.go`, `errors.go`, `permissions.go`, `repository.go`,
-  `service.go`, `controller.go`, `singleton.go`.
+  (templates em `agents/05`): `dto_request.go`, `dto_response.go`,
+  `errors.go`, `permissions.go`, `repository.go`, `service.go`,
+  `controller.go`, `singleton.go`. **O modelo (entidades, VOs, `NewX`, inputs,
+  `ListFilter`, status) mora em `internal/identidade/model/{subdominio}` —
+  pacote-folha importável por todas as camadas.**
 - **Cada subdomínio hospeda um agregado** (ou poucos, com raiz explícita no
-  `model.go`): a raiz é a única porta de entrada; referência a outro agregado
-  **só por uuid** — nunca join de escrita.
+  pacote `model/`): a raiz é a única porta de entrada; referência a outro agregado
+  **só por uuid** — nunca join de escrita. Importar o **`model/` de irmão é
+  permitido para leituras** (ele é folha); escrita em agregado alheio continua
+  só por interface/application.
 - **Repositório é por agregado**, com métodos em linguagem de negócio.
 - **Invariantes vivem no construtor `NewX` e nos métodos de comportamento**
   da entidade — struct literal de entidade fora do pacote é proibida.

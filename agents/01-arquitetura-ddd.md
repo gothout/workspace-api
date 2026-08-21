@@ -302,7 +302,7 @@ O `cmd/bootstrap` é o **único lugar onde os pacotes se encontram**: dois `infr
 
 ## Validação da arquitetura
 
-As regras 1–8 valem em duas frentes complementares:
+As regras 1–9 valem em duas frentes complementares:
 
 ### 1. arch-go (gate executável)
 

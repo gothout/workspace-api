@@ -2,9 +2,9 @@
 
 Domínio de identidade: a hierarquia **organization → workspace → user**
 (especificação completa em `agents/03`). Domínio é **pasta direta de
-`internal/`**: os subdomínios moram em `domain/` e as orquestrações que os
-atravessam em `application/` (hoje: `application/catalogo` e
-`application/auth`).
+`internal/`**: os modelos expostos (entidades, VOs, invariantes) moram em
+`model/`, os subdomínios em `domain/` e as orquestrações que os atravessam em
+`application/` (hoje: `application/catalogo` e `application/auth`).
 
 ## Subdomínios
 

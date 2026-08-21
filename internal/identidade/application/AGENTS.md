@@ -16,8 +16,10 @@ Host).
   consumidor dita o contrato), ligadas no `cmd/bootstrap` por **adaptadores
   que resolvem o singleton NA CHAMADA** — mesmo desenho do
   `internal/middleware`.
-- Importa `pkg`, `infra`, `middleware` — **nunca importa subdomínio de
-  `domain/`** e nunca é importada por ele (regras 3 e 5 de `agents/01`).
+- Importa `pkg`, `infra`, `middleware` e os pacotes **`model/`** do domínio
+  (para leituras e projeções complexas sobre os agregados) — **nunca importa
+  subdomínio de `domain/`** e nunca é importada por ele (regras 3 e 5 de
+  `agents/01`).
 - Uma aplicação por pasta. Rotas em `/api/application/identidade/...`, com a
   mesma regra de auth rota a rota dos subdomínios de `domain/`.
 - Aplicação nova aqui precisa atravessar de fato 2+ subdomínios (ou agregar

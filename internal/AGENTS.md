@@ -25,8 +25,10 @@ Fluxo permitido: `pkg ← infra ← {dominio}/model ← {dominio}/domain ← {do
    em testes.
 3. `internal/{dominio}/domain` importa `pkg`, `infra` e `middleware` —
    **nunca** `application` nem `cmd`.
-4. Um subdomínio **não importa irmão**: dependência entra por interface
-   declarada no consumidor e ligada no bootstrap.
+4. Um subdomínio **não importa o `domain/` de irmão**: dependência entra por
+   interface declarada no consumidor e ligada no bootstrap. Importar o
+   **`model/` de irmão é permitido e incentivado para leituras** — ele é folha
+   (regra 9); escrita em agregado alheio continua só por interface/application.
 5. `application` importa `pkg`, `infra` e `middleware` — **nunca os pacotes
    de `domain/` do próprio domínio**: orquestra os subdomínios por
    interfaces estreitas em `contratos.go`, não persiste nada próprio.
