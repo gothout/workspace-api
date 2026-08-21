@@ -12,10 +12,11 @@ completa em `agents/01`.
 | `infra` | adaptadores técnicos (Postgres, JWT, migrations) |
 | `middleware` | cadeia de autenticação/autorização/resolução |
 | `identidade/` | **domínio** do negócio (bounded context) — pasta direta de `internal/` |
+| `identidade/model/` | **modelos expostos** do domínio (entidades, VOs, invariantes) — **folha**, importável por todas as camadas |
 | `identidade/domain/` | subdomínios do domínio (`organization`, `workspace`, `user`) |
-| `identidade/application/` | orquestrações entre os subdomínios do domínio (`catalogo`) |
+| `identidade/application/` | orquestrações entre os subdomínios do domínio (`catalogo`, `auth`) |
 
-Fluxo permitido: `pkg ← infra ← {dominio}/domain ← {dominio}/application ← cmd`.
+Fluxo permitido: `pkg ← infra ← {dominio}/model ← {dominio}/domain ← {dominio}/application ← cmd`.
 
 ## As 8 regras de dependência (mesma numeração de `agents/01` — fonte única)
 

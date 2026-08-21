@@ -26,10 +26,14 @@ invariantes (a hierarquia organization → workspace → user, o escopo por
 linha), então moram no mesmo domínio.
 
 Na prática, o domínio é uma **pasta direta de `internal/`** que contém sempre
-dois filhos:
+três filhos:
 
 - `domain/` — os subdomínios (a regra de negócio);
-- `application/` — os casos de uso que orquestram esses subdomínios.
+- `application/` — os casos de uso que orquestram esses subdomínios;
+- `model/` — os **modelos expostos** do domínio (entidades, VOs, invariantes),
+  pacotes-**folha** que qualquer camada importa sem ciclo — é o que viabiliza
+  **buscas complexas sobre os modelos sem o emaranhado** dos subdomínios,
+  apenas por pacotes.
 
 **Critério de decisão — domínio novo ou encaixar no existente?** Cria-se um
 domínio novo quando a área tem vocabulário e invariantes que **não se
@@ -58,7 +62,11 @@ domínio** (ou agrega dados de todos eles). Ela **não tem entidade nem
 persistência próprias** — sem `model.go` e sem `repository.go`. No lugar
 deles, um **`contratos.go`** declara as interfaces estreitas de que a
 aplicação precisa (o consumidor dita o contrato), ligadas no `cmd/bootstrap`
-por adaptadores que resolvem o singleton do subdomínio **na chamada**.
+por adaptadores que resolvem o singleton do subdomínio **na chamada**. Para
+**leitura**, a aplicação importa os pacotes `model/` do domínio
+**livremente** (regra 9): é daí que saem as buscas complexas e projeções
+sobre vários agregados, sem atravessar subdomínios. Escrita continua só via
+contratos.
 
 **Regra prática:** o caso de uso **cruza subdomínios**? Sobe para
 `application/`. Orquestração de UM subdomínio só não é aplicação — é sinal
@@ -98,6 +106,10 @@ workspace-api/
     ├── middleware/                 ← SetContextAuthorization, ResolveWorkspace, RequirePermission
     │                               ← NÃO importa nenhum {dominio}/domain: dependências por interfaces em contratos.go
     └── identidade/                 ← DOMÍNIO (bounded context) — pasta direta de internal/
+        ├── model/                  ← MODELOS expostos do domínio: entidades, VOs, invariantes — FOLHA, importável por todos
+        │   ├── organization/       ← package organization (entidade, VOs, NewX, inputs)
+        │   ├── workspace/          ← idem (exemplo canônico dos templates do doc 05)
+        │   └── user/               ← idem (User, RefreshToken, Atribuicao, Papel...)
         ├── domain/                 ← camada de DOMÍNIO: subdomínios com regra de negócio e tabelas próprias
         │   ├── organization/       ← raiz da hierarquia; campo `dominio` custom (white-label); apikey
         │   ├── workspace/          ← slug DNS único global; escopo por organization
@@ -116,8 +128,9 @@ Dois casos mostram onde cada coisa mora:
 
 1. **"Criar workspace"** — regra de negócio de UM recorte: validar formato e
    unicidade global do slug, gravar na tabela `identidade_workspace_workspace`.
-   Tudo acontece dentro de **`internal/identidade/domain/workspace`**, que
-   expõe `POST /api/domain/identidade/workspaces`.
+   A regra acontece em **`internal/identidade/domain/workspace`**, que opera o
+   modelo de **`internal/identidade/model/workspace`** e expõe
+   `POST /api/domain/identidade/workspaces`.
 2. **"Listar as permissões que o usuário tem"** — cruza `organization` +
    `workspace` + `user` (vínculo, papéis por workspace, permissões de cada
    papel) e agrega o `Catalogo()` de todos os subdomínios. Nenhum subdomínio
@@ -128,16 +141,15 @@ Dois casos mostram onde cada coisa mora:
 
 ## Anatomia de um subdomínio (pacote Go)
 
-Cada `internal/{dominio}/domain/{subdominio}/` tem **exatamente** estes arquivos (templates canônicos no doc `05`):
+Cada `internal/{dominio}/domain/{subdominio}/` tem **exatamente** estes **8 arquivos** (templates canônicos no doc `05`). **O modelo não mora aqui**: entidade, VOs, construtor `NewX`, inputs e as constantes `Dominio`/`Subdominio` estão em `internal/{dominio}/model/{subdominio}` — pacote-folha importável por qualquer camada (regra 9):
 
 | Arquivo | Responsabilidade |
 |---|---|
-| `model.go` | Comentário de pacote, constantes `Dominio`/`Subdominio`, tipos nomeados com `Valido()`, **Value Objects** com construtor validador (`ParseSlug`), entidade GORM com `TableName()` + **construtor `NewX` que valida invariantes** + métodos de comportamento, `CreateInput`/`UpdateInput`, `ListFilter` |
 | `dto_request.go` | DTOs de entrada (tags de binding + validação) com `ParaEntrada()`; PATCH usa ponteiros |
 | `dto_response.go` | DTOs de saída com construtores `NovoXResponseDto`; nunca expõe hash nem campos internos |
-| `errors.go` | Erros sentinela + catálogo {código estável, mensagem PT-BR, status} registrado no mapa global do `rest_err` |
+| `errors.go` | Erros sentinela + catálogo {código estável, mensagem PT-BR, status} registrado no mapa global do `rest_err` — inclusive as sentinelas de invariante vindas do pacote `model` |
 | `permissions.go` | Constantes `PermX` + `Catalogo()` com metadados — alimenta o endpoint de permissões |
-| `repository.go` | Interface `Repository` + `repositoryImpl` privada; **um por agregado**, métodos em linguagem de negócio; toda query passa por `orgctx.Scope` |
+| `repository.go` | Interface `Repository` + `repositoryImpl` privada; **um por agregado**, métodos em linguagem de negócio; toda query passa por `orgctx.Scope`/`ScopeOrganization` |
 | `service.go` | Interface `Service` + `serviceImpl` privada; **domain service do agregado** — TODA a regra de negócio; auditoria em toda escrita |
 | `controller.go` | Interface `Controller` + handlers HTTP finos + `Routes()` com a cadeia de middlewares declarada rota a rota |
 | `singleton.go` | `New(deps...)`, `Use()`, `MustUse()` (padrão obrigatório — doc 05) |
@@ -192,16 +204,21 @@ não serve numa conversa com o negócio, ele está errado no código também.
   comportamento — nunca uma string solta viajando pelos inputs, nunca struct
   anêmica espalhada pelo pacote.
 
+Entidade e VO moram juntos no pacote **`model/`** do domínio
+(`internal/{dominio}/model/{subdominio}`) — folha que qualquer camada importa
+sem ciclo (regra 9).
+
 ### Agregado e raiz de agregado
 
-Cada subdomínio hospeda **um agregado** (ou poucos, com raiz explícita). A
-raiz é a **única porta de entrada**: nada altera um workspace senão pelo
-agregado `Workspace`; registro filho (ex.: `atribuicao`, no subdomínio
-`user`) só é tocado pela sua raiz. Invariantes de consistência imediata vivem
-**dentro do agregado** — construtor e métodos. Entre agregados, a referência
-é **por uuid, nunca por join de escrita**: `Workspace.OrganizationUUID`
-aponta para a organization, e quem precisa do dado dela pergunta ao
-subdomínio dela (por interface — regra 4).
+Cada subdomínio hospeda **um agregado** (ou poucos, com raiz explícita no
+pacote `model/`). A raiz é a **única porta de entrada** das mutações — operada
+pelo `service` do subdomínio: nada altera um workspace senão pelo agregado
+`Workspace`; registro filho (ex.: `atribuicao`, no subdomínio `user`) só é
+tocado pela sua raiz. Invariantes de consistência imediata vivem **dentro do
+agregado** — construtor e métodos. Entre agregados, a referência é **por
+uuid, nunca por join de escrita**: `Workspace.OrganizationUUID` aponta para a
+organization, e quem precisa do dado dela pergunta ao subdomínio dela (por
+interface — regra 4) ou lê o **`model/` dela** (permitido para leitura).
 
 ### Repositório: um por agregado
 
@@ -221,9 +238,10 @@ o nome DDD.
 
 ### Invariantes no construtor
 
-`model.go` expõe `NewX(input) (*X, error)`, que valida as invariantes antes
-de devolver a entidade. Controller e service **nunca** montam entidade campo
-a campo: struct literal de entidade fora do pacote é reprovada em revisão.
+O pacote `model/` expõe `NewX(input) (*X, error)`, que valida as invariantes
+antes de devolver a entidade. Controller e service **nunca** montam entidade
+campo a campo: struct literal de entidade fora do pacote `model/` é reprovada
+em revisão.
 Entidade ≠ DTO ≠ input — o DTO carrega dado cru, o construtor devolve
 entidade válida.
 
@@ -245,19 +263,20 @@ errobserve/ClickHouse (doc `02`). Não inventar antes da hora.
 1. **`pkg` é folha**: não importa nada de `internal/` fora de `pkg`.
 2. **`infra` importa só `pkg` + libs externas — nunca outro `infra`.** Quando um infra precisar do outro (ex.: JWT com denylist no Redis, evolução futura), a dependência entra por interface declarada no consumidor e o `cmd/bootstrap` faz a ligação. Nem no código, nem nos testes.
 3. **`internal/{dominio}/domain` importa `pkg` + `infra` + `middleware`. Nunca importa `application` nem `cmd`.**
-4. **Um subdomínio não importa irmão.** A dependência entra por **interface declarada no consumidor** e ligada no `cmd/bootstrap` (adaptador que resolve o singleton do outro lado na chamada). Nem por import direto, nem por variável global compartilhada.
-5. **`internal/{dominio}/application` importa `pkg` + `infra` + `middleware` — nunca os pacotes de `domain/` do próprio domínio.** Os subdomínios vizinhos entram **só por interface estreita** do `contratos.go`: o pacote fica testável sem banco e sem singleton, e o que atravessa a fronteira é o mínimo.
+4. **Um subdomínio não importa o `domain/` de irmão.** A dependência entra por **interface declarada no consumidor** e ligada no `cmd/bootstrap` (adaptador que resolve o singleton do outro lado na chamada). Nem por import direto, nem por variável global compartilhada. Importar o **`model/` de irmão é permitido e incentivado para leituras** — o model é folha (regra 9); **escrita** em agregado alheio continua só por interface/application.
+5. **`internal/{dominio}/application` importa `pkg` + `infra` + `middleware` + os pacotes `model/` do domínio — nunca os pacotes de `domain/` do próprio domínio.** Os subdomínios vizinhos entram **só por interface estreita** do `contratos.go`: o pacote fica testável sem banco e sem singleton, e o que atravessa a fronteira é o mínimo.
 6. **Dentro do subdomínio: `controller → service → repository`.** Nunca o contrário.
 7. **Controller nunca toca `*gorm.DB`.** Recebe o `Service` pela interface.
 8. **Todo método de repository recebe `ctx` e aplica o escopo — duas variantes, ambas fail-closed**: `orgctx.Scope` (organization **e** workspace; tabelas da vida dentro do workspace) ou `orgctx.ScopeOrganization` (só organization; tabelas **acima** do workspace, como `workspace` e `user`). Sem escopo a query falha, nunca roda aberta. As exceções (raiz sem escopo, globais da plataforma, `FindBySlug` global) estão no doc `03` e no `AGENTS.md` do pacote, com o motivo escrito.
+9. **`internal/{dominio}/model` é folha do domínio**: importa só stdlib + libs externas + `internal/pkg` — **nunca** `domain`, `application`, `infra` nem `middleware`. **Todas as camadas podem importá-lo** (`domain`, `application`, `middleware`, `cmd`) — é o nível que permite buscas complexas sobre os modelos sem atravessar subdomínios.
 
 Fluxo de dependências permitido:
 
 ```
-pkg ← infra ← {dominio}/domain ← {dominio}/application ← cmd (bootstrap/routes)
+pkg ← infra ← {dominio}/model ← {dominio}/domain ← {dominio}/application ← cmd (bootstrap/routes)
 ```
 
-O `internal/middleware` fica fora dessa linha: importa `pkg` + `infra` (JWT) e **não importa nenhum `internal/{dominio}/domain`** — os controllers de `domain` importam ELE, então importar os dois lados seria ciclo. Tudo o que o middleware precisa do negócio (vínculo user↔workspace, permissões efetivas, resolução de workspace pelo Host) entra por interface em `contratos.go`, ligada no bootstrap. Cadeia não inicializada = rota **fechada** (403), nunca aberta.
+O `internal/middleware` fica fora dessa linha: importa `pkg` + `infra` (JWT) + os pacotes `model/` e **não importa nenhum `internal/{dominio}/domain`** — os controllers de `domain` importam ELE, então importar os dois lados seria ciclo. Tudo o que o middleware precisa do negócio (vínculo user↔workspace, permissões efetivas, resolução de workspace pelo Host) entra por interface em `contratos.go`, ligada no bootstrap. Cadeia não inicializada = rota **fechada** (403), nunca aberta.
 
 ## Padrão de inicialização (bootstrap DI)
 
@@ -314,18 +333,25 @@ dependenciesRules:
       internal:
         - "workspace-api/internal/pkg"
         - "workspace-api/internal/infra"
+        - "workspace-api/internal.*.model"
+  - package: "workspace-api/internal.*.model"       # modelos: FOLHA do domínio (só pkg + libs externas)
+    shouldOnlyDependsOn:
+      internal:
+        - "workspace-api/internal/pkg"
   - package: "workspace-api/internal.*.domain"      # subdomínios de QUALQUER domínio
     shouldOnlyDependsOn:
       internal:
         - "workspace-api/internal/pkg"
         - "workspace-api/internal/infra"
         - "workspace-api/internal/middleware"
+        - "workspace-api/internal.*.model"
   - package: "workspace-api/internal.*.application" # aplicações de QUALQUER domínio
     shouldOnlyDependsOn:
       internal:
         - "workspace-api/internal/pkg"
         - "workspace-api/internal/infra"
         - "workspace-api/internal/middleware"
+        - "workspace-api/internal.*.model"
   - package: "workspace-api/cmd"                    # composição: pode importar todas as camadas
     shouldOnlyDependsOn:
       internal:
@@ -341,13 +367,14 @@ Sem regra para `cmd/**`, pacote raiz e `docs/` (Swagger gerado), o coverage
 precisa de regra, mesmo que permissiva.
 
 Como `shouldOnlyDependsOn` lista tudo o que é permitido, o que não está na
-lista reprova: irmão importando irmão (`...domain/user` → `...domain/organization`),
-`application` importando `domain/`, `middleware` importando qualquer
-`internal/{dominio}/...` — todos caem no gate sem regra extra.
+lista reprova: irmão importando irmão (`...domain/user` → `...domain/organization`
+— o `model` de irmão é permitido), `application` importando `domain/`,
+`model` importando qualquer coisa acima de `pkg`, `middleware` importando
+`internal/{dominio}/domain` — todos caem no gate sem regra extra.
 
 ### 2. Dependency Graph do Go Architect (conferência visual)
 
 - Ferramenta: [Dependency Graph](https://go-architect.github.io/docs/analysis-tools/dependency-graph/) do Go Architect. Apontar para a pasta do projeto: ela desenha o grafo de pacotes, classificando os nós em Internal / External / StandardLib / Organization.
 - **Quando rodar:** ao fechar cada fase (ver doc `06`).
-- **O que conferir:** o fluxo `pkg ← infra ← {dominio}/domain ← {dominio}/application ← cmd` está valendo; nenhuma aresta `infra → infra`, nenhuma `subdomínio → irmão`, nenhuma `domain → application`, nenhuma `middleware → internal/{dominio}/domain`.
+- **O que conferir:** o fluxo `pkg ← infra ← {dominio}/model ← {dominio}/domain ← {dominio}/application ← cmd` está valendo; nenhuma aresta `infra → infra`, nenhuma `subdomínio → domain de irmão`, nenhuma `domain → application`, nenhuma `model → domain/application/infra/middleware`, nenhuma `middleware → internal/{dominio}/domain`.
 - Dependência inesperada no grafo = parar e corrigir antes de fechar a fase; registrar a conferência no log do `06`.

@@ -72,17 +72,17 @@ O singleton **não é seguro para inicialização concorrente nem re-inicializa�
 
 ## Templates de arquivo
 
-### model.go
+### model/ — pacote do modelo (`internal/identidade/model/workspace`)
 
 ```go
-// Package workspace implementa o subdomínio workspace do domínio identidade:
-// unidade de trabalho de uma organization, endereçada por slug DNS único global.
-// Entidades: Workspace. Dependências: pkg (orgctx, rest_err, pagination) + libs
-// (gorm/pgx); a conexão *gorm.DB é injetada pelo bootstrap (infra/postgres) —
-// o subdomínio não importa o pacote infra.
+// Package workspace implementa o MODELO do subdomínio workspace do domínio
+// identidade: entidade raiz do agregado, VOs e invariantes.
+// FOLHA do domínio: não importa domain, application, infra nem middleware —
+// qualquer camada pode importá-lo (regra 9 do doc 01).
 package workspace
 
 import (
+    "errors"
     "regexp"
     "strings"
     "time"
@@ -94,9 +94,18 @@ import (
 )
 
 const (
-    // Dominio e Subdominio identificam este pacote nos catálogos (erros, permissões) e logs.
+    // Dominio e Subdominio identificam este modelo nos catálogos (erros, permissões) e logs.
     Dominio    = "identidade"
     Subdominio = "workspace"
+)
+
+// Sentinelas de invariante do MODELO — o pacote é folha e não importa o
+// errors.go do subdomínio; o catálogo de lá (code estável + status) registra
+// estas sentinelas.
+var (
+    ErrSlugInvalido = errors.New("slug fora do formato DNS")
+    ErrNomeInvalido = errors.New("nome fora do formato esperado")
+    ErrJaInativo    = errors.New("workspace já está inativo")
 )
 
 // StatusWorkspace — ciclo de vida do workspace.
