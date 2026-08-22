@@ -2,7 +2,48 @@
 
 ## Codebase Patterns
 
-- (preencher aqui padrões reutilizáveis descobertos durante as iterações)
+- Singleton em todo pacote de infra/subdomínio: função pura `Connect(...)` +
+  `sync.Once` com `InitX/Get/Close`; testes usam a função pura direto, nunca o
+  singleton. Para testar ciclo do singleton, um único teste por pacote.
+- Fail-closed do orgctx via `gorm.DB.AddError`: contexto sem escopo devolve
+  query que FALHA na execução (`ErrEscopoAusente`) — testado com gorm DryRun
+  sem banco real.
+- Testes que dependem de docker/testcontainers: helper `dockerDisponivel(t)`
+  + `t.Skip` — verdes sem ambiente, reais com ele (postgres:16 local).
+- Config/jwt singletons precisam de `ResetarParaTeste()` exportado quando
+  outros pacotes exercem o boot nos próprios testes (`sync.Once` é por
+  processo).
+- CLI cobra imprime via `cmd.OutOrStdout()` (nunca os.Stdout) para saída
+  testável; comandos montados por funções construtoras sem estado global.
+- swag/arch-go instaláveis no Go 1.25: arch-go mudou para
+  `github.com/arch-go/arch-go`; usar `swag@latest` (v1.16.6 fixa x/tools
+  antigo que não compila).
+- Regra arch-go do `cmd` precisa listar `workspace-api/cmd` além de
+  `internal` — bootstrap/server/cli se importam entre si por design.
 
 Started: 2026-08-22
+---
+
+## 2026-08-22 - F0
+- Implementada fundação completa: pkg/{config,rest_err,pagination,orgctx,validator};
+  infra/{database/postgres,database/migrations,jwt}; cmd/{cli,bootstrap,server+routes};
+  main.go, configs_example.json, docs/ Swagger versionado, arch-go.yml +
+  arquitetura_test.go.
+- Migrations: runner golang-migrate com fonte própria (filtra `-- manual`),
+  advisory lock do driver pgx, CLI up|down|goto|force|status|validate|create;
+  teste up→down→up REAL em postgres:16 efêmero (testcontainers) passando.
+- Smoke end-to-end: serve sobe, aplica migrations, /api/status ok, Swagger 200,
+  404 padronizado, SIGTERM drena requisições.
+- Checks: build/vet/test verdes; arch-go compliance 100 coverage 100.
+- Docs lidos: agents/{README,01,02,04,05}, AGENTS.md de cmd/*, internal/*,
+  internal/pkg/*, internal/infra/*, db/migrations.
+- **Learnings for future iterations:**
+  - http.Server.Shutdown faz Serve() retornar ErrServerClosed IMEDIATAMENTE
+    (drain continua em Shutdown) — teste de drain não pode esperar Servir
+    junto com Parar no mesmo select.
+  - `go test -race` exige CGO+gcc — indisponível aqui; rodar na CI (F2+ tem
+    invariante disputada de slug/e-mail).
+  - `SET lock_timeout` via pool sql.Exec não garante a conexão do migrador;
+    statement_timeout vem do config do driver pgx (por statement).
+  - Issue #1 fecha no merge do PR (Closes #1).
 ---

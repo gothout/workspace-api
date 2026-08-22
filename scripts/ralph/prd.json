@@ -17,7 +17,7 @@
         "go build/vet/test verdes"
       ],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "issue": 1,
       "branch": "ox-alpha/fase-0",
       "docs": ["agents/README.md", "agents/01-arquitetura-ddd.md", "agents/02-stack-e-infra.md", "agents/04-convencoes-api.md", "agents/05-padroes-codigo.md"]
