@@ -6,8 +6,8 @@
 // (user) estes adaptadores passam a resolver o singleton do subdomínio NA
 // CHAMADA; os contratos do middleware NÃO mudam. O domínio custom white-label
 // (ProvedorDominiosCustom) e a validação de X-Api-Key (ResolvedorApiKeys)
-// entram na F2 junto da tabela da organization — até lá ficam DESLIGADOS:
-// resolução cobre só o domínio-base e toda X-Api-Key falha 401 (fail-closed).
+// entraram na F2 — vivem em organizacao.go, delegando ao subdomínio
+// organization.
 package bootstrap
 
 import (
@@ -25,12 +25,16 @@ import (
 
 // ligarMiddleware monta a cadeia com adaptadores que resolvem o pool NA
 // CHAMADA (regra do AGENTS.md do bootstrap). Chamada UMA vez no boot,
-// depois das migrations e antes do registro de rotas.
+// depois das migrations e antes do registro de rotas. Os contratos de
+// organization (domínios custom e X-Api-Key) delegam ao subdomínio —
+// organizacao.go; os resolvedores abaixo seguem provisórios até F3/F4.
 func ligarMiddleware(gerenciador *jwt.Manager) error {
 	return middleware.New(middleware.Dependencias{
-		JWT:        gerenciador,
-		Workspaces: resolvedorWorkspaces{},
-		Permissoes: resolvedorPermissoes{},
+		JWT:            gerenciador,
+		Workspaces:     resolvedorWorkspaces{},
+		DominiosCustom: provedorDominiosCustom{},
+		Permissoes:     resolvedorPermissoes{},
+		ApiKeys:        resolvedorApiKeys{},
 	})
 }
 
@@ -240,29 +244,4 @@ func registrarSuporte(ctx context.Context, usuario, organizacao, workspace uuid.
 		"organization_uuid", organizacao.String(),
 		"workspace_uuid", workspace.String(),
 		"papel", papel)
-}
-
-// --- Provedor de domínios custom para o CORS --------------------------------
-
-// dominiosCustomParaCors expõe ao engine os domínios white-label registrados
-// pelas organizations. PROVISÓRIO: consulta identidade_organization_organization
-// direto; na F2 passa a delegar ao subdomínio organization — o contrato do
-// CORS não muda. Enquanto a tabela não existe, origem fora do domínio-base é
-// recusada com log de erro (fail-closed), nunca aceita.
-func dominiosCustomParaCors(ctx context.Context) ([]string, error) {
-	db, err := postgres.GetDB()
-	if err != nil {
-		return nil, err
-	}
-	var dominios []string
-	err = db.WithContext(ctx).
-		Table("identidade_organization_organization").
-		Where("dominio IS NOT NULL AND dominio <> '' AND status = 'ativo'").
-		Distinct().
-		Order("dominio").
-		Pluck("dominio", &dominios).Error
-	if err != nil && errors.Is(err, gorm.ErrRecordNotFound) {
-		return []string{}, nil
-	}
-	return dominios, err
 }

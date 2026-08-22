@@ -1,4 +1,617 @@
+definitions:
+  organization.ApiKeyCriadaResponseDto:
+    properties:
+      chave:
+        type: string
+      created_at:
+        type: string
+      escopo_organization:
+        type: boolean
+      expires_at:
+        type: string
+      nome:
+        type: string
+      organization_uuid:
+        type: string
+      permissoes:
+        items:
+          type: string
+        type: array
+      status:
+        type: string
+      uuid:
+        type: string
+      workspaces_permitidos:
+        items:
+          type: string
+        type: array
+    type: object
+  organization.ApiKeyResponseDto:
+    properties:
+      created_at:
+        type: string
+      escopo_organization:
+        type: boolean
+      expires_at:
+        type: string
+      nome:
+        type: string
+      organization_uuid:
+        type: string
+      permissoes:
+        items:
+          type: string
+        type: array
+      status:
+        type: string
+      uuid:
+        type: string
+      workspaces_permitidos:
+        items:
+          type: string
+        type: array
+    type: object
+  organization.CreateApiKeyRequestDto:
+    properties:
+      escopo_organization:
+        type: boolean
+      expires_at:
+        type: string
+      nome:
+        maxLength: 120
+        minLength: 3
+        type: string
+      permissoes:
+        items:
+          type: string
+        type: array
+      workspaces_permitidos:
+        items:
+          type: string
+        type: array
+    required:
+    - nome
+    - permissoes
+    type: object
+  organization.CreateOrganizationRequestDto:
+    properties:
+      documento:
+        maxLength: 64
+        type: string
+      nome:
+        maxLength: 120
+        minLength: 2
+        type: string
+    required:
+    - nome
+    type: object
+  organization.DefinirDominioRequestDto:
+    properties:
+      dominio:
+        maxLength: 253
+        type: string
+    required:
+    - dominio
+    type: object
+  organization.OrganizationResponseDto:
+    properties:
+      created_at:
+        type: string
+      documento:
+        type: string
+      dominio:
+        type: string
+      nome:
+        type: string
+      status:
+        type: string
+      updated_at:
+        type: string
+      uuid:
+        type: string
+    type: object
+  organization.UpdateOrganizationRequestDto:
+    properties:
+      nome:
+        maxLength: 120
+        minLength: 2
+        type: string
+      status:
+        enum:
+        - ativo
+        - inativo
+        type: string
+    type: object
+  pagination.Response-organization_ApiKeyResponseDto:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/organization.ApiKeyResponseDto'
+        type: array
+      page:
+        type: integer
+      page_size:
+        type: integer
+      total:
+        type: integer
+    type: object
+  pagination.Response-organization_OrganizationResponseDto:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/organization.OrganizationResponseDto'
+        type: array
+      page:
+        type: integer
+      page_size:
+        type: integer
+      total:
+        type: integer
+    type: object
+  rest_err.RestErr:
+    properties:
+      code:
+        type: string
+      error:
+        type: string
+      message:
+        type: string
+      ray_trace:
+        type: string
+    type: object
 info:
   contact: {}
-paths: {}
+paths:
+  /api/domain/identidade/organizations:
+    get:
+      description: Listagem paginada GLOBAL das organizations (restrita a super_admin/suporte
+        auditado)
+      parameters:
+      - description: UUID do workspace (fallback quando o host não tem subdomínio)
+        in: header
+        name: X-Workspace-Id
+        type: string
+      - description: Página (default 1)
+        in: query
+        name: page
+        type: integer
+      - description: Itens por página (teto 100)
+        in: query
+        name: pageSize
+        type: integer
+      - description: Filtro por nome
+        in: query
+        name: nome
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/pagination.Response-organization_OrganizationResponseDto'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/rest_err.RestErr'
+      security:
+      - BearerAuth: []
+      summary: Lista organizations
+      tags:
+      - Identidade · Organization
+    post:
+      consumes:
+      - application/json
+      description: Cria a raiz da hierarquia (dona do contrato); acesso restrito a
+        super_admin
+      parameters:
+      - description: UUID do workspace (fallback quando o host não tem subdomínio)
+        in: header
+        name: X-Workspace-Id
+        type: string
+      - description: Dados da organization
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/organization.CreateOrganizationRequestDto'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/organization.OrganizationResponseDto'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/rest_err.RestErr'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/rest_err.RestErr'
+      security:
+      - BearerAuth: []
+      summary: Cria uma organization
+      tags:
+      - Identidade · Organization
+  /api/domain/identidade/organizations/{uuid}:
+    delete:
+      description: 'Remoção lógica com cascata: suspende os workspaces e desativa
+        a resolução do domínio custom; o valor removido NÃO se libera'
+      parameters:
+      - description: UUID do workspace (fallback quando o host não tem subdomínio)
+        in: header
+        name: X-Workspace-Id
+        type: string
+      - description: UUID da organization
+        in: path
+        name: uuid
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: UUID malformado
+          schema:
+            $ref: '#/definitions/rest_err.RestErr'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/rest_err.RestErr'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/rest_err.RestErr'
+      security:
+      - BearerAuth: []
+      summary: Remove uma organization
+      tags:
+      - Identidade · Organization
+    get:
+      description: Devolve a organization cujo uuid é o do caminho, se pertencer à
+        organization resolvida na requisição
+      parameters:
+      - description: UUID do workspace (fallback quando o host não tem subdomínio)
+        in: header
+        name: X-Workspace-Id
+        type: string
+      - description: UUID da organization
+        in: path
+        name: uuid
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/organization.OrganizationResponseDto'
+        "400":
+          description: UUID malformado
+          schema:
+            $ref: '#/definitions/rest_err.RestErr'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/rest_err.RestErr'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/rest_err.RestErr'
+      security:
+      - BearerAuth: []
+      summary: Consulta uma organization
+      tags:
+      - Identidade · Organization
+    patch:
+      consumes:
+      - application/json
+      description: Atualização parcial; inativar via PATCH suspende os workspaces
+        e desativa o domínio custom (cascata auditada)
+      parameters:
+      - description: UUID do workspace (fallback quando o host não tem subdomínio)
+        in: header
+        name: X-Workspace-Id
+        type: string
+      - description: UUID da organization
+        in: path
+        name: uuid
+        required: true
+        type: string
+      - description: Campos a atualizar
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/organization.UpdateOrganizationRequestDto'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/organization.OrganizationResponseDto'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/rest_err.RestErr'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/rest_err.RestErr'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/rest_err.RestErr'
+        "422":
+          description: Transição de estado proibida
+          schema:
+            $ref: '#/definitions/rest_err.RestErr'
+      security:
+      - BearerAuth: []
+      summary: Atualiza uma organization
+      tags:
+      - Identidade · Organization
+  /api/domain/identidade/organizations/{uuid}/acoes/reativar:
+    post:
+      description: 'Ação de negócio própria: devolve a organization ao ar; workspaces
+        suspensos continuam suspensos até ação explícita'
+      parameters:
+      - description: UUID do workspace (fallback quando o host não tem subdomínio)
+        in: header
+        name: X-Workspace-Id
+        type: string
+      - description: UUID da organization
+        in: path
+        name: uuid
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/organization.OrganizationResponseDto'
+        "400":
+          description: UUID malformado
+          schema:
+            $ref: '#/definitions/rest_err.RestErr'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/rest_err.RestErr'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/rest_err.RestErr'
+        "422":
+          description: Já está ativa
+          schema:
+            $ref: '#/definitions/rest_err.RestErr'
+      security:
+      - BearerAuth: []
+      summary: Reativa uma organization
+      tags:
+      - Identidade · Organization
+  /api/domain/identidade/organizations/{uuid}/api-keys:
+    get:
+      description: Lista paginada dos metadados das chaves da organization — nunca
+        expõe hash nem segredo
+      parameters:
+      - description: UUID do workspace (fallback quando o host não tem subdomínio)
+        in: header
+        name: X-Workspace-Id
+        type: string
+      - description: UUID da organization
+        in: path
+        name: uuid
+        required: true
+        type: string
+      - description: Página (default 1)
+        in: query
+        name: page
+        type: integer
+      - description: Itens por página (teto 100)
+        in: query
+        name: pageSize
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/pagination.Response-organization_ApiKeyResponseDto'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/rest_err.RestErr'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/rest_err.RestErr'
+      security:
+      - BearerAuth: []
+      summary: Lista as chaves de API
+      tags:
+      - Identidade · Organization
+    post:
+      consumes:
+      - application/json
+      description: Gera a chave de API da organization; o token em claro vem nesta
+        resposta UMA ÚNICA VEZ — só o SHA-256 é persistido
+      parameters:
+      - description: UUID do workspace (fallback quando o host não tem subdomínio)
+        in: header
+        name: X-Workspace-Id
+        type: string
+      - description: UUID da organization
+        in: path
+        name: uuid
+        required: true
+        type: string
+      - description: Dados da chave
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/organization.CreateApiKeyRequestDto'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/organization.ApiKeyCriadaResponseDto'
+        "400":
+          description: Entrada inválida (permissão fora do formato, escopo vazio...)
+          schema:
+            $ref: '#/definitions/rest_err.RestErr'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/rest_err.RestErr'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/rest_err.RestErr'
+      security:
+      - BearerAuth: []
+      summary: Cria uma chave de API
+      tags:
+      - Identidade · Organization
+  /api/domain/identidade/organizations/{uuid}/api-keys/{apikey_uuid}:
+    delete:
+      description: Remoção lógica da chave; requisições com ela passam a falhar fechadas
+        imediatamente
+      parameters:
+      - description: UUID do workspace (fallback quando o host não tem subdomínio)
+        in: header
+        name: X-Workspace-Id
+        type: string
+      - description: UUID da organization
+        in: path
+        name: uuid
+        required: true
+        type: string
+      - description: UUID da chave
+        in: path
+        name: apikey_uuid
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: UUID malformado
+          schema:
+            $ref: '#/definitions/rest_err.RestErr'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/rest_err.RestErr'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/rest_err.RestErr'
+      security:
+      - BearerAuth: []
+      summary: Revoga uma chave de API
+      tags:
+      - Identidade · Organization
+  /api/domain/identidade/organizations/{uuid}/dominio:
+    delete:
+      description: Desliga a resolução `*.{dominio}`; o valor removido não volta a
+        ser registrável (índice único total)
+      parameters:
+      - description: UUID do workspace (fallback quando o host não tem subdomínio)
+        in: header
+        name: X-Workspace-Id
+        type: string
+      - description: UUID da organization
+        in: path
+        name: uuid
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/organization.OrganizationResponseDto'
+        "400":
+          description: UUID malformado
+          schema:
+            $ref: '#/definitions/rest_err.RestErr'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/rest_err.RestErr'
+        "404":
+          description: Sem domínio definido
+          schema:
+            $ref: '#/definitions/rest_err.RestErr'
+      security:
+      - BearerAuth: []
+      summary: Remove o domínio custom white-label
+      tags:
+      - Identidade · Organization
+    put:
+      consumes:
+      - application/json
+      description: Registra `*.{dominio}` para os workspaces da organization; valida
+        formato DNS, base_domain e public suffix; único global
+      parameters:
+      - description: UUID do workspace (fallback quando o host não tem subdomínio)
+        in: header
+        name: X-Workspace-Id
+        type: string
+      - description: UUID da organization
+        in: path
+        name: uuid
+        required: true
+        type: string
+      - description: Domínio custom
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/organization.DefinirDominioRequestDto'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/organization.OrganizationResponseDto'
+        "400":
+          description: Domínio inválido
+          schema:
+            $ref: '#/definitions/rest_err.RestErr'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/rest_err.RestErr'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/rest_err.RestErr'
+        "409":
+          description: Domínio em uso
+          schema:
+            $ref: '#/definitions/rest_err.RestErr'
+      security:
+      - BearerAuth: []
+      summary: Aponta o domínio custom white-label
+      tags:
+      - Identidade · Organization
 swagger: "2.0"

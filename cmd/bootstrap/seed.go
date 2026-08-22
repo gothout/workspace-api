@@ -86,10 +86,21 @@ func Seed(caminhoConfig string) error {
 	if err != nil {
 		return err
 	}
-	if err := semearPapeis(context.Background(), db); err != nil {
+	ctx := context.Background()
+	if err := semearPapeis(ctx, db); err != nil {
 		return err
 	}
-	return nil
+	return semearOrganizacaoRaiz(ctx, db)
+}
+
+// semearOrganizacaoRaiz cria a organization da PLATAFORMA (raiz do console
+// master) com uuid determinístico — rodar duas vezes não duplica nem altera.
+func semearOrganizacaoRaiz(ctx context.Context, db *gorm.DB) error {
+	uuidRaiz := uuid.NewSHA1(uuid.NameSpaceURL, []byte("workspace-api://organizacao-raiz"))
+	return db.WithContext(ctx).Exec(`
+INSERT INTO identidade_organization_organization (uuid, nome, status)
+VALUES (?, ?, 'ativo')
+ON CONFLICT (uuid) DO NOTHING`, uuidRaiz, "Plataforma").Error
 }
 
 // semearPapeis insere papéis e permissões com ON CONFLICT DO NOTHING — rodar

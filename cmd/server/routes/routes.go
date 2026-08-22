@@ -18,6 +18,7 @@ import (
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
 
+	organizacao "workspace-api/internal/identidade/domain/organization"
 	"workspace-api/internal/pkg/config"
 	"workspace-api/internal/pkg/rest_err"
 )
@@ -95,11 +96,14 @@ func Montar(opcoes Opcoes) *gin.Engine {
 }
 
 // registrarConhecidos pendura os controllers já inicializados nos grupos.
-// Na F0 não há subdomínio ainda: a lista fica vazia e o engine sobe só com
-// rotas de sistema (definição de pronto do cmd/server/routes).
+// Engine montado por teste não passa pelo boot: subdomínio ausente = rota
+// não sobe, com motivo no log (nunca pânico, nunca rota aberta).
 func registrarConhecidos(dominio, aplicacao *gin.RouterGroup) {
-	_ = dominio   // F1+: registrarRotas("identidade.<sub>", dominio, ...)
-	_ = aplicacao // F4+: registrarRotas("identidade.auth", aplicacao, ...)
+	registrarRotas("identidade.organization", dominio, func() (Controlador, error) {
+		return organizacao.Use()
+	})
+	// F3+: workspace/user no grupo dominio; F4+: auth; F5+: catalogo na aplicacao.
+	_ = aplicacao
 }
 
 // middlewareAccessLog ocupa o slot do access log: linha estruturada por

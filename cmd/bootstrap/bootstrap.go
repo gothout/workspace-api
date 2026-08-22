@@ -16,6 +16,8 @@ import (
 	"syscall"
 	"time"
 
+	dominioOrganizacao "workspace-api/internal/identidade/domain/organization"
+
 	"workspace-api/cmd/server"
 	"workspace-api/cmd/server/routes"
 	"workspace-api/internal/infra/database/migrations"
@@ -87,8 +89,20 @@ func Serve(caminhoConfig string) error {
 	}
 	slog.Info("[BOOTSTRAP] middleware da cadeia de autorização inicializado")
 
-	// 7. Domínios/aplicações entram aqui nas fases F2+ — os adaptadores do
-	// middleware resolvem os singletons na chamada, sem conhecer o concreto.
+	// 7. Domínios — subdomínios de internal/identidade/domain na ordem de
+	// dependência (organization → workspace → user); cada adaptador do
+	// middleware acima resolve estes singletons NA CHAMADA. A cascata
+	// organization→workspace entra pelo contrato (contratos.go), provisório
+	// até a F3 ligar o lado do workspace.
+	db, err := postgres.GetDB()
+	if err != nil {
+		return fmt.Errorf("boot: %w", err)
+	}
+	_, err = dominioOrganizacao.New(db, suspendedorWorkspaces{})
+	if err != nil {
+		return fmt.Errorf("boot: %w", err)
+	}
+	slog.Info("[BOOTSTRAP-DI] Contêiner Identidade/Organization inicializado.")
 
 	// 8. HTTP — sondas e provedor de domínios custom injetados como funções;
 	// o servidor drena requisições em voo antes do fechamento LIFO.

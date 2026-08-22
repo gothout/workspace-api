@@ -1,0 +1,351 @@
+package organization
+
+import (
+	"context"
+	"testing"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	orgmodel "workspace-api/internal/identidade/model/organization"
+	"workspace-api/internal/pkg/orgctx"
+	"workspace-api/internal/pkg/pagination"
+)
+
+// --- Dublês (regra: testes de service NUNCA passam pelo singleton) ----------
+
+type repoFake struct {
+	porUUID      map[uuid.UUID]*orgmodel.Organization
+	erroAoSalvar error // sentinela injetada para simular conflito de unicidade
+}
+
+func novoRepoFake() *repoFake { return &repoFake{porUUID: map[uuid.UUID]*orgmodel.Organization{}} }
+
+func (r *repoFake) Criar(ctx context.Context, o *orgmodel.Organization) error {
+	if r.erroAoSalvar != nil {
+		return r.erroAoSalvar
+	}
+	r.porUUID[o.UUID] = o
+	return nil
+}
+
+func (r *repoFake) BuscarPorUUID(ctx context.Context, id uuid.UUID) (*orgmodel.Organization, error) {
+	if o, ok := r.porUUID[id]; ok {
+		return o, nil
+	}
+	return nil, ErrNotFound
+}
+
+func (r *repoFake) Listar(ctx context.Context, f orgmodel.ListFilter) ([]orgmodel.Organization, int64, error) {
+	items := make([]orgmodel.Organization, 0, len(r.porUUID))
+	for _, o := range r.porUUID {
+		items = append(items, *o)
+	}
+	return items, int64(len(items)), nil
+}
+
+func (r *repoFake) Atualizar(ctx context.Context, o *orgmodel.Organization) error {
+	if r.erroAoSalvar != nil {
+		return r.erroAoSalvar
+	}
+	r.porUUID[o.UUID] = o
+	return nil
+}
+
+func (r *repoFake) Remover(ctx context.Context, id uuid.UUID) error {
+	delete(r.porUUID, id)
+	return nil
+}
+
+func (r *repoFake) ListarDominiosAtivos(ctx context.Context) ([]LinhaDominioAtivo, error) {
+	lista := []LinhaDominioAtivo{}
+	for _, o := range r.porUUID {
+		if o.Status == orgmodel.StatusAtivo && o.TemDominio() {
+			lista = append(lista, LinhaDominioAtivo{Valor: o.Dominio.String(), OrganizationUUID: o.UUID})
+		}
+	}
+	return lista, nil
+}
+
+type chavesFake struct {
+	porOrg map[uuid.UUID][]*orgmodel.ApiKey
+}
+
+func novasChavesFake() *chavesFake { return &chavesFake{porOrg: map[uuid.UUID][]*orgmodel.ApiKey{}} }
+
+func (c *chavesFake) CriarApiKey(ctx context.Context, k *orgmodel.ApiKey) error {
+	c.porOrg[k.OrganizationUUID] = append(c.porOrg[k.OrganizationUUID], k)
+	return nil
+}
+
+func (c *chavesFake) ListarApiKeys(ctx context.Context, organizationUUID uuid.UUID, p pagination.Pagination) ([]orgmodel.ApiKey, int64, error) {
+	todas := c.porOrg[organizationUUID]
+	items := make([]orgmodel.ApiKey, 0, len(todas))
+	for _, k := range todas {
+		items = append(items, *k)
+	}
+	return items, int64(len(items)), nil
+}
+
+func (c *chavesFake) BuscarApiKeyPorUUID(ctx context.Context, organizationUUID, chaveUUID uuid.UUID) (*orgmodel.ApiKey, error) {
+	for _, k := range c.porOrg[organizationUUID] {
+		if k.UUID == chaveUUID {
+			return k, nil
+		}
+	}
+	return nil, ErrApiKeyNaoEncontrada
+}
+
+func (c *chavesFake) BuscarApiKeyPorHash(ctx context.Context, hash string) (*orgmodel.ApiKey, error) {
+	for _, ks := range c.porOrg {
+		for _, k := range ks {
+			if k.KeyHash == hash {
+				return k, nil
+			}
+		}
+	}
+	return nil, ErrApiKeyNaoEncontrada
+}
+
+func (c *chavesFake) RemoverApiKey(ctx context.Context, organizationUUID, chaveUUID uuid.UUID) error {
+	resto := c.porOrg[organizationUUID][:0]
+	for _, k := range c.porOrg[organizationUUID] {
+		if k.UUID != chaveUUID {
+			resto = append(resto, k)
+		}
+	}
+	if len(resto) == len(c.porOrg[organizationUUID]) {
+		return ErrApiKeyNaoEncontrada
+	}
+	c.porOrg[organizationUUID] = resto
+	return nil
+}
+
+type suspensorFake struct {
+	chamadas int
+	ultimo   uuid.UUID
+	erro     error
+}
+
+func (s *suspensorFake) SuspenderPorOrganization(ctx context.Context, organizationUUID uuid.UUID) (int, error) {
+	s.chamadas++
+	s.ultimo = organizationUUID
+	if s.erro != nil {
+		return 0, s.erro
+	}
+	return s.chamadas, nil
+}
+
+// --- Suíte -------------------------------------------------------------------
+
+const baseDomainTeste = "plataforma.exemplo"
+
+func montarServico(t *testing.T) (Service, *repoFake, *chavesFake, *suspensorFake) {
+	t.Helper()
+	repo := novoRepoFake()
+	chaves := novasChavesFake()
+	suspensore := &suspensorFake{}
+	svc := NewService(repo, chaves, suspensore, func() (string, error) { return baseDomainTeste, nil })
+	return svc, repo, chaves, suspensore
+}
+
+func ctxDaOrganizacao(id uuid.UUID) context.Context {
+	return orgctx.WithOrganization(context.Background(), id)
+}
+
+func TestCreateValidaInvariantsPeloConstrutor(t *testing.T) {
+	svc, repo, _, _ := montarServico(t)
+
+	o, err := svc.Create(context.Background(), orgmodel.CreateInput{Nome: "Acme"})
+	require.NoError(t, err)
+	assert.Equal(t, orgmodel.StatusAtivo, o.Status)
+	require.Len(t, repo.porUUID, 1)
+
+	_, err = svc.Create(context.Background(), orgmodel.CreateInput{Nome: "a"})
+	assert.ErrorIs(t, err, orgmodel.ErrNomeInvalido)
+
+	repo.erroAoSalvar = ErrDominioEmUso
+	_, err = svc.Create(context.Background(), orgmodel.CreateInput{Nome: "Outra"})
+	assert.ErrorIs(t, err, ErrDominioEmUso)
+}
+
+func TestLeituraNaoVazaOrganizacaoAlheia(t *testing.T) {
+	svc, _, _, _ := montarServico(t)
+	alvo, err := svc.Create(context.Background(), orgmodel.CreateInput{Nome: "Alvo"})
+	require.NoError(t, err)
+
+	casos := []struct {
+		nome string
+		ctx  context.Context
+	}{
+		{"sem escopo no ctx", context.Background()},
+		{"organization alheia no ctx", ctxDaOrganizacao(uuid.New())},
+	}
+	for _, caso := range casos {
+		_, err := svc.Read(caso.ctx, alvo.UUID)
+		assert.ErrorIs(t, err, ErrNotFound, caso.nome, "não vaza existência")
+	}
+
+	vista, err := svc.Read(ctxDaOrganizacao(alvo.UUID), alvo.UUID)
+	require.NoError(t, err)
+	assert.Equal(t, alvo.UUID, vista.UUID)
+}
+
+func TestUpdateInativaComCascataERecusaRepeticao(t *testing.T) {
+	svc, _, _, suspensore := montarServico(t)
+	o, err := svc.Create(context.Background(), orgmodel.CreateInput{Nome: "Acme"})
+	require.NoError(t, err)
+	ctx := ctxDaOrganizacao(o.UUID)
+
+	inativo := orgmodel.StatusInativo
+	atualizada, err := svc.Update(ctx, o.UUID, orgmodel.UpdateInput{Nome: ptrTexto("Acme Ltda"), Status: &inativo})
+	require.NoError(t, err)
+	assert.Equal(t, orgmodel.StatusInativo, atualizada.Status)
+	assert.Equal(t, 1, suspensore.chamadas, "inativar dispara a cascata UMA vez")
+	assert.Equal(t, o.UUID, suspensore.ultimo)
+
+	_, err = svc.Update(ctx, o.UUID, orgmodel.UpdateInput{Status: &inativo})
+	assert.ErrorIs(t, err, orgmodel.ErrJaInativo)
+	assert.Equal(t, 1, suspensore.chamadas, "invariante violada nem chega à cascata")
+
+	// Cascata falhando impede a persistência — pai nunca fica inativo com filho vivo.
+	suspensorQuebrado := &suspensorFake{erro: assert.AnError}
+	svcQuebrado := NewService(novoRepoFake(), novasChavesFake(), suspensorQuebrado,
+		func() (string, error) { return baseDomainTeste, nil })
+	outro, err := svcQuebrado.Create(context.Background(), orgmodel.CreateInput{Nome: "Fragil"})
+	require.NoError(t, err)
+	_, err = svcQuebrado.Update(ctxDaOrganizacao(outro.UUID), outro.UUID,
+		orgmodel.UpdateInput{Status: &inativo})
+	assert.ErrorIs(t, err, assert.AnError)
+}
+
+func TestReativarETransicaoUnica(t *testing.T) {
+	svc, _, _, _ := montarServico(t)
+	o, err := svc.Create(context.Background(), orgmodel.CreateInput{Nome: "Acme"})
+	require.NoError(t, err)
+	ctx := ctxDaOrganizacao(o.UUID)
+
+	_, err = svc.Reativar(ctx, o.UUID)
+	assert.ErrorIs(t, err, orgmodel.ErrJaAtivo, "reativar ativa é recusado")
+
+	inativo := orgmodel.StatusInativo
+	_, err = svc.Update(ctx, o.UUID, orgmodel.UpdateInput{Status: &inativo})
+	require.NoError(t, err)
+
+	reativada, err := svc.Reativar(ctx, o.UUID)
+	require.NoError(t, err)
+	assert.Equal(t, orgmodel.StatusAtivo, reativada.Status)
+}
+
+func TestDeleteExecutaCascataAntesDaRemocao(t *testing.T) {
+	svc, repo, _, suspensore := montarServico(t)
+	o, err := svc.Create(context.Background(), orgmodel.CreateInput{Nome: "Acme"})
+	require.NoError(t, err)
+
+	require.NoError(t, svc.Delete(ctxDaOrganizacao(o.UUID), o.UUID))
+	assert.Equal(t, 1, suspensore.chamadas)
+	assert.NotContains(t, repo.porUUID, o.UUID)
+
+	assert.ErrorIs(t, svc.Delete(ctxDaOrganizacao(uuid.New()), uuid.New()), ErrNotFound)
+}
+
+func TestDefinirEDepoisRemoverDominioCustom(t *testing.T) {
+	svc, repo, _, _ := montarServico(t)
+	o, err := svc.Create(context.Background(), orgmodel.CreateInput{Nome: "Acme"})
+	require.NoError(t, err)
+	ctx := ctxDaOrganizacao(o.UUID)
+
+	recusados := []struct{ valor, motivo string }{
+		{"plataforma.exemplo", "igual ao base_domain"},
+		{"sub.plataforma.exemplo", "descendente do base_domain"},
+		{"co.uk", "public suffix puro"},
+		{"localhost", "rótulo único"},
+		{"ruim_.com", "formato DNS"},
+	}
+	for _, caso := range recusados {
+		_, err := svc.DefinirDominio(ctx, o.UUID, caso.valor)
+		assert.ErrorIs(t, err, orgmodel.ErrDominioInvalido, "%s deveria ser recusado (%s)", caso.valor, caso.motivo)
+	}
+
+	_, err = svc.DefinirDominio(ctx, o.UUID, " Parceiro.COM ")
+	require.NoError(t, err)
+	assert.Equal(t, "parceiro.com", repo.porUUID[o.UUID].Dominio.String())
+
+	registrados, err := svc.ListarDominiosAtivos(ctx)
+	require.NoError(t, err)
+	require.Len(t, registrados, 1)
+	assert.Equal(t, "parceiro.com", registrados[0].Valor)
+	assert.Equal(t, o.UUID, registrados[0].OrganizationUUID)
+
+	repo.erroAoSalvar = ErrDominioEmUso
+	_, err = svc.DefinirDominio(ctx, o.UUID, "outro.com")
+	assert.ErrorIs(t, err, ErrDominioEmUso, "unicidade global vem do índice único")
+	repo.erroAoSalvar = nil
+
+	_, err = svc.RemoverDominio(ctx, o.UUID)
+	require.NoError(t, err)
+	_, err = svc.RemoverDominio(ctx, o.UUID)
+	assert.ErrorIs(t, err, orgmodel.ErrDominioNaoDefinido)
+
+	registrados, err = svc.ListarDominiosAtivos(ctx)
+	require.NoError(t, err)
+	assert.Empty(t, registrados)
+}
+
+func TestCicloCompletoDaApiKey(t *testing.T) {
+	svc, _, chaves, _ := montarServico(t)
+	o, err := svc.Create(context.Background(), orgmodel.CreateInput{Nome: "Acme"})
+	require.NoError(t, err)
+	ctx := ctxDaOrganizacao(o.UUID)
+
+	// Chave em claro nasce uma única vez e nunca coincide com o hash.
+	k, chave, err := svc.CriarApiKey(ctx, o.UUID, ApiKeyEntrada{
+		Nome:               "integração",
+		EscopoOrganization: true,
+		Permissoes:         []string{"identidade:workspace:ler"},
+	})
+	require.NoError(t, err)
+	assert.NotEqual(t, chave, k.KeyHash, "hash persistido não expõe a chave")
+	assert.Contains(t, chave, "wka_")
+
+	_, _, err = svc.CriarApiKey(ctx, o.UUID, ApiKeyEntrada{
+		Nome:                 "loja",
+		WorkspacesPermitidos: []uuid.UUID{uuid.New()},
+		Permissoes:           []string{"identidade:workspace:ler"},
+		ExpiresAt:            ptrTempo(time.Now().UTC().Add(time.Hour)),
+	})
+	require.NoError(t, err)
+
+	itens, total, err := svc.ListarApiKeys(ctx, o.UUID, pagination.Pagination{})
+	require.NoError(t, err)
+	assert.EqualValues(t, 2, total)
+	require.Len(t, itens, 2)
+	require.Len(t, chaves.porOrg[o.UUID], 2)
+
+	// Cross-org: nem ler nem revogar.
+	forasteiro := ctxDaOrganizacao(uuid.New())
+	_, _, err = svc.CriarApiKey(forasteiro, o.UUID, ApiKeyEntrada{Nome: "x", EscopoOrganization: true, Permissoes: []string{"*:*"}})
+	assert.ErrorIs(t, err, ErrNotFound)
+	_, _, err = svc.ListarApiKeys(forasteiro, o.UUID, pagination.Pagination{})
+	assert.ErrorIs(t, err, ErrNotFound)
+	assert.ErrorIs(t, svc.RevogarApiKey(forasteiro, o.UUID, k.UUID), ErrNotFound)
+
+	// Entradas inválidas batem nas sentinelas do modelo.
+	_, _, err = svc.CriarApiKey(ctx, o.UUID, ApiKeyEntrada{
+		Nome:               "ruim",
+		EscopoOrganization: true,
+		Permissoes:         []string{"workspace:ler"},
+	})
+	assert.ErrorIs(t, err, orgmodel.ErrPermissaoInvalida)
+	_, _, err = svc.CriarApiKey(ctx, o.UUID, ApiKeyEntrada{Nome: "sem escopo", Permissoes: []string{"*:*"}})
+	assert.ErrorIs(t, err, orgmodel.ErrEscopoApiKeyInvalido)
+
+	require.NoError(t, svc.RevogarApiKey(ctx, o.UUID, k.UUID))
+	assert.ErrorIs(t, svc.RevogarApiKey(ctx, o.UUID, k.UUID), ErrApiKeyNaoEncontrada, "revogar duas vezes não encontra")
+	require.Len(t, chaves.porOrg[o.UUID], 1)
+}
+
+func ptrTexto(s string) *string       { return &s }
+func ptrTempo(t time.Time) *time.Time { return &t }
