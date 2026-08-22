@@ -17,6 +17,7 @@ import (
 	"time"
 
 	dominioOrganizacao "workspace-api/internal/identidade/domain/organization"
+	dominioWorkspace "workspace-api/internal/identidade/domain/workspace"
 
 	"workspace-api/cmd/server"
 	"workspace-api/cmd/server/routes"
@@ -92,8 +93,8 @@ func Serve(caminhoConfig string) error {
 	// 7. Domínios — subdomínios de internal/identidade/domain na ordem de
 	// dependência (organization → workspace → user); cada adaptador do
 	// middleware acima resolve estes singletons NA CHAMADA. A cascata
-	// organization→workspace entra pelo contrato (contratos.go), provisório
-	// até a F3 ligar o lado do workspace.
+	// organization→workspace entra pelo contrato (contratos.go da
+	// organization) com o adaptador de workspace.go resolvendo NA CHAMADA.
 	db, err := postgres.GetDB()
 	if err != nil {
 		return fmt.Errorf("boot: %w", err)
@@ -103,6 +104,14 @@ func Serve(caminhoConfig string) error {
 		return fmt.Errorf("boot: %w", err)
 	}
 	slog.Info("[BOOTSTRAP-DI] Contêiner Identidade/Organization inicializado.")
+
+	// Cache de resolução por slug: contrato CacheResolucao do subdomínio;
+	// implementação Redis é evolução (#8) — nil é operação normal.
+	_, err = dominioWorkspace.New(db, nil)
+	if err != nil {
+		return fmt.Errorf("boot: %w", err)
+	}
+	slog.Info("[BOOTSTRAP-DI] Contêiner Identidade/Workspace inicializado.")
 
 	// 8. HTTP — sondas e provedor de domínios custom injetados como funções;
 	// o servidor drena requisições em voo antes do fechamento LIFO.

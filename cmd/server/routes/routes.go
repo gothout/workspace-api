@@ -19,6 +19,7 @@ import (
 	ginSwagger "github.com/swaggo/gin-swagger"
 
 	organizacao "workspace-api/internal/identidade/domain/organization"
+	workspace "workspace-api/internal/identidade/domain/workspace"
 	"workspace-api/internal/pkg/config"
 	"workspace-api/internal/pkg/rest_err"
 )
@@ -102,7 +103,10 @@ func registrarConhecidos(dominio, aplicacao *gin.RouterGroup) {
 	registrarRotas("identidade.organization", dominio, func() (Controlador, error) {
 		return organizacao.Use()
 	})
-	// F3+: workspace/user no grupo dominio; F4+: auth; F5+: catalogo na aplicacao.
+	registrarRotas("identidade.workspace", dominio, func() (Controlador, error) {
+		return workspace.Use()
+	})
+	// F4+: user no grupo dominio; auth na aplicacao; F5+: catalogo na aplicacao.
 	_ = aplicacao
 }
 

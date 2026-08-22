@@ -1,18 +1,17 @@
-// Ligação da cadeia de middleware com o banco: adaptadores que implementam os
-// contratos de internal/middleware consultando as tabelas de autorização DIRETAMENTE.
+// Ligação da cadeia de middleware com o negócio: adaptadores que implementam
+// os contratos de internal/middleware.
 //
-// PROVISÓRIO DOCUMENTADO (issue #2 / agents/03): na F1 não há subdomínio para
-// delegar — a consulta vai direta ao SQL canônico. Na F3 (workspace) e na F4
-// (user) estes adaptadores passam a resolver o singleton do subdomínio NA
-// CHAMADA; os contratos do middleware NÃO mudam. O domínio custom white-label
-// (ProvedorDominiosCustom) e a validação de X-Api-Key (ResolvedorApiKeys)
-// entraram na F2 — vivem em organizacao.go, delegando ao subdomínio
-// organization.
+// O ResolvedorWorkspaces delega ao subdomínio workspace desde a F3 — vive em
+// workspace.go, resolvendo o singleton NA CHAMADA. O resolvedor de
+// permissões segue PROVISÓRIO DOCUMENTADO (issue #2 / agents/03): consulta o
+// SQL canônico das tabelas de autorização direto; na F4 passa a delegar ao
+// service do user. Os contratos do middleware NÃO mudam. Os contratos de
+// organization (domínios custom e X-Api-Key) delegam ao subdomínio —
+// organizacao.go.
 package bootstrap
 
 import (
 	"context"
-	"errors"
 	"log/slog"
 
 	"github.com/google/uuid"
@@ -25,9 +24,7 @@ import (
 
 // ligarMiddleware monta a cadeia com adaptadores que resolvem o pool NA
 // CHAMADA (regra do AGENTS.md do bootstrap). Chamada UMA vez no boot,
-// depois das migrations e antes do registro de rotas. Os contratos de
-// organization (domínios custom e X-Api-Key) delegam ao subdomínio —
-// organizacao.go; os resolvedores abaixo seguem provisórios até F3/F4.
+// depois das migrations e antes do registro de rotas.
 func ligarMiddleware(gerenciador *jwt.Manager) error {
 	return middleware.New(middleware.Dependencias{
 		JWT:            gerenciador,
@@ -36,86 +33,6 @@ func ligarMiddleware(gerenciador *jwt.Manager) error {
 		Permissoes:     resolvedorPermissoes{},
 		ApiKeys:        resolvedorApiKeys{},
 	})
-}
-
-// --- Contrato ResolvedorWorkspaces ------------------------------------------
-
-// resolvedorWorkspaces resolve workspace por slug (Host) ou uuid
-// (X-Workspace-Id) na tabela canônica do subdomínio workspace. A busca é a
-// EXCEÇÃO global documentada (agents/03): acontece antes de existir escopo;
-// o resultado nunca vaza para rotas de administração.
-type resolvedorWorkspaces struct{}
-
-// linhaWorkspace é a projeção mínima da tabela identidade_workspace_workspace.
-type linhaWorkspace struct {
-	UUID             uuid.UUID
-	OrganizationUUID uuid.UUID
-	Slug             string
-	Status           string
-}
-
-func (resolvedorWorkspaces) BuscarPorSlug(ctx context.Context, slug string) (*middleware.WorkspaceResolvido, error) {
-	db, err := postgres.GetDB()
-	if err != nil {
-		return nil, err
-	}
-	return buscarWorkspacePorSlug(ctx, db, slug)
-}
-
-func (resolvedorWorkspaces) BuscarPorUUID(ctx context.Context, id uuid.UUID) (*middleware.WorkspaceResolvido, error) {
-	db, err := postgres.GetDB()
-	if err != nil {
-		return nil, err
-	}
-	return buscarWorkspacePorUUID(ctx, db, id)
-}
-
-// Fixos devolve os rótulos de endereço fixo da plataforma (doc 03, regra 8) —
-// Host com um deles NUNCA resolve workspace. Quando o subdomínio workspace
-// nascer (F3), esta lista passa a vir dele; os valores são os mesmos.
-func (resolvedorWorkspaces) Fixos() []string {
-	return []string{"www", "api", "app", "admin", "docs", "status", "mail", "suporte", "painel"}
-}
-
-// buscarWorkspacePorSlug é a FUNÇÃO PURA por trás do adaptador — os testes
-// a exercem direto com o banco efêmero, nunca pelo singleton do processo.
-func buscarWorkspacePorSlug(ctx context.Context, db *gorm.DB, slug string) (*middleware.WorkspaceResolvido, error) {
-	var linha linhaWorkspace
-	err := db.WithContext(ctx).
-		Table("identidade_workspace_workspace").
-		Select("uuid, organization_uuid, slug, status").
-		Where("slug = ?", slug).
-		First(&linha).Error
-	return paraResolvido(&linha), traduzirNaoEncontrado(err)
-}
-
-func buscarWorkspacePorUUID(ctx context.Context, db *gorm.DB, id uuid.UUID) (*middleware.WorkspaceResolvido, error) {
-	var linha linhaWorkspace
-	err := db.WithContext(ctx).
-		Table("identidade_workspace_workspace").
-		Select("uuid, organization_uuid, slug, status").
-		Where("uuid = ?", id).
-		First(&linha).Error
-	return paraResolvido(&linha), traduzirNaoEncontrado(err)
-}
-
-func paraResolvido(linha *linhaWorkspace) *middleware.WorkspaceResolvido {
-	if linha == nil || linha.UUID == uuid.Nil {
-		return nil
-	}
-	return &middleware.WorkspaceResolvido{
-		UUID:             linha.UUID,
-		OrganizationUUID: linha.OrganizationUUID,
-		Slug:             linha.Slug,
-		Ativo:            linha.Status == "ativo",
-	}
-}
-
-func traduzirNaoEncontrado(err error) error {
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return middleware.ErrNaoEncontrado
-	}
-	return err
 }
 
 // --- Contrato ResolvedorPermissoes -------------------------------------------

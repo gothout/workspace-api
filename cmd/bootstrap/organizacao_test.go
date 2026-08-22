@@ -13,7 +13,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	dominioOrganizacao "workspace-api/internal/identidade/domain/organization"
+	dominioWorkspace "workspace-api/internal/identidade/domain/workspace"
 	orgmodel "workspace-api/internal/identidade/model/organization"
+	modelworkspace "workspace-api/internal/identidade/model/workspace"
 	"workspace-api/internal/middleware"
 	"workspace-api/internal/pkg/config"
 	"workspace-api/internal/pkg/orgctx"
@@ -66,11 +68,14 @@ func TestSeedOrganizacaoRaizIdempotente(t *testing.T) {
 }
 
 // Ponta a ponta sobre o esquema migrado: CRUD de organization, unicidade
-// TOTAL do domínio custom, cascata degradada, chaves de API e os adaptadores
-// do middleware (provedor de domínios custom + resolvedor X-Api-Key).
+// TOTAL do domínio custom, chaves de API, adaptadores do middleware (provedor
+// de domínios custom + resolvedor X-Api-Key), subdomínio workspace (slug
+// global, reservados, resolução por Host) e a cascata REAL organization →
+// workspace.
 //
-// O singleton do subdomínio é POR PROCESSO (sync.Once): este teste é o único
-// que o boota neste pacote, amarrando-o ao banco efêmero desta suíte.
+// O singleton é POR PROCESSO (sync.Once): este é o ÚNICO teste do pacote que
+// boota os contêineres — amarrados ao banco efêmero desta suíte; os demais
+// usam funções puras direto.
 func TestSubdominioOrganizationPontaAPonta(t *testing.T) {
 	if !dockerDisponivel(t) {
 		t.Skip("docker indisponível — teste de integração pulado")
@@ -79,6 +84,8 @@ func TestSubdominioOrganizationPontaAPonta(t *testing.T) {
 	configParaOrganization(t)
 	require.NoError(t, semearOrganizacaoRaiz(amb.ctx, amb.db))
 
+	_, err := dominioWorkspace.New(amb.db, nil)
+	require.NoError(t, err)
 	ctrl, err := dominioOrganizacao.New(amb.db, suspendedorWorkspaces{})
 	require.NoError(t, err)
 	require.NotNil(t, ctrl)
@@ -181,12 +188,55 @@ func TestSubdominioOrganizationPontaAPonta(t *testing.T) {
 	assert.ErrorIs(t, err, dominioOrganizacao.ErrDominioEmUso,
 		"índice único TOTAL: domínio removido NÃO se libera (anti-takeover)")
 
-	// --- Inativação com cascata degradada (F3 liga o lado do workspace) --------------
+	// --- Subdomínio workspace (F3) sobre o mesmo banco ------------------------------
+	// Slug único GLOBAL, reservados vindos DO SUBDOMÍNIO e resolução pelos
+	// adaptadores do middleware.
+	svcWs := dominioWorkspace.MustUse().Service
+	wsB1, err := svcWs.Create(ctxB, modelworkspace.CreateInput{Nome: "Filial Sul", Slug: "filial-sul"})
+	require.NoError(t, err)
+	assert.Equal(t, orgB.UUID, wsB1.OrganizationUUID, "escopo vem do ctx, nunca do corpo")
+
+	reservados := []string{"www", "api", "app", "admin", "docs", "status", "mail", "suporte", "painel"}
+	for _, fixo := range reservados {
+		_, err := svcWs.Create(ctxB, modelworkspace.CreateInput{Nome: "Fixo " + fixo, Slug: fixo})
+		assert.ErrorIs(t, err, dominioWorkspace.ErrSlugReservado, "reservado %q nunca é criável", fixo)
+	}
+	assert.ElementsMatch(t, reservados, (resolvedorWorkspaces{}).Fixos(),
+		"lista de rótulos fixos vem do SUBDOMÍNIO, não do adaptador")
+
+	_, err = svcWs.Create(ctxC, modelworkspace.CreateInput{Nome: "Concorrente", Slug: "filial-sul"})
+	assert.ErrorIs(t, err, dominioWorkspace.ErrSlugEmUso,
+		"outra organization NÃO cria o mesmo slug — unicidade é global")
+
+	peloHost, err := (resolvedorWorkspaces{}).BuscarPorSlug(ctxFundo, "filial-sul")
+	require.NoError(t, err)
+	require.NotNil(t, peloHost)
+	assert.True(t, peloHost.Ativo)
+	assert.Equal(t, orgB.UUID, peloHost.OrganizationUUID)
+
+	peloHeader, err := (resolvedorWorkspaces{}).BuscarPorUUID(ctxFundo, wsB1.UUID)
+	require.NoError(t, err)
+	require.NotNil(t, peloHeader)
+	assert.Equal(t, "filial-sul", peloHeader.Slug)
+
+	_, err = (resolvedorWorkspaces{}).BuscarPorSlug(ctxFundo, "slug-fantasma")
+	assert.ErrorIs(t, err, middleware.ErrNaoEncontrado, "inexistente falha fechada")
+
+	// Leitura de administração por organization alheia não vaza existência.
+	_, err = svcWs.Read(ctxC, wsB1.UUID)
+	assert.ErrorIs(t, err, dominioWorkspace.ErrNotFound)
+
+	// --- Inativação com cascata REAL (desde a F3 o lado workspace está ligado) ---
 	inativo := orgmodel.StatusInativo
 	_, err = svc.Update(ctxB, orgB.UUID, orgmodel.UpdateInput{Status: &inativo})
-	require.NoError(t, err, "cascata provisória devolve nil enquanto o workspace não existe")
+	require.NoError(t, err, "cascata suspende os workspaces da organization")
 	_, err = svc.Update(ctxB, orgB.UUID, orgmodel.UpdateInput{Status: &inativo})
 	assert.ErrorIs(t, err, orgmodel.ErrJaInativo)
+
+	peloHost, err = (resolvedorWorkspaces{}).BuscarPorSlug(ctxFundo, "filial-sul")
+	require.NoError(t, err)
+	require.NotNil(t, peloHost)
+	assert.False(t, peloHost.Ativo, "cascata suspendeu o workspace → resolução devolve Ativo=false (404)")
 
 	_, err = svc.Reativar(ctxB, orgB.UUID)
 	require.NoError(t, err)

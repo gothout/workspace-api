@@ -3,18 +3,14 @@
 // AGENTS.md do bootstrap) e traduzem o vocabulário de erro para os contratos
 // de internal/middleware.
 //
-// O suspendedorWorkspaces é PROVISÓRIO DOCUMENTADO (issue #3): a cascata de
-// inativação depende do subdomínio workspace, que só nasce na F3 — enquanto
-// ele não existe, NÃO há workspace algum no banco (a tabela sequer existe),
-// então a cascata é vazia por natureza e o adaptador devolve 0 sem erro, com
-// log. Na F3 este arquivo passa a resolver workspace.Use() NA CHAMADA; nem o
-// contrato (contratos.go da organization) nem o serviço mudam.
+// A cascata organization→workspace (SuspendedorWorkspaces) vive em
+// workspace.go desde a F3, delegando ao subdomínio irmão pelo contrato —
+// nunca chamada direta (regra 4 de agents/01).
 package bootstrap
 
 import (
 	"context"
 	"errors"
-	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
@@ -23,21 +19,6 @@ import (
 	orgmodel "workspace-api/internal/identidade/model/organization"
 	"workspace-api/internal/middleware"
 )
-
-// --- Contrato SuspendedorWorkspaces (cascata organization → workspace) -------
-
-// suspendedorWorkspaces executa a suspensão dos workspaces da organization.
-type suspendedorWorkspaces struct{}
-
-func (suspendedorWorkspaces) SuspenderPorOrganization(ctx context.Context, organizationUUID uuid.UUID) (int, error) {
-	// F3 liga aqui: ctrl, err := workspace.Use(); ... ctrl.Service.Suspender...
-	slog.WarnContext(ctx,
-		"[DEGRADADO] cascata organization→workspace sem subdomínio alvo",
-		"dominio", orgmodel.Dominio, "subdominio", "workspace",
-		"organization_uuid", organizationUUID.String(),
-		"motivo", "subdomínio workspace ainda não inicializado (F3); não há workspace no banco até lá")
-	return 0, nil
-}
 
 var errOrganizationNaoInicializada = errors.New("subdomínio organization não inicializado")
 
