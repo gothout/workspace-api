@@ -69,7 +69,7 @@
         "Acesso de suporte auditado"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "issue": 4,
       "branch": "ox-alpha/fase-3",
       "docs": ["agents/05-padroes-codigo.md", "internal/identidade/domain/workspace/AGENTS.md", "internal/identidade/model/workspace/AGENTS.md"]

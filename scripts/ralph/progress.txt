@@ -107,3 +107,27 @@ Started: 2026-08-22
   - pkill -f "<caminho>" mata o próprio shell do tool (o padrão casa a cmdline);
     usar pkill -x <binário>.
 ---
+
+## 2026-08-22 - F3 (finalização da iteração anterior)
+- A iteração anterior commitou `feat: [F3] - Subdomínio workspace` mas morreu
+  antes dos passos 9-12. Esta iteração verificou a implementação contra o
+  checklist da issue #4 e fechou o que faltava:
+  - Swagger estava STALE no commit da fase (rotas de workspace ausentes em
+    docs/) — regenerado com `swag init -g main.go -o docs`.
+  - prd.json F3 → passes: true; linha #4 no log de agents/06; PR #18 atualizado.
+- Verificação: build/vet/test verdes (testcontainers reais: up→down→up da
+  migration 0005, unicidade global do slug, slug removido não se libera,
+  isolamento por organization, cascata de inativação); arch-go compliance 100
+  coverage 100; rotas rota a rota; cache por interface (nil é normal);
+  suporte auditado `[SUPORTE]`; slugs fixos no service.
+- Docs read: agents/06, AGENTS.md de model/workspace, domain/workspace,
+  internal/, identidade/, db/migrations, cmd/bootstrap, cmd/.
+- **Learnings for future iterations:**
+  - SEMPRE rodar `swag init -g main.go -o docs` antes de commitar rota nova —
+    o grep "workspaces" no swagger.json antigo casava só em descrições alheias;
+    conferir por path completo (`grep '"/api/domain/identidade/workspaces"'`).
+  - Se o commit feat já existe mas o bookkeeping falta, revalidar TUDO (build/
+    test/arch-go/swagger) antes de só carimbar passes:true — o commit anterior
+    pode estar incompleto sem que o log diga.
+  - gcc segue ausente: `-race` continua na CI (invariantes disputadas F3/F4).
+---
