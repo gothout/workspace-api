@@ -38,4 +38,4 @@ Uma linha por issue fechada. Formato: data ISO, issue (número real), arquivos c
 
 | data | issue | arquivos criados/alterados | resultado build/testes | observações |
 |---|---|---|---|---|
-| — | — | — | — | — |
+| 2026-08-22 | #1 (F0) | `main.go`, `configs_example.json`, `arch-go.yml`, `arquitetura_test.go`; `internal/pkg/{config,rest_err,pagination,orgctx,validator}`; `internal/infra/database/postgres`, `internal/infra/database/migrations`, `internal/infra/jwt`; `cmd/cli`, `cmd/bootstrap`, `cmd/server` + `cmd/server/routes` | build/vet/test verdes; arch-go compliance 100 + coverage 100; smoke test end-to-end (`serve` com Postgres efêmero: `/api/status` ok, Swagger 200, 404 padronizado, SIGTERM drena) | `-race` indisponível localmente (sem gcc/CGO) — rodar na CI; migrations runner ignora arquivos `-- manual`; `migrate validate/create` rodam sem conexão |

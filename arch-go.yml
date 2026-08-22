@@ -1,0 +1,46 @@
+version: 1
+threshold:
+  compliance: 100
+  coverage: 100
+dependenciesRules:
+  - package: "workspace-api/internal/pkg"           # folha: só enxerga pkg
+    shouldOnlyDependsOn:
+      internal:
+        - "workspace-api/internal/pkg"
+  - package: "workspace-api/internal/infra"         # infra: só pkg + libs externas — nunca outro infra
+    shouldOnlyDependsOn:
+      internal:
+        - "workspace-api/internal/pkg"
+  - package: "workspace-api/internal/middleware"    # sem {dominio}/domain nem application (ciclo)
+    shouldOnlyDependsOn:
+      internal:
+        - "workspace-api/internal/pkg"
+        - "workspace-api/internal/infra"
+        - "workspace-api/internal.*.model"
+  - package: "workspace-api/internal.*.model"       # modelos expostos: FOLHA do domínio
+    shouldOnlyDependsOn:
+      internal:
+        - "workspace-api/internal/pkg"
+  - package: "workspace-api/internal.*.domain"      # subdomínios de QUALQUER domínio
+    shouldOnlyDependsOn:
+      internal:
+        - "workspace-api/internal/pkg"
+        - "workspace-api/internal/infra"
+        - "workspace-api/internal/middleware"
+        - "workspace-api/internal.*.model"
+  - package: "workspace-api/internal.*.application" # aplicações de QUALQUER domínio
+    shouldOnlyDependsOn:
+      internal:
+        - "workspace-api/internal/pkg"
+        - "workspace-api/internal/infra"
+        - "workspace-api/internal/middleware"
+        - "workspace-api/internal.*.model"
+  - package: "workspace-api/cmd"                    # composição: pode importar todas as camadas e os irmãos de cmd
+    shouldOnlyDependsOn:
+      internal:
+        - "workspace-api/internal"
+        - "workspace-api/cmd"
+  - package: "workspace-api"                        # pacote raiz (main + teste de arquitetura) e docs/ gerado
+    shouldOnlyDependsOn:
+      internal:
+        - "workspace-api"
