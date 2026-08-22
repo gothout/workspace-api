@@ -47,3 +47,32 @@ Started: 2026-08-22
     statement_timeout vem do config do driver pgx (por statement).
   - Issue #1 fecha no merge do PR (Closes #1).
 ---
+
+## 2026-08-22 - F1
+- Autenticação/autorização granular completa: jwt (emissão+validação access/refresh,
+  claims sub/org/wks/name/email/typ, jti único no refresh, interface RevogadorDeRefresh);
+  internal/middleware com contratos.go (ResolvedorWorkspaces, ProvedorDominiosCustom,
+  ResolvedorApiKeys, ResolvedorPermissoes) e cadeia SetContextAuthorization →
+  ResolveWorkspace → RequirePermission fail-closed; migrations 0001 (papel +
+  papel_permissao globais sem escopo) e 0002 (atribuicao); seed idempotente dos 5 papéis;
+  adaptadores provisórios em cmd/bootstrap/middleware.go consultando as tabelas direto;
+  CORS com provedor de domínios custom injetado.
+- Files changed: db/migrations/000{1,2}_*.{up,down}.sql; internal/infra/jwt/{token,revogacao}.go;
+  internal/pkg/orgctx (getter Permissoes); internal/middleware/* (5 arquivos + 4 de teste);
+  cmd/bootstrap/{middleware,seed,middleware_test}.go, bootstrap.go, routes.go; go.mod/go.sum.
+- Docs read: agents/{03,04,05,01,02}, AGENTS.md de middleware, infra/jwt, cmd/bootstrap,
+  pkg/orgctx, infra/database (+migrations), db/migrations.
+- **Learnings for future iterations:**
+  - `*:*` tem 2 segmentos — matcher de curingas precisa de caso especial além do
+    casamento por segmento de 3 partes.
+  - sync.Once envenena o singleton após New falho: cada tentativa de boot em teste
+    precisa ResetarParaTeste antes.
+  - Adaptadores do bootstrap seguem "função pura + método fino que resolve GetDB()":
+    testes de integração usam as funções puras com gorm do efêmero, nunca o singleton.
+  - `gh pr edit` falha neste ambiente (deprecação GraphQL Projects classic) — usar
+    `gh api repos/{owner}/{repo}/pulls/N -X PATCH -f body=...`.
+  - Scan de uuid::text no Raw do gorm: pgx devolve uuid como string; scan direto em
+    uuid.UUID quebra ("converting driver.Value type string to a uint8").
+  - Tabela identidade_workspace_workspace não existe até F3: resolvedor provisório de
+    workspace está ligado mas só vira útil na F3 (500 honesto se chamado antes).
+---

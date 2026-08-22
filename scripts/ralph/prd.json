@@ -35,7 +35,7 @@
         "Seed dos 5 papéis"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "issue": 2,
       "branch": "ox-alpha/fase-1",
       "docs": ["agents/03-identidade-tenancy.md", "internal/middleware/AGENTS.md", "internal/infra/jwt/AGENTS.md", "cmd/bootstrap/AGENTS.md"]
