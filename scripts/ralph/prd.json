@@ -1,6 +1,6 @@
 {
   "project": "workspace-api",
-  "branchName": "ralph/workspace-api",
+  "branchName": "ox-alpha/code",
   "description": "Template de API gerenciadora Go com DDD, hierarchy organization -> workspace -> user",
   "userStories": [
     {
@@ -19,7 +19,7 @@
       "priority": 1,
       "passes": false,
       "issue": 1,
-      "branch": "ralph/fase-0",
+      "branch": "ox-alpha/fase-0",
       "docs": ["agents/README.md", "agents/01-arquitetura-ddd.md", "agents/02-stack-e-infra.md", "agents/04-convencoes-api.md", "agents/05-padroes-codigo.md"]
     },
     {
@@ -37,7 +37,7 @@
       "priority": 2,
       "passes": false,
       "issue": 2,
-      "branch": "ralph/fase-1",
+      "branch": "ox-alpha/fase-1",
       "docs": ["agents/03-identidade-tenancy.md", "internal/middleware/AGENTS.md", "internal/infra/jwt/AGENTS.md", "cmd/bootstrap/AGENTS.md"]
     },
     {
@@ -54,7 +54,7 @@
       "priority": 3,
       "passes": false,
       "issue": 3,
-      "branch": "ralph/fase-2",
+      "branch": "ox-alpha/fase-2",
       "docs": ["agents/05-padroes-codigo.md", "internal/identidade/domain/organization/AGENTS.md", "internal/identidade/model/organization/AGENTS.md"]
     },
     {
@@ -71,7 +71,7 @@
       "priority": 4,
       "passes": false,
       "issue": 4,
-      "branch": "ralph/fase-3",
+      "branch": "ox-alpha/fase-3",
       "docs": ["agents/05-padroes-codigo.md", "internal/identidade/domain/workspace/AGENTS.md", "internal/identidade/model/workspace/AGENTS.md"]
     },
     {
@@ -88,7 +88,7 @@
       "priority": 5,
       "passes": false,
       "issue": 5,
-      "branch": "ralph/fase-4",
+      "branch": "ox-alpha/fase-4",
       "docs": ["agents/05-padroes-codigo.md", "internal/identidade/domain/user/AGENTS.md", "internal/identidade/model/user/AGENTS.md", "internal/identidade/application/auth/AGENTS.md"]
     },
     {
@@ -105,7 +105,7 @@
       "priority": 6,
       "passes": false,
       "issue": 6,
-      "branch": "ralph/fase-5",
+      "branch": "ox-alpha/fase-5",
       "docs": ["agents/04-convencoes-api.md", "internal/identidade/application/catalogo/AGENTS.md", "internal/identidade/application/AGENTS.md"]
     },
     {
@@ -122,7 +122,7 @@
       "priority": 7,
       "passes": false,
       "issue": 7,
-      "branch": "ralph/fase-6",
+      "branch": "ox-alpha/fase-6",
       "docs": ["agents/01-arquitetura-ddd.md", "agents/06-plano-execucao.md"]
     }
   ]
