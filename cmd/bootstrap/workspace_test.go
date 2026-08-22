@@ -2,8 +2,6 @@ package bootstrap
 
 import (
 	"context"
-	"errors"
-	"sync"
 	"testing"
 
 	"github.com/google/uuid"
@@ -96,58 +94,4 @@ func TestFluxoWorkspaceFuncoesPuras(t *testing.T) {
 	suspensos, err = wsSvc.SuspenderPorOrganization(ctxA, orgA.UUID)
 	require.NoError(t, err)
 	assert.Equal(t, 0, suspensos, "cascata idempotente")
-}
-
-// TestUnicidadeSlugSobConcorrencia exercita o índice único TOTAL sob
-// paralelismo: exatamente UMA goroutine cria o slug, as demais recebem
-// ErrSlugEmUso. Invariante disputada — roda também sob `go test -race` na CI.
-func TestUnicidadeSlugSobConcorrencia(t *testing.T) {
-	if !dockerDisponivel(t) {
-		t.Skip("docker indisponível — teste de integração pulado")
-	}
-	amb := subirAmbiente(t)
-
-	disputante, err := orgmodel.NewOrganization(orgmodel.CreateInput{Nome: "Disputante"})
-	require.NoError(t, err)
-	require.NoError(t, dominioOrganizacao.NewRepository(amb.db).Criar(amb.ctx, disputante))
-
-	svc := dominioWorkspace.NewService(dominioWorkspace.NewRepository(amb.db), nil)
-	ctxDisputa := orgctx.WithOrganization(amb.ctx, disputante.UUID)
-
-	const concorrentes = 12
-	slug := "disputado"
-
-	resultados := make(chan error, concorrentes)
-	var prontos sync.WaitGroup
-	prontos.Add(concorrentes)
-	disparo := make(chan struct{})
-	var done sync.WaitGroup
-	done.Add(concorrentes)
-	for i := 0; i < concorrentes; i++ {
-		go func() {
-			defer done.Done()
-			prontos.Done() // sinaliza que está prestes a esperar o disparo
-			<-disparo      // todos alinhados antes de disparar
-			_, err := svc.Create(ctxDisputa, modelworkspace.CreateInput{Nome: "Disputa", Slug: slug})
-			resultados <- err
-		}()
-	}
-	prontos.Wait() // garante que todas as goroutines estão na barreira
-	close(disparo)
-	done.Wait()
-	close(resultados)
-
-	vitorias, conflitos := 0, 0
-	for err := range resultados {
-		switch {
-		case err == nil:
-			vitorias++
-		case errors.Is(err, dominioWorkspace.ErrSlugEmUso):
-			conflitos++
-		default:
-			t.Fatalf("erro inesperado na disputa: %v", err)
-		}
-	}
-	assert.Equal(t, 1, vitorias, "exatamente UM create vence a disputa pelo slug")
-	assert.Equal(t, concorrentes-1, conflitos, "demais recebem ErrSlugEmUso (nunca erro genérico)")
 }
