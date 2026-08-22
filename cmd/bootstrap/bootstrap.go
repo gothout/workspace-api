@@ -75,16 +75,28 @@ func Serve(caminhoConfig string) error {
 		}
 	}
 
-	// 6. Middleware + domínios/aplicações entram aqui nas fases F1+ — os
-	// adaptadores resolvem os singletons NA CHAMADA, então sobem antes dos
-	// controllers que consomem as rotas.
+	// 6. Middleware — cadeia de auth/resolução/autorização ligada por
+	// adaptadores que resolvem NA CHAMADA (cmd/bootstrap/middleware.go);
+	// sobe antes dos controllers que consomem as funções de pacote.
+	gerenciadorJWT, err := jwt.Get()
+	if err != nil {
+		return fmt.Errorf("boot: %w", err)
+	}
+	if err := ligarMiddleware(gerenciadorJWT); err != nil {
+		return fmt.Errorf("boot: middleware: %w", err)
+	}
+	slog.Info("[BOOTSTRAP] middleware da cadeia de autorização inicializado")
 
-	// 7. HTTP — sondas injetadas como funções; o servidor drena requisições
-	// em voo antes deste return liberar o fechamento LIFO.
+	// 7. Domínios/aplicações entram aqui nas fases F2+ — os adaptadores do
+	// middleware resolvem os singletons na chamada, sem conhecer o concreto.
+
+	// 8. HTTP — sondas e provedor de domínios custom injetados como funções;
+	// o servidor drena requisições em voo antes do fechamento LIFO.
 	engine := routes.Montar(routes.Opcoes{
-		App:        cfg.App,
-		Cors:       cfg.Server.HTTP.Cors,
-		SondaBanco: postgres.Ping,
+		App:            cfg.App,
+		Cors:           cfg.Server.HTTP.Cors,
+		SondaBanco:     postgres.Ping,
+		DominiosCustom: dominiosCustomParaCors,
 	})
 	readTimeout, writeTimeout, idleTimeout := cfg.Server.HTTP.Timeouts()
 	servidor := server.Novo(engine, server.Opcoes{
@@ -225,17 +237,9 @@ func MigrateCreate(caminhoConfig, descricao string) (string, string, error) {
 	return migrations.Create(op.cfg.Databases.Migrations.Path, descricao)
 }
 
-// Seed roda dados mínimos idempotentes — NUNCA automático no boot. Os seeds
-// de papéis entram na Fase 1; hoje não há nada a semear.
-func Seed(caminhoConfig string) error {
-	op, err := abrirOperacao(caminhoConfig, true)
-	if err != nil {
-		return err
-	}
-	defer op.fechar()
-	slog.Info("[SEED] nada a semear nesta fase — papéis da plataforma entram na Fase 1")
-	return nil
-}
+// Seed roda dados mínimos idempotentes — NUNCA automático no boot. Os 5
+// papéis globais da plataforma e suas permissões estão em seed.go.
+// (implementação movida para seed.go na F1)
 
 // --- Adaptadores ------------------------------------------------------------
 

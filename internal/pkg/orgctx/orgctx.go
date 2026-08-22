@@ -9,6 +9,7 @@ package orgctx
 import (
 	"context"
 	"errors"
+	"sort"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -83,7 +84,9 @@ func RayTrace(ctx context.Context) string {
 	return v
 }
 
-// TemPermissao confere se a permissão granular está nas efetivas do ctx.
+// TemPermissao confere se a permissão granular está nas efetivas do ctx —
+// casamento EXATO; curingas (ex.: identidade:workspace:*) precisam do
+// matcher do middleware, que usa Permissoes().
 func TemPermissao(ctx context.Context, permissao string) bool {
 	conjunto, ok := ctx.Value(chavePermissoes).(map[string]struct{})
 	if !ok {
@@ -91,6 +94,22 @@ func TemPermissao(ctx context.Context, permissao string) bool {
 	}
 	_, presente := conjunto[permissao]
 	return presente
+}
+
+// Permissoes devolve TODAS as permissões efetivas injetadas no ctx, em ordem
+// determinística — inclusive curingas; quem interpreta curinga é o matcher
+// da autorização, não o repositório.
+func Permissoes(ctx context.Context) []string {
+	conjunto, ok := ctx.Value(chavePermissoes).(map[string]struct{})
+	if !ok {
+		return nil
+	}
+	lista := make([]string, 0, len(conjunto))
+	for p := range conjunto {
+		lista = append(lista, p)
+	}
+	sort.Strings(lista)
+	return lista
 }
 
 // Scope aplica o filtro de tenancy COMPLETO (organization E workspace) à

@@ -26,12 +26,14 @@ var (
 	ErrNaoInicializado = errors.New("jwt não inicializado: chame InitJWT no boot")
 )
 
-// Manager carrega os parâmetros assinados no boot; a lógica de emissão e
-// verificação de tokens entra na Fase 1 (middleware fail-closed).
+// Manager carrega os parâmetros assinados no boot; a emissão e verificação
+// de tokens está em token.go. O revogador é opcional (revogacao.go) —
+// interface declarada aqui dentro, implementação ligada no bootstrap.
 type Manager struct {
 	segredo    []byte
 	ttlAccess  time.Duration
 	ttlRefresh time.Duration
+	revogador  RevogadorDeRefresh
 }
 
 // TTLAccess devolve a validade do access token.

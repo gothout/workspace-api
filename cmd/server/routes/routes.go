@@ -32,12 +32,16 @@ const (
 	RotaDoc    = "/doc"
 )
 
-// Opções carregam o que o engine precisa do boot — sondas injetadas pelo
-// bootstrap, nunca importadas daqui.
+// Opcoes carregam o que o engine precisa do boot — sondas e domínios custom
+// injetados pelo bootstrap, nunca importados daqui.
 type Opcoes struct {
 	App        config.AppConfig
 	Cors       config.CorsConfig
 	SondaBanco func(context.Context) error
+	// DominiosCustom devolve os domínios white-label registrados pelas
+	// organizations (lowercase, sem porta); nil = só o domínio-base. Erro na
+	// consulta recusa a origem (fail-closed), nunca abre.
+	DominiosCustom func(context.Context) ([]string, error)
 }
 
 // Controlador é o que todo subdomínio expõe para pendurar rotas.
@@ -112,9 +116,9 @@ func middlewareAccessLog() gin.HandlerFunc {
 }
 
 // politicaCors aceita origens do domínio-base da plataforma (inclusive
-// subdomínios *.{base_domain}) e as exatas extras da config; domínios custom
-// das organizations entram na Fase 2 (white-label). Origem fora da lista é
-// recusada.
+// subdomínios *.{base_domain}), as exatas extras da config e os domínios
+// custom registrados pelas organizations (white-label) — casamento por host
+// PARSEADO, nunca HasSuffix em string crua (`evil-{base_domain}` não passa).
 func politicaCors(opcoes Opcoes) gin.HandlerFunc {
 	baseDomain := strings.ToLower(strings.TrimSpace(opcoes.App.BaseDomain))
 	extras := map[string]bool{}
@@ -122,7 +126,7 @@ func politicaCors(opcoes Opcoes) gin.HandlerFunc {
 		extras[strings.ToLower(extra)] = true
 	}
 	configurado := cors.Config{
-		AllowOriginFunc: func(origem string) bool {
+		AllowOriginWithContextFunc: func(c *gin.Context, origem string) bool {
 			u, err := url.Parse(strings.ToLower(origem))
 			if err != nil || u.Hostname() == "" {
 				return false
@@ -131,7 +135,10 @@ func politicaCors(opcoes Opcoes) gin.HandlerFunc {
 			if baseDomain != "" && (host == baseDomain || strings.HasSuffix(host, "."+baseDomain)) {
 				return true
 			}
-			return extras[origem] || extras[host]
+			if extras[origem] || extras[host] {
+				return true
+			}
+			return origemEmDominioCustom(opcoes, c.Request.Context(), host)
 		},
 		AllowMethods:     []string{http.MethodGet, http.MethodPost, http.MethodPatch, http.MethodPut, http.MethodDelete, http.MethodOptions},
 		AllowHeaders:     []string{"Authorization", "X-Api-Key", "X-Workspace-Id", "X-Request-Id", "Content-Type"},
@@ -140,6 +147,26 @@ func politicaCors(opcoes Opcoes) gin.HandlerFunc {
 		MaxAge:           12 * time.Hour,
 	}
 	return cors.New(configurado)
+}
+
+// origemEmDominioCustom casa o host da origem contra os domínios custom
+// registrados; falha de consulta recusa (fail-closed) com log.
+func origemEmDominioCustom(opcoes Opcoes, ctx context.Context, host string) bool {
+	if opcoes.DominiosCustom == nil {
+		return false
+	}
+	dominios, err := opcoes.DominiosCustom(ctx)
+	if err != nil {
+		slog.ErrorContext(ctx, "cors.dominios_custom_falharam", "causa", err.Error())
+		return false
+	}
+	for _, dominio := range dominios {
+		dominio = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(dominio), "."))
+		if dominio != "" && (host == dominio || strings.HasSuffix(host, "."+dominio)) {
+			return true
+		}
+	}
+	return false
 }
 
 // registrarRotasSistema: GET /api/status para sondas (montada AQUI, fora das
