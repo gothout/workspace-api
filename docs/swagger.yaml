@@ -148,6 +148,19 @@ definitions:
       total:
         type: integer
     type: object
+  pagination.Response-workspace_WorkspaceResponseDto:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/workspace.WorkspaceResponseDto'
+        type: array
+      page:
+        type: integer
+      page_size:
+        type: integer
+      total:
+        type: integer
+    type: object
   rest_err.RestErr:
     properties:
       code:
@@ -157,6 +170,50 @@ definitions:
       message:
         type: string
       ray_trace:
+        type: string
+    type: object
+  workspace.CreateWorkspaceRequestDto:
+    properties:
+      nome:
+        maxLength: 120
+        minLength: 2
+        type: string
+      slug:
+        description: 'slugdns: tag do pkg/validator'
+        maxLength: 63
+        minLength: 3
+        type: string
+    required:
+    - nome
+    - slug
+    type: object
+  workspace.UpdateWorkspaceRequestDto:
+    properties:
+      nome:
+        maxLength: 120
+        minLength: 2
+        type: string
+      status:
+        enum:
+        - ativo
+        - inativo
+        type: string
+    type: object
+  workspace.WorkspaceResponseDto:
+    properties:
+      created_at:
+        type: string
+      nome:
+        type: string
+      organization_uuid:
+        type: string
+      slug:
+        type: string
+      status:
+        type: string
+      updated_at:
+        type: string
+      uuid:
         type: string
     type: object
 info:
@@ -614,4 +671,256 @@ paths:
       summary: Aponta o domínio custom white-label
       tags:
       - Identidade · Organization
+  /api/domain/identidade/workspaces:
+    get:
+      description: Lista paginada dos workspaces da organization, com filtros
+      parameters:
+      - description: UUID do workspace (fallback quando o host não tem subdomínio)
+        in: header
+        name: X-Workspace-Id
+        type: string
+      - description: Página (default 1)
+        in: query
+        name: page
+        type: integer
+      - description: Itens por página (teto 100)
+        in: query
+        name: pageSize
+        type: integer
+      - description: Filtro por nome
+        in: query
+        name: nome
+        type: string
+      - description: Filtro por status (ativo|inativo)
+        in: query
+        name: status
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/pagination.Response-workspace_WorkspaceResponseDto'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/rest_err.RestErr'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/rest_err.RestErr'
+      security:
+      - BearerAuth: []
+      summary: Lista workspaces
+      tags:
+      - Identidade · Workspace
+    post:
+      consumes:
+      - application/json
+      description: Cria workspace na organization autenticada, validando slug único
+        global e reservados
+      parameters:
+      - description: UUID do workspace (fallback quando o host não tem subdomínio)
+        in: header
+        name: X-Workspace-Id
+        type: string
+      - description: Dados do workspace
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/workspace.CreateWorkspaceRequestDto'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/workspace.WorkspaceResponseDto'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/rest_err.RestErr'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/rest_err.RestErr'
+        "409":
+          description: Slug em uso
+          schema:
+            $ref: '#/definitions/rest_err.RestErr'
+        "422":
+          description: Slug reservado pela plataforma
+          schema:
+            $ref: '#/definitions/rest_err.RestErr'
+      security:
+      - BearerAuth: []
+      summary: Cria um workspace
+      tags:
+      - Identidade · Workspace
+  /api/domain/identidade/workspaces/{uuid}:
+    delete:
+      description: Remoção lógica do workspace no escopo da organization; o slug removido
+        NÃO se libera (índice único total — anti-takeover)
+      parameters:
+      - description: UUID do workspace (fallback quando o host não tem subdomínio)
+        in: header
+        name: X-Workspace-Id
+        type: string
+      - description: UUID do workspace
+        in: path
+        name: uuid
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: UUID malformado
+          schema:
+            $ref: '#/definitions/rest_err.RestErr'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/rest_err.RestErr'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/rest_err.RestErr'
+      security:
+      - BearerAuth: []
+      summary: Remove um workspace
+      tags:
+      - Identidade · Workspace
+    get:
+      description: Devolve o workspace no escopo da organization resolvida — workspace
+        de organization alheia não se distingue de inexistente
+      parameters:
+      - description: UUID do workspace (fallback quando o host não tem subdomínio)
+        in: header
+        name: X-Workspace-Id
+        type: string
+      - description: UUID do workspace
+        in: path
+        name: uuid
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/workspace.WorkspaceResponseDto'
+        "400":
+          description: UUID malformado
+          schema:
+            $ref: '#/definitions/rest_err.RestErr'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/rest_err.RestErr'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/rest_err.RestErr'
+      security:
+      - BearerAuth: []
+      summary: Consulta um workspace
+      tags:
+      - Identidade · Workspace
+    patch:
+      consumes:
+      - application/json
+      description: Atualização parcial; inativar via PATCH suspende a resolução pelo
+        Host; reativação é ação própria
+      parameters:
+      - description: UUID do workspace (fallback quando o host não tem subdomínio)
+        in: header
+        name: X-Workspace-Id
+        type: string
+      - description: UUID do workspace
+        in: path
+        name: uuid
+        required: true
+        type: string
+      - description: Campos a atualizar
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/workspace.UpdateWorkspaceRequestDto'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/workspace.WorkspaceResponseDto'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/rest_err.RestErr'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/rest_err.RestErr'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/rest_err.RestErr'
+        "422":
+          description: Transição de estado proibida
+          schema:
+            $ref: '#/definitions/rest_err.RestErr'
+      security:
+      - BearerAuth: []
+      summary: Atualiza um workspace
+      tags:
+      - Identidade · Workspace
+  /api/domain/identidade/workspaces/{uuid}/acoes/reativar:
+    post:
+      description: 'Ação de negócio própria: devolve o workspace ao ar e a resolução
+        pelo Host volta imediatamente'
+      parameters:
+      - description: UUID do workspace (fallback quando o host não tem subdomínio)
+        in: header
+        name: X-Workspace-Id
+        type: string
+      - description: UUID do workspace
+        in: path
+        name: uuid
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/workspace.WorkspaceResponseDto'
+        "400":
+          description: UUID malformado
+          schema:
+            $ref: '#/definitions/rest_err.RestErr'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/rest_err.RestErr'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/rest_err.RestErr'
+        "422":
+          description: Já está ativo
+          schema:
+            $ref: '#/definitions/rest_err.RestErr'
+      security:
+      - BearerAuth: []
+      summary: Reativa um workspace
+      tags:
+      - Identidade · Workspace
 swagger: "2.0"

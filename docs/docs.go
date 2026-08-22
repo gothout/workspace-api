@@ -701,6 +701,391 @@ const docTemplate = `{
                     }
                 }
             }
+        },
+        "/api/domain/identidade/workspaces": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Lista paginada dos workspaces da organization, com filtros",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Identidade · Workspace"
+                ],
+                "summary": "Lista workspaces",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "UUID do workspace (fallback quando o host não tem subdomínio)",
+                        "name": "X-Workspace-Id",
+                        "in": "header"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Página (default 1)",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Itens por página (teto 100)",
+                        "name": "pageSize",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filtro por nome",
+                        "name": "nome",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filtro por status (ativo|inativo)",
+                        "name": "status",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/pagination.Response-workspace_WorkspaceResponseDto"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Cria workspace na organization autenticada, validando slug único global e reservados",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Identidade · Workspace"
+                ],
+                "summary": "Cria um workspace",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "UUID do workspace (fallback quando o host não tem subdomínio)",
+                        "name": "X-Workspace-Id",
+                        "in": "header"
+                    },
+                    {
+                        "description": "Dados do workspace",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/workspace.CreateWorkspaceRequestDto"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/workspace.WorkspaceResponseDto"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "409": {
+                        "description": "Slug em uso",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "422": {
+                        "description": "Slug reservado pela plataforma",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/domain/identidade/workspaces/{uuid}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Devolve o workspace no escopo da organization resolvida — workspace de organization alheia não se distingue de inexistente",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Identidade · Workspace"
+                ],
+                "summary": "Consulta um workspace",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "UUID do workspace (fallback quando o host não tem subdomínio)",
+                        "name": "X-Workspace-Id",
+                        "in": "header"
+                    },
+                    {
+                        "type": "string",
+                        "description": "UUID do workspace",
+                        "name": "uuid",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/workspace.WorkspaceResponseDto"
+                        }
+                    },
+                    "400": {
+                        "description": "UUID malformado",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Remoção lógica do workspace no escopo da organization; o slug removido NÃO se libera (índice único total — anti-takeover)",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Identidade · Workspace"
+                ],
+                "summary": "Remove um workspace",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "UUID do workspace (fallback quando o host não tem subdomínio)",
+                        "name": "X-Workspace-Id",
+                        "in": "header"
+                    },
+                    {
+                        "type": "string",
+                        "description": "UUID do workspace",
+                        "name": "uuid",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "400": {
+                        "description": "UUID malformado",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    }
+                }
+            },
+            "patch": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Atualização parcial; inativar via PATCH suspende a resolução pelo Host; reativação é ação própria",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Identidade · Workspace"
+                ],
+                "summary": "Atualiza um workspace",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "UUID do workspace (fallback quando o host não tem subdomínio)",
+                        "name": "X-Workspace-Id",
+                        "in": "header"
+                    },
+                    {
+                        "type": "string",
+                        "description": "UUID do workspace",
+                        "name": "uuid",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Campos a atualizar",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/workspace.UpdateWorkspaceRequestDto"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/workspace.WorkspaceResponseDto"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "422": {
+                        "description": "Transição de estado proibida",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/domain/identidade/workspaces/{uuid}/acoes/reativar": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Ação de negócio própria: devolve o workspace ao ar e a resolução pelo Host volta imediatamente",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Identidade · Workspace"
+                ],
+                "summary": "Reativa um workspace",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "UUID do workspace (fallback quando o host não tem subdomínio)",
+                        "name": "X-Workspace-Id",
+                        "in": "header"
+                    },
+                    {
+                        "type": "string",
+                        "description": "UUID do workspace",
+                        "name": "uuid",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/workspace.WorkspaceResponseDto"
+                        }
+                    },
+                    "400": {
+                        "description": "UUID malformado",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "422": {
+                        "description": "Já está ativo",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    }
+                }
+            }
         }
     },
     "definitions": {
@@ -927,6 +1312,26 @@ const docTemplate = `{
                 }
             }
         },
+        "pagination.Response-workspace_WorkspaceResponseDto": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/workspace.WorkspaceResponseDto"
+                    }
+                },
+                "page": {
+                    "type": "integer"
+                },
+                "page_size": {
+                    "type": "integer"
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
         "rest_err.RestErr": {
             "type": "object",
             "properties": {
@@ -940,6 +1345,69 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "ray_trace": {
+                    "type": "string"
+                }
+            }
+        },
+        "workspace.CreateWorkspaceRequestDto": {
+            "type": "object",
+            "required": [
+                "nome",
+                "slug"
+            ],
+            "properties": {
+                "nome": {
+                    "type": "string",
+                    "maxLength": 120,
+                    "minLength": 2
+                },
+                "slug": {
+                    "description": "slugdns: tag do pkg/validator",
+                    "type": "string",
+                    "maxLength": 63,
+                    "minLength": 3
+                }
+            }
+        },
+        "workspace.UpdateWorkspaceRequestDto": {
+            "type": "object",
+            "properties": {
+                "nome": {
+                    "type": "string",
+                    "maxLength": 120,
+                    "minLength": 2
+                },
+                "status": {
+                    "type": "string",
+                    "enum": [
+                        "ativo",
+                        "inativo"
+                    ]
+                }
+            }
+        },
+        "workspace.WorkspaceResponseDto": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "nome": {
+                    "type": "string"
+                },
+                "organization_uuid": {
+                    "type": "string"
+                },
+                "slug": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "uuid": {
                     "type": "string"
                 }
             }
