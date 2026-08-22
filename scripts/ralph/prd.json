@@ -120,7 +120,7 @@
         "README de uso do template finalizado"
       ],
       "priority": 7,
-      "passes": false,
+      "passes": true,
       "issue": 7,
       "branch": "ox-alpha/fase-6",
       "docs": ["agents/01-arquitetura-ddd.md", "agents/06-plano-execucao.md"]

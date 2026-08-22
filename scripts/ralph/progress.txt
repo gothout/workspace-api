@@ -31,6 +31,15 @@
 - Todo caminho interno do service que grava/consulta por repositório
   escopado precisa do MESMO ctx escopado — repassar o ctx "cru" para uma
   chamada interna quebra fail-closed silenciosamente (virou 500 no smoke).
+- Cobertura Swagger executável: bootar os singletons UMA vez por pacote de
+  teste sobre postgres efêmero, montar o engine real e comparar
+  engine.Routes() × docs/swagger.json nos dois sentidos (normalizar `:p` →
+  `{p}`; excluir /api/status, /doc, /doc/*qualquer).
+- Conferência do grafo de dependências como gate: `go list -json ./...` +
+  classificação por camada no teste raiz reprova aresta proibida do doc 01
+  sem depender de ferramenta GUI.
+- `go test -race` precisa de CGO+gcc no ambiente (apt-get install gcc;
+  CGO_ENABLED=1) — invariantes disputadas rodam localmente desde a F6.
 
 Started: 2026-08-22
 ---
@@ -228,4 +237,50 @@ Started: 2026-08-22
     explícita no agregador do bootstrap para a forma única da application.
   - Edit tool em linha gigante de tabela markdown: oldString curto pode
     engolir o cabeçalho da linha seguinte — conferir grep depois.
+---
+
+## 2026-08-22 - F6
+- Hardening do template fechado (última story do PRD):
+  - Concorrência: `cmd/bootstrap/concorrencia_test.go` com barreira de
+    disparo + `aquecerPool` (conexões abertas antes da largada); disputa do
+    slug (movida de workspace_test.go) e NOVA disputa de e-mail — ambas 12
+    goroutines, exatamente 1 vencedora, demais recebem a sentinela de
+    conflito; e-mail também provado livre entre organizations (índice parcial).
+  - Cobertura Swagger: `cmd/bootstrap/swagger_cobertura_test.go` boota os 5
+    singletons sobre o postgres efêmero, monta o engine REAL via routes.Montar
+    e compara rotas × docs/swagger.json nos DOIS sentidos (gin `:p` → `{p}`).
+  - Dependency Graph: módulo do Go Architect não compila no toolchain atual
+    (x/tools antigo/tokeninternal) e é GUI sem headless — a conferência virou
+    gate executável equivalente: `grafo_dependencias_test.go` na raiz roda
+    `go list -json ./...`, classifica por camada e reprova as arestas
+    proibidas do doc 01; imprime arestas por par de camadas no log.
+  - README.md reescrito: status real, como subir (configs_example → configs,
+    migrations automáticas no boot), CLI migrate/seed, como criar subdomínio
+    novo passo a passo, como o front consome os catálogos, deploy ops.
+  - AGENTS.md revisados: middleware (nota do resolvedor provisório F1→F4
+    atualizada para o estado atual), bootstrap (arquivos-frente reais).
+- Checks: build/vet/test verdes; **`go test -race ./...` VERDE localmente**
+  (gcc instalado via apt neste ambiente — CGO_ENABLED=1); arch-go 100/100;
+  cobertura Swagger verde nos dois sentidos.
+- Files changed: cmd/bootstrap/{concorrencia,swagger_cobertura}_test.go;
+  cmd/bootstrap/workspace_test.go (teste movido); grafo_dependencias_test.go;
+  README.md; internal/middleware/AGENTS.md; cmd/bootstrap/AGENTS.md;
+  agents/06; prd.json; progress.txt.
+- Docs read: issue #7, agents/01 (validação da arquitetura), agents/06,
+  AGENTS.md raiz, AGENTS.md de cmd/{,bootstrap}, cmd/server/routes,
+  internal/, internal/identidade{,/domain,/domain/workspace,/domain/user},
+  internal/middleware, db/migrations.
+- **Learnings for future iterations:**
+  - `-race` exige CGO+gcc: `apt-get install gcc` resolveu no ambiente; rodar
+    como `CGO_ENABLED=1 go test -race ./...` (o default aqui era CGO_ENABLED=0).
+  - Teste em pacote X não pode importar pacote que importa X (ciclo): o teste
+    de Swagger morou no bootstrap (que já importa routes) por isso.
+  - Singletons dos subdomínios podem ser bootados em teste UMA vez por
+    processo/pacote — o teste de cobertura Swagger é O único que faz isso em
+    cmd/bootstrap; os demais seguem funções puras.
+  - go install de ferramentas com x/tools velho quebra no Go 1.25
+    (tokeninternal: "invalid array length -delta * delta") — swag@latest ok,
+    arch-go (novo path github.com/arch-go/arch-go) ok, go-architect morto.
+  - engine.Routes() devolve wildcards gin (`:uuid`) — normalizar para `{uuid}`
+    antes de comparar com OpenAPI; excluir /api/status, /doc e /doc/*qualquer.
 ---
