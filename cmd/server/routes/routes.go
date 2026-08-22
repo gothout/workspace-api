@@ -19,6 +19,7 @@ import (
 	ginSwagger "github.com/swaggo/gin-swagger"
 
 	aplicacaoauth "workspace-api/internal/identidade/application/auth"
+	aplicacaocatalogo "workspace-api/internal/identidade/application/catalogo"
 	organizacao "workspace-api/internal/identidade/domain/organization"
 	usuario "workspace-api/internal/identidade/domain/user"
 	workspace "workspace-api/internal/identidade/domain/workspace"
@@ -93,7 +94,7 @@ func Montar(opcoes Opcoes) *gin.Engine {
 	// auth é declarada DENTRO de Routes(), rota a rota, nunca no grupo.
 	dominio := engine.Group(PrefixoDominio)
 	aplicacao := engine.Group(PrefixoAplicacao)
-	registrarConhecidos(dominio, aplicacao)
+	registrarConhecidos(engine, dominio, aplicacao)
 
 	return engine
 }
@@ -101,7 +102,7 @@ func Montar(opcoes Opcoes) *gin.Engine {
 // registrarConhecidos pendura os controllers já inicializados nos grupos.
 // Engine montado por teste não passa pelo boot: subdomínio ausente = rota
 // não sobe, com motivo no log (nunca pânico, nunca rota aberta).
-func registrarConhecidos(dominio, aplicacao *gin.RouterGroup) {
+func registrarConhecidos(engine *gin.Engine, dominio, aplicacao *gin.RouterGroup) {
 	registrarRotas("identidade.organization", dominio, func() (Controlador, error) {
 		return organizacao.Use()
 	})
@@ -114,7 +115,17 @@ func registrarConhecidos(dominio, aplicacao *gin.RouterGroup) {
 	registrarRotas("identidade.auth", aplicacao, func() (Controlador, error) {
 		return aplicacaoauth.Use()
 	})
-	// F5+: catalogo na aplicacao.
+	// A aplicação catalogo pendura rotas nas DUAS casas: o grupo
+	// /api/application e a rota de sistema /api/system/errors direto no
+	// engine — exceção de prefixo decidida no doc 01/04. Sem boot, nenhuma
+	// das duas sobe (mesma regra de subdomínio ausente).
+	if ctrl, err := aplicacaocatalogo.Use(); err == nil {
+		ctrl.Routes(aplicacao)
+		ctrl.RoutesSistema(engine)
+	} else {
+		slog.Warn("rotas não registradas: aplicação não inicializada",
+			"subdominio", "identidade.catalogo", "motivo", err.Error())
+	}
 }
 
 // middlewareAccessLog ocupa o slot do access log: linha estruturada por

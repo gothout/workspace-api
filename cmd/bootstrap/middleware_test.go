@@ -206,7 +206,7 @@ func TestResolvedorPermissoesViaServiceDoUserSobreEsquemaReal(t *testing.T) {
 
 	permissoes, err := svc.PermissoesEfetivas(ctxOrg, operador, wsA)
 	require.NoError(t, err)
-	assert.ElementsMatch(t, []string{"identidade:workspace:ler"}, permissoes)
+	assert.ElementsMatch(t, []string{"identidade:workspace:ler", "identidade:catalogo:ler"}, permissoes)
 
 	// Suporte auditado: dono entra em OUTRO workspace da própria organization.
 	vinculo, err = svc.TemVinculo(ctxOrg, dono, wsA2)
@@ -216,7 +216,7 @@ func TestResolvedorPermissoesViaServiceDoUserSobreEsquemaReal(t *testing.T) {
 	permissoes, err = svc.PermissoesEfetivas(ctxOrg, dono, wsA2)
 	require.NoError(t, err)
 	assert.ElementsMatch(t, []string{"identidade:workspace:*", "identidade:user:*",
-		"identidade:organization:gerenciar_apikeys"}, permissoes)
+		"identidade:organization:gerenciar_apikeys", "identidade:catalogo:ler"}, permissoes)
 
 	// Sem vínculo e sem suporte: negativa limpa (forasteiro nem existe aqui).
 	forasteiro := uuid.MustParse("cccccccc-0000-4000-8000-00000000cc03")

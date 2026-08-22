@@ -150,6 +150,54 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/application/identidade/catalogo/permissoes/minhas": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Devolve a árvore dominio → subdominio → ações JÁ FILTRADA pelas permissões efetivas do usuário no workspace ativo — o front monta menu/botões sem hardcode de regra. super_admin recebe a árvore inteira",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Identidade · Catálogo"
+                ],
+                "summary": "Lista as permissões do usuário autenticado",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "UUID do workspace (fallback quando o host não tem subdomínio)",
+                        "name": "X-Workspace-Id",
+                        "in": "header"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/catalogo.ArvoreResponseDto"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    }
+                }
+            }
+        },
         "/api/domain/identidade/organizations": {
             "get": {
                 "security": [
@@ -1751,6 +1799,26 @@ const docTemplate = `{
                     }
                 }
             }
+        },
+        "/api/system/errors": {
+            "get": {
+                "description": "Todos os erros possíveis, agrupados por domínio/subdomínio com code estável, mensagem PT-BR e status — mapping de tradução/listagem do front-end. Rota pública de sistema por decisão",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Sistema · Catálogo"
+                ],
+                "summary": "Mapa completo de erros do sistema",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/catalogo.ErrosResponseDto"
+                        }
+                    }
+                }
+            }
         }
     },
     "definitions": {
@@ -1810,6 +1878,76 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "uuid": {
+                    "type": "string"
+                }
+            }
+        },
+        "catalogo.AcaoDto": {
+            "type": "object",
+            "properties": {
+                "descricao": {
+                    "type": "string"
+                },
+                "grupo_menu": {
+                    "type": "string"
+                },
+                "metodo": {
+                    "type": "string"
+                },
+                "permissao": {
+                    "type": "string"
+                },
+                "rota": {
+                    "type": "string"
+                }
+            }
+        },
+        "catalogo.ArvoreResponseDto": {
+            "type": "object",
+            "properties": {
+                "dominios": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/catalogo.DominioDto"
+                    }
+                }
+            }
+        },
+        "catalogo.DominioDto": {
+            "type": "object",
+            "properties": {
+                "dominio": {
+                    "type": "string"
+                },
+                "subdominios": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/catalogo.SubdominioAcoesDto"
+                    }
+                }
+            }
+        },
+        "catalogo.ErrosResponseDto": {
+            "type": "object",
+            "properties": {
+                "erros": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/rest_err.GrupoErros"
+                    }
+                }
+            }
+        },
+        "catalogo.SubdominioAcoesDto": {
+            "type": "object",
+            "properties": {
+                "acoes": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/catalogo.AcaoDto"
+                    }
+                },
+                "subdominio": {
                     "type": "string"
                 }
             }
@@ -2074,6 +2212,37 @@ const docTemplate = `{
                 },
                 "total": {
                     "type": "integer"
+                }
+            }
+        },
+        "rest_err.EntradaErro": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "integer"
+                }
+            }
+        },
+        "rest_err.GrupoErros": {
+            "type": "object",
+            "properties": {
+                "dominio": {
+                    "type": "string"
+                },
+                "erros": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/rest_err.EntradaErro"
+                    }
+                },
+                "subdominio": {
+                    "type": "string"
                 }
             }
         },

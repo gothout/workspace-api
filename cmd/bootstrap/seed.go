@@ -4,6 +4,10 @@
 // Os 5 papéis globais e seus conjuntos exatos de permissões vêm do doc 03:
 // strings estáveis que os subdomínios declaram como constantes PermX nas
 // fases seguintes — divergência entre seed e PermX é bug de contrato.
+//
+// identidade:catalogo:ler (constante PermLer da aplicação catalogo) está nos
+// QUATRO papéis humanos: ver a própria árvore de permissões é pré-requisito
+// de usar qualquer outra — super_admin passa pelo curinga *:*.
 package bootstrap
 
 import (
@@ -46,6 +50,7 @@ var papeisSeed = []papelSeed{
 			"identidade:workspace:*",
 			"identidade:user:*",
 			"identidade:organization:gerenciar_apikeys",
+			"identidade:catalogo:ler",
 		},
 	},
 	{
@@ -54,6 +59,7 @@ var papeisSeed = []papelSeed{
 		permissoes: []string{
 			"identidade:workspace:editar",
 			"identidade:user:*",
+			"identidade:catalogo:ler",
 		},
 	},
 	{
@@ -61,6 +67,7 @@ var papeisSeed = []papelSeed{
 		descricao: "Operador: trabalha no workspace sem administrar identidade; ações operacionais chegam com os subdomínios de negócio.",
 		permissoes: []string{
 			"identidade:workspace:ler",
+			"identidade:catalogo:ler",
 		},
 	},
 	{
@@ -70,6 +77,7 @@ var papeisSeed = []papelSeed{
 			"identidade:organization:ler",
 			"identidade:workspace:ler",
 			"identidade:user:ler",
+			"identidade:catalogo:ler",
 		},
 	},
 }

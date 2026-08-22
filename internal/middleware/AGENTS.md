@@ -36,6 +36,9 @@ para montar rotas — um import de volta fecharia ciclo. Então:
   (fail-closed testável: engine de teste sobe sem boot).
 - **`MustUse()` é restrito ao `cmd/bootstrap`** — panic fora do boot é
   proibido.
+- **`Atende(efetivas, exigida)`** é o matcher puro do `RequirePermission`,
+  exposto para quem filtra catálogo pelo conjunto do ctx (aplicação
+  `catalogo`) — a semântica de curinga vive SÓ aqui, nunca duplicada.
 - **Resolvedor de permissões provisório**: na F1 o adaptador do
   `cmd/bootstrap` consulta as tabelas de autorização (`papel`,
   `papel_permissao`, `atribuicao`) diretamente; na F4 passa a delegar ao

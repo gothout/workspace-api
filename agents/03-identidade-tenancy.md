@@ -39,12 +39,12 @@ A organization pode registrar um **domínio próprio** (ex.: `parceiro.com`): op
 | Papel | Permissões | Quem é |
 |---|---|---|
 | `super_admin` | `*:*` | Admin da plataforma: atravessa qualquer exigência, entra em qualquer workspace de qualquer organization. |
-| `admin_organization` | `identidade:workspace:*` + `identidade:user:*` + `identidade:organization:gerenciar_apikeys` | Dono do contrato: administra workspaces, usuários, papéis e as chaves de API da organization; entra como admin em qualquer workspace **da própria organization** (acesso de suporte). O curinga **não** cobre `identidade:organization:*` — administrar organizations (listar/criar/editar) é `super_admin`/suporte auditado. |
-| `admin_workspace` | `identidade:workspace:editar` + `identidade:user:*` no workspace | Administrador de um workspace: tudo dentro dos workspaces em que exerce o papel, menos mudar a estrutura do contrato. |
-| `usuario_workspace` | ações operacionais do workspace, sem administração de identidade | Operador: trabalha no workspace, não cria usuário nem mexe em papéis. |
-| `somente_leitura` | só as ações `:ler` | Consulta sem escrita. |
+| `admin_organization` | `identidade:workspace:*` + `identidade:user:*` + `identidade:organization:gerenciar_apikeys` + `identidade:catalogo:ler` | Dono do contrato: administra workspaces, usuários, papéis e as chaves de API da organization; entra como admin em qualquer workspace **da própria organization** (acesso de suporte). O curinga **não** cobre `identidade:organization:*` — administrar organizations (listar/criar/editar) é `super_admin`/suporte auditado. |
+| `admin_workspace` | `identidade:workspace:editar` + `identidade:user:*` + `identidade:catalogo:ler` no workspace | Administrador de um workspace: tudo dentro dos workspaces em que exerce o papel, menos mudar a estrutura do contrato. |
+| `usuario_workspace` | ações operacionais do workspace + `identidade:catalogo:ler`, sem administração de identidade | Operador: trabalha no workspace, não cria usuário nem mexe em papéis. |
+| `somente_leitura` | só as ações `:ler` (inclusive `identidade:catalogo:ler`) | Consulta sem escrita. |
 
-Os conjuntos exatos de permissões de cada papel são definidos no **seed (F1)** como strings estáveis — os subdomínios declaram as mesmas constantes `PermX` nas fases seguintes; divergência entre seed e `PermX` é bug de contrato. Papéis customizados por organization são evolução possível — o template entrega os 5 seed.
+Os conjuntos exatos de permissões de cada papel são definidos no **seed (F1)** como strings estáveis — os subdomínios declaram as mesmas constantes `PermX` nas fases seguintes; divergência entre seed e `PermX` é bug de contrato. `identidade:catalogo:ler` (constante `PermLer` da aplicação `catalogo`, F5) está nos QUATRO papéis humanos: ver a própria árvore de permissões é pré-requisito de usar qualquer outra — `super_admin` passa pelo curinga. Papéis customizados por organization são evolução possível — o template entrega os 5 seed.
 
 ## Autenticação — dois mecanismos
 
@@ -117,7 +117,7 @@ Regras do `ResolveWorkspace` (fail-closed):
 
 - Os **erros se auto-registram**: o `init()` de cada subdomínio inscreve o catálogo dele no registro global do `rest_err` — **code duplicado = panic no boot** (nunca sobrescrita).
 - As **permissões são agregadas no bootstrap**: o `Catalogo()` de todos os subdomínios num **registro único**, entregue à aplicação `internal/identidade/application/catalogo` — o bootstrap garante o import de todos os subdomínios **antes** de montá-la.
-- `GET /api/application/identidade/catalogo/permissoes/minhas` devolve ao usuário autenticado **só o que ele pode acessar**, já em árvore `dominio → subdominio → ações` com rota/método/descrição (contrato completo no doc 04).
+- `GET /api/application/identidade/catalogo/permissoes/minhas` devolve ao usuário autenticado **só o que ele pode acessar**, já em árvore `dominio → subdominio → ações` com rota/método/descrição (contrato completo no doc 04). Exige a cadeia completa rota a rota com `identidade:catalogo:ler` — seedada nos 4 papéis humanos justamente para o endpoint servir de menu para qualquer usuário autenticado.
 - O front-end monta menu e botões a partir desse endpoint — **sem hardcode de regra de acesso**.
 
 ## Acesso de suporte

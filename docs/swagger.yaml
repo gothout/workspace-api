@@ -39,6 +39,51 @@ definitions:
       uuid:
         type: string
     type: object
+  catalogo.AcaoDto:
+    properties:
+      descricao:
+        type: string
+      grupo_menu:
+        type: string
+      metodo:
+        type: string
+      permissao:
+        type: string
+      rota:
+        type: string
+    type: object
+  catalogo.ArvoreResponseDto:
+    properties:
+      dominios:
+        items:
+          $ref: '#/definitions/catalogo.DominioDto'
+        type: array
+    type: object
+  catalogo.DominioDto:
+    properties:
+      dominio:
+        type: string
+      subdominios:
+        items:
+          $ref: '#/definitions/catalogo.SubdominioAcoesDto'
+        type: array
+    type: object
+  catalogo.ErrosResponseDto:
+    properties:
+      erros:
+        items:
+          $ref: '#/definitions/rest_err.GrupoErros'
+        type: array
+    type: object
+  catalogo.SubdominioAcoesDto:
+    properties:
+      acoes:
+        items:
+          $ref: '#/definitions/catalogo.AcaoDto'
+        type: array
+      subdominio:
+        type: string
+    type: object
   organization.ApiKeyCriadaResponseDto:
     properties:
       chave:
@@ -213,6 +258,26 @@ definitions:
         type: integer
       total:
         type: integer
+    type: object
+  rest_err.EntradaErro:
+    properties:
+      code:
+        type: string
+      message:
+        type: string
+      status:
+        type: integer
+    type: object
+  rest_err.GrupoErros:
+    properties:
+      dominio:
+        type: string
+      erros:
+        items:
+          $ref: '#/definitions/rest_err.EntradaErro'
+        type: array
+      subdominio:
+        type: string
     type: object
   rest_err.RestErr:
     properties:
@@ -436,6 +501,37 @@ paths:
       summary: Renova a sessão
       tags:
       - Identidade · Auth
+  /api/application/identidade/catalogo/permissoes/minhas:
+    get:
+      description: Devolve a árvore dominio → subdominio → ações JÁ FILTRADA pelas
+        permissões efetivas do usuário no workspace ativo — o front monta menu/botões
+        sem hardcode de regra. super_admin recebe a árvore inteira
+      parameters:
+      - description: UUID do workspace (fallback quando o host não tem subdomínio)
+        in: header
+        name: X-Workspace-Id
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/catalogo.ArvoreResponseDto'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/rest_err.RestErr'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/rest_err.RestErr'
+      security:
+      - BearerAuth: []
+      - ApiKeyAuth: []
+      summary: Lista as permissões do usuário autenticado
+      tags:
+      - Identidade · Catálogo
   /api/domain/identidade/organizations:
     get:
       description: Listagem paginada GLOBAL das organizations (restrita a super_admin/suporte
@@ -1490,4 +1586,19 @@ paths:
       summary: Reativa um workspace
       tags:
       - Identidade · Workspace
+  /api/system/errors:
+    get:
+      description: Todos os erros possíveis, agrupados por domínio/subdomínio com
+        code estável, mensagem PT-BR e status — mapping de tradução/listagem do front-end.
+        Rota pública de sistema por decisão
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/catalogo.ErrosResponseDto'
+      summary: Mapa completo de erros do sistema
+      tags:
+      - Sistema · Catálogo
 swagger: "2.0"

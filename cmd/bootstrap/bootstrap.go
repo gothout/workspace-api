@@ -21,6 +21,7 @@ import (
 	dominioWorkspace "workspace-api/internal/identidade/domain/workspace"
 
 	aplicacaoauth "workspace-api/internal/identidade/application/auth"
+	aplicacaocatalogo "workspace-api/internal/identidade/application/catalogo"
 
 	"workspace-api/cmd/server"
 	"workspace-api/cmd/server/routes"
@@ -138,6 +139,15 @@ func Serve(caminhoConfig string) error {
 		return fmt.Errorf("boot: %w", err)
 	}
 	slog.Info("[BOOTSTRAP-DI] Contêiner Identidade/Auth inicializado.")
+
+	// Aplicação catalogo — DEPOIS de todos os subdomínios: o agregador
+	// acima só enxerga os Catalogo() dos pacotes já importados e bootados.
+	if _, err := aplicacaocatalogo.New(aplicacaocatalogo.Dependencias{
+		Permissoes: novoAgregadorPermissoes(),
+	}); err != nil {
+		return fmt.Errorf("boot: %w", err)
+	}
+	slog.Info("[BOOTSTRAP-DI] Contêiner Identidade/Catalogo inicializado.")
 
 	// 8. HTTP — sondas e provedor de domínios custom injetados como funções;
 	// o servidor drena requisições em voo antes do fechamento LIFO.

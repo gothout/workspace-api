@@ -163,6 +163,15 @@ func responderFechada(ctx *gin.Context, evento string) {
 	rest_err.WriteError(ctx, rest_err.NewForbiddenError("Operação indisponível nesta instância."))
 }
 
+// Atende relata se alguma das permissões efetivas atende à exigida — A MESMA
+// semântica do RequirePermission (igualdade exata, curinga por segmento ou
+// global). Consumidores externos que filtram catálogos pelo conjunto do ctx
+// (ex.: a aplicação catalogo) usam ESTA função para nunca divergir do
+// middleware: uma ação listada na árvore é sempre uma rota que o usuário passa.
+func Atende(efetivas []string, exigida string) bool {
+	return permissaoAtende(efetivas, exigida)
+}
+
 // permissaoAtende casa a exigida contra as efetivas: igualdade exata,
 // curinga por segmento (`identidade:user:*` libera as ações de user) ou o
 // curinga global do super_admin (`*:*`). Exigida malformada não é atendida.
