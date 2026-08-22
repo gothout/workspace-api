@@ -1,0 +1,27 @@
+[Unit]
+Description=workspace-api — template de API gerenciadora organization/workspace/user
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=workspace-api
+Group=workspace-api
+ExecStart=/usr/local/bin/workspace-api serve --config /etc/workspace-api/configs.json
+WorkingDirectory=/var/lib/workspace-api
+Restart=on-failure
+RestartSec=5
+
+# Segurança básica
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/workspace-api /var/log/workspace-api
+
+# Logs via journald
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=workspace-api
+
+[Install]
+WantedBy=multi-user.target

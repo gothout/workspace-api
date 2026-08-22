@@ -103,3 +103,55 @@ Cada pasta tem seu `AGENTS.md` com regras específicas e definição de pronto.
   em inglês, vocabulário de negócio em PT-BR (ver `agents/05`).
 - Migration aplicada nunca é editada; mudança destrutiva é expand-and-contract.
 - Termo de negócio novo entra no glossário do `agents/00` no mesmo commit.
+
+## Deploy no servidor de teste
+
+Scripts prontos em `scripts/ops/` para subir/parar/ver logs do `workspace-api`:
+
+```bash
+# 1. Compile
+go build -o workspace-api ./cmd/server
+
+# 2. Instala binário, usuário, diretórios e unit do systemd
+sudo ./scripts/ops/install-service.sh ./workspace-api
+
+# 3. Edite a config antes de subir
+sudo nano /etc/workspace-api/configs.json
+
+# 4. Inicie
+sudo ./scripts/ops/start.sh
+
+# 5. Logs em tempo real (Ctrl+C sai, não para o serviço)
+./scripts/ops/logs.sh
+
+# 6. Pare
+sudo ./scripts/ops/stop.sh
+```
+
+Se o servidor **não tiver systemd**, os scripts caem automaticamente para
+`nohup` + pidfile em `/var/run/workspace-api.pid` e logs em
+`/var/log/workspace-api/workspace-api.log`.
+
+> **Segurança:** o unit roda como usuário `workspace-api` sem privilégios,
+> com `ProtectSystem=strict` e `ProtectHome=true`.
+
+## Ralph loop (OpenCode)
+
+A automação orientada por PRD está em `scripts/ralph/`:
+
+- `scripts/ralph/AGENT.md` — instruções para agentes de IA.
+- `scripts/ralph/prd.json` — backlog de user stories por fase (issues #1 a #7).
+- `scripts/ralph/run-loop.sh` — orquestra o loop de implementação.
+
+Para rodar com **OpenCode**:
+
+```bash
+# Dentro da pasta do projeto
+opencode run scripts/ralph/run-loop.sh
+```
+
+O agente lê a fase atual do `prd.json`, implementa **uma story por vez**, roda
+`go build/vet/test`, commita e atualiza o progresso em
+`scripts/ralph/progress.txt`.
+
+Branch de teste inicial: `ox-alpha/code`.
