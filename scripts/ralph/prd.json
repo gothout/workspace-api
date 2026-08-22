@@ -103,7 +103,7 @@
         "Testes de contrato"
       ],
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "issue": 6,
       "branch": "ox-alpha/fase-5",
       "docs": ["agents/04-convencoes-api.md", "internal/identidade/application/catalogo/AGENTS.md", "internal/identidade/application/AGENTS.md"]

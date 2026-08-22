@@ -188,3 +188,44 @@ Started: 2026-08-22
   - Sem rotação de refresh (renovação mantém o antigo até expirar) e sem
     rate-limit/lockout — ambos evolução futura documentada.
 ---
+
+## 2026-08-22 - F5
+- Aplicação catalogo completa: GET /api/application/identidade/catalogo/
+  permissoes/minhas (árvore dominio→subdominio→ações filtrada pelo conjunto
+  efetivo do usuário, um par rota+método = uma ação, saída ordenada) e
+  GET /api/system/errors (mapa completo do registro global do rest_err,
+  rota pública de sistema). Bootstrap agrega os Catalogo() dos 3 subdomínios
+  na forma única do contratos.go ([BOOTSTRAP-DI] Contêiner
+  Identidade/Catalogo); middleware exporta Atende() — a filtragem usa o
+  MESMO matcher do RequirePermission; seed ganha identidade:catalogo:ler nos
+  4 papéis humanos (ver a própria árvore é pré-requisito de usar qualquer
+  outra); agents/03 atualizado no mesmo commit.
+- Files changed: internal/identidade/application/catalogo/* (7 arquivos);
+  internal/middleware/{autorizacao.go,AGENTS.md}; cmd/bootstrap/{catalogo.go,
+  bootstrap.go,seed.go,middleware_test.go}; cmd/server/routes/routes.go;
+  agents/{03,06}; docs/* (swag init); prd.json; progress.txt.
+- Docs read: issue #6, catalogo+application AGENTS.md, agents/{01,03,04,05},
+  AGENTS.md de middleware, rest_err, orgctx, routes, bootstrap, domain/*
+  (permissions.go dos 3 subdomínios), auth (referência de aplicação).
+- Checks: build/vet/test verdes; arch-go compliance 100 coverage 100; smoke
+  ponta a ponta com postgres efêmero: super_admin recebe árvore inteira,
+  usuario_workspace vê só as 2 ações :ler, /api/system/errors devolve os 4
+  grupos (auth 3 / organization 13 / user 17 / workspace 8), 401 sem token,
+  Swagger serve os dois paths novos.
+- **Learnings for future iterations:**
+  - Permissão de rota self-service precisa estar nos papéis humanos do seed,
+    senão o endpoint só serve super_admin (RequirePermission vazio NEGA —
+    não existe "rota autenticada sem permissão" nesta cadeia).
+  - /api/system/errors tem que ser montada NO ENGINE: registrar no grupo
+    /api/application mudaria o path do contrato (doc 04) — o controller
+    expõe RoutesSistema(engine) além de Routes(grupo).
+  - RegistrarCatalogo com mapa VAZIO criaria grupo vazio no mapa de erros:
+    pacote sem sentinelas próprias NÃO chama o registro (caso do catalogo).
+  - Dois erros diferentes apontando o MESMO código dentro de UM catálogo não
+    panicam (checagem de duplicado olha o registro ANTES de inserir) — o
+    dedupe do MapaErros é quem evita duplicata na resposta.
+  - Tipos homônimos PermissaoMeta/RotaMeta por subdomínio exigem conversão
+    explícita no agregador do bootstrap para a forma única da application.
+  - Edit tool em linha gigante de tabela markdown: oldString curto pode
+    engolir o cabeçalho da linha seguinte — conferir grep depois.
+---
