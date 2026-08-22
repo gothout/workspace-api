@@ -5,10 +5,11 @@ workspace → user**, arquitetura por domínio (DDD tático) e padrão singleton
 Pensado para ser clonado como ponto de partida de SaaS multi-tenant com
 white-label para parceiros.
 
-> **Status atual:** especificação completa, código ainda não escrito. A
-> implementação segue as [issues do plano de
-> execução](https://github.com/gothout/workspace-api/issues) (Fase 0 → 6),
-> guiadas pela documentação em `agents/`.
+> **Status:** template completo e funcional — fundação, autenticação
+> granular, os três subdomínios da hierarquia, aplicação de auth e catálogos
+> do sistema implementados e cobertos por testes de unidade, integração
+> (Postgres efêmero) e concorrência (`go test -race`). Gates de arquitetura
+> executáveis (arch-go 100/100 + grafo de dependências).
 
 ## O modelo
 
@@ -23,18 +24,151 @@ Organization ── tem N ──▶ Workspace          (slug DNS: {slug}.{base_d
   (white-label): `*.{dominio-da-org}` resolve os workspaces dela, com
   validação de pertencimento — workspace alheio não resolve no domínio do
   parceiro.
-- **Workspace**: unidade de tenancy, identificado por slug único global.
+- **Workspace**: unidade de tenancy, identificado por slug único global
+  (`{slug}.{base_domain}`); slug removido não se libera (anti-takeover).
 - **User**: pertence à organization; recebe **papéis por workspace** (RBAC
-  granular `dominio:subdominio:acao`).
+  granular `dominio:subdominio:acao`). Login indistinguível ("não existe" =
+  "senha errada", inclusive por timing), refresh token persistido com
+  revogação por `jti`.
+
+## Stack
+
+gin · Postgres (gorm + pgx) · golang-jwt · golang-migrate · cobra/viper ·
+swaggo (Swagger versionado em `docs/`) · testify · arch-go. Evoluções
+planejadas (issues
+[#8](https://github.com/gothout/workspace-api/issues/8)–[#10](https://github.com/gothout/workspace-api/issues/10)):
+Redis (cache/denylist), ClickHouse (logs assíncronos) e errobserve
+(observador de erros).
+
+## Como subir
+
+Pré-requisitos: Go 1.25+, Postgres 14+ acessível e Docker (para a suíte de
+testes de integração).
+
+```bash
+# 1. Config local (configs.json é ignorado pelo git; o example é o contrato)
+cp configs_example.json configs.json
+#    ajuste databases.postgres.* e security.jwt_secret para o seu ambiente
+
+# 2. Rodar — as migrations sobem SOZINHAS no boot (advisory lock; rollback
+#    nunca é automático). O seed NUNCA é automático.
+go run . serve --config configs.json
+
+# 3. Dados mínimos (papéis globais + organization raiz), idempotente:
+go run . migrate up --config configs.json   # se quiser aplicar fora do boot
+go run . seed --config configs.json
+```
+
+A API sobe em `http://localhost:8080`:
+
+| Rota | Para quê |
+|---|---|
+| `GET /api/status` | sonda de saúde (banco incluído) |
+| `/doc/index.html` | Swagger UI do contrato versionado em `docs/` |
+| `POST /api/application/identidade/auth/login` | autenticação |
+
+### CLI completa de migrations
+
+```bash
+go run . migrate up        # aplica pendentes
+go run . migrate down 1    # reverte as últimas N (posicional, manual)
+go run . migrate status    # estado de cada migration
+go run . migrate validate  # confere pares up/down SEM conexão (gate de CI)
+go run . migrate create identidade_workspace_descricao  # novo par up/down
+```
+
+### Deploy em servidor
+
+Scripts prontos em `scripts/ops/` (instala binário/usuário/unit systemd,
+start/stop/logs):
+
+```bash
+sudo ./scripts/ops/install-service.sh ./workspace-api
+sudo nano /etc/workspace-api/configs.json   # config antes de subir
+sudo ./scripts/ops/start.sh && ./scripts/ops/logs.sh
+```
+
+Sem systemd os scripts caem para `nohup` + pidfile automaticamente. O unit
+roda como usuário sem privilégios, com `ProtectSystem=strict`.
+
+## Como criar um subdomínio novo
+
+Exemplo canônico: `internal/{dominio}/domain/workspace`. O caminho determina
+o nome público de tudo:
+
+| Origem | Derivação | Exemplo (`identidade` + `workspace`) |
+|---|---|---|
+| Tabela | `{dominio}_{subdominio}_{entidade}` | `identidade_workspace_workspace` |
+| Migration | `NNNN_{dominio}_{subdominio}_{desc}.{up,down}.sql` | `0005_identidade_workspace_create` |
+| Rota | `/api/domain/{dominio}/{recurso-plural}` | `/api/domain/identidade/workspaces` |
+| Permissão | `{dominio}:{subdominio}:{acao}` | `identidade:workspace:editar` |
+| Código de erro | `{dominio}.{subdominio}.{nome}` | `identidade.workspace.slug_em_uso` |
+
+Passo a passo (templates completos em `agents/05`):
+
+1. **Modelo exposto** — `internal/{dominio}/model/{subdominio}`: entidades,
+   VOs com construtor validador (`ParseSlug`, `ParseEmail`...), inputs,
+   sentinelas de invariante. Pacote-folha: importa só stdlib/libs +
+   `internal/pkg`.
+2. **Subdomínio** — `internal/{dominio}/domain/{subdominio}` com os
+   **8 arquivos + `permissions.go`**: DTOs de entrada/saída, `errors.go`
+   (sentinelas + catálogo registrado no `rest_err`), `repository.go` (toda
+   query passa por `orgctx.Scope`/`ScopeOrganization` — fail-closed),
+   `service.go` (toda a regra + auditoria em toda escrita), `controller.go`
+   (`Routes()` declarando a cadeia de auth **rota a rota**), `singleton.go`
+   (`New`/`Use`/`MustUse`).
+3. **Migration** — par `up/down` em `db/migrations/`; todo `up` tem `down`
+   no mesmo commit, exercitado por `up → down → up` em banco efêmero.
+4. **Ligação** — adaptadores no `cmd/bootstrap` (é o único lugar onde
+   pacotes se encontram) e registro das rotas via `Use()` em
+   `cmd/server/routes`.
+5. **Contrato** — annotations do swag no controller + `swag init -g main.go
+   -o docs`; permissões novas entram no seed dos papéis; erros novos aparecem
+   sozinhos em `GET /api/system/errors`.
+6. **Gate** — `go build/vet/test ./...` verdes (+ `-race` se tocar invariante
+   disputada) e arch-go 100/100 (o teste pula se a ferramenta não estiver
+   instalada; com ela instalada, reprovação é gate).
+
+O caso de uso que **cruza 2+ subdomínios** não mora em nenhum deles: sobe
+para `internal/{dominio}/application/{nome}`, sem model/repository próprios —
+os vizinhos entram por interfaces estreitas do `contratos.go`, ligadas no
+bootstrap (exemplos: `auth`, `catalogo`).
+
+## Como o front consome os catálogos
+
+Zero hardcode de erro ou regra de acesso no front-end — os dois catálogos
+são contratos:
+
+```bash
+# Login
+POST /api/application/identidade/auth/login
+{"email": "...", "senha": "..."}          → access_token + refresh_token
+
+# O QUE o usuário pode fazer: árvore dominio→subdominio→ações filtrada pelo
+# conjunto efetivo dele (mesmo matcher do RequirePermission)
+GET /api/application/identidade/catalogo/permissoes/minhas
+
+# O QUE PODE dar errado: mapa completo code estável + mensagem PT-BR + status
+GET /api/system/errors
+```
+
+- Permissão nova aparece na árvore quando entra no `Catalogo()` do
+  subdomínio; erro novo aparece no mapa quando entra no `errors.go` — o front
+  lê os dois endpoints e nunca decora código.
+- Toda rota de negócio exige a cadeia `Authorization: Bearer ...` +
+  resolução de workspace pelo Host (`{slug}.{base_domain}` ou
+  `{slug}.{dominio-custom}` white-label) + permissão exata rota a rota;
+  cadeia ausente/incompleta = **403 fechada**, nunca aberta.
 
 ## Arquitetura em uma página
 
 - **Camadas** (`internal/`): `pkg` (folha, utilitários) ← `infra` (Postgres,
-  JWT — singletons com `Connect` puro) ← `{dominio}/domain` (subdomínios com
-  os 9 arquivos canônicos) ← `{dominio}/application` (casos de uso que cruzam
-  subdomínios) ← `cmd` (composição do processo). As regras de dependência são
-  **executáveis** via arch-go e conferidas visualmente com o Dependency Graph
-  do Go Architect.
+  JWT — singletons com `Connect` puro) ← `{dominio}/model` (modelos expostos,
+  folha importável por todos) ← `{dominio}/domain` (subdomínios) ←
+  `{dominio}/application` ← `cmd` (composição). As regras de dependência são
+  **executáveis**: arch-go (`arch-go.yml`, compliance+coverage 100 dentro do
+  `go test ./...`) e o grafo de dependências conferido por teste
+  (`grafo_dependencias_test.go`).
 - **Singleton**: todo pacote de infra e todo subdomínio segue `New(deps...)` →
   `Use()` → `MustUse()` com `sync.Once`. Postgres/JWT são fatais; futuras
   dependências (Redis, ClickHouse) degradam com log `[DEGRADADO]`.
@@ -42,20 +176,12 @@ Organization ── tem N ──▶ Workspace          (slug DNS: {slug}.{base_d
   `orgctx.Scope`/`ScopeOrganization` — sem escopo, a query falha.
 - **Autorização granular rota a rota**: cada rota declara sua permissão exata
   via `RequirePermission`; cadeia não inicializada = 403, nunca aberta.
-- **Mapping para o front-end**: `GET .../permissoes/minhas` devolve a árvore
-  do que o usuário pode acessar; `GET /api/system/errors` devolve todos os
-  erros possíveis do sistema (code estável + mensagem + status). Sem hardcode
-  no front.
 - **Migrations**: SQL puro em pares `up`/`down`; `up` automático no boot
-  (advisory lock), `down` testado (`up → down → up` em banco efêmero), CLI
-  `migrate up|down|status|validate|create`.
-
-## Stack
-
-gin · Postgres (gorm + pgx) · golang-jwt · golang-migrate · cobra/viper ·
-swaggo (Swagger) · testify · arch-go. Evoluções planejadas (issues
-[#8](https://github.com/gothout/workspace-api/issues/8)–[#10](https://github.com/gothout/workspace-api/issues/10)):
-Redis, ClickHouse (logs assíncronos) e observador de erros.
+  (advisory lock), `down` testado (`up → down → up` em banco efêmero).
+- **Testes**: unidade com dublês (nunca singleton), integração real com
+  Postgres efêmero (pula sem Docker), concorrência nas invariantes
+  disputadas com pool aquecido (`go test -race ./...`), cobertura Swagger nos
+  dois sentidos e grafo de dependências — todos parte do `go test ./...`.
 
 ## Estrutura
 
@@ -67,34 +193,26 @@ internal/
   infra/         database (postgres, migrations), jwt
   middleware/    cadeia de auth/autorização (fail-closed)
   identidade/    DOMÍNIO
-    model/       modelos expostos: entidades, VOs, invariantes (folha, importável por todas as camadas)
+    model/       modelos expostos: entidades, VOs, invariantes (folha)
     domain/      subdomínios: organization, workspace, user
     application/ aplicações: auth, catalogo
 db/migrations/   SQL puro up/down
+docs/            Swagger GERADO e versionado (swag init -g main.go -o docs)
 ```
 
 Cada pasta tem seu `AGENTS.md` com regras específicas e definição de pronto.
-
-## Como contribuir (loop de execução)
-
-1. Abrir `agents/README.md` e seguir o protocolo.
-2. Pegar a issue aberta mais antiga — uma por vez, nunca pular fase.
-3. Antes de codar, reler `agents/01`, `agents/04`, `agents/05` e o
-   `AGENTS.md` das pastas tocadas.
-4. Fechar com `go build ./... && go vet ./... && go test ./...` verdes
-   (`-race` se tocar invariante disputada) e registrar no log do `agents/06`.
 
 ## Fases
 
 | Issue | Fase |
 |---|---|
-| [#1](https://github.com/gothout/workspace-api/issues/1) | F0 — Fundação (config, postgres, rest_err, migrations, server, arch-go) |
-| [#2](https://github.com/gothout/workspace-api/issues/2) | F1 — Autenticação e autorização granular |
-| [#3](https://github.com/gothout/workspace-api/issues/3) | F2 — Subdomínio organization (com domínio custom) |
-| [#4](https://github.com/gothout/workspace-api/issues/4) | F3 — Subdomínio workspace (slug, white-label) |
-| [#5](https://github.com/gothout/workspace-api/issues/5) | F4 — Subdomínio user + aplicação auth |
-| [#6](https://github.com/gothout/workspace-api/issues/6) | F5 — Catálogos do sistema (permissões + mapa de erros) |
-| [#7](https://github.com/gothout/workspace-api/issues/7) | F6 — Hardening do template |
+| [#1](https://github.com/gothout/workspace-api/issues/1) | F0 — Fundação (config, postgres, rest_err, migrations, server, arch-go) ✅ |
+| [#2](https://github.com/gothout/workspace-api/issues/2) | F1 — Autenticação e autorização granular ✅ |
+| [#3](https://github.com/gothout/workspace-api/issues/3) | F2 — Subdomínio organization (com domínio custom) ✅ |
+| [#4](https://github.com/gothout/workspace-api/issues/4) | F3 — Subdomínio workspace (slug, white-label) ✅ |
+| [#5](https://github.com/gothout/workspace-api/issues/5) | F4 — Subdomínio user + aplicação auth ✅ |
+| [#6](https://github.com/gothout/workspace-api/issues/6) | F5 — Catálogos do sistema (permissões + mapa de erros) ✅ |
+| [#7](https://github.com/gothout/workspace-api/issues/7) | F6 — Hardening do template ✅ |
 | [#8](https://github.com/gothout/workspace-api/issues/8)–[#10](https://github.com/gothout/workspace-api/issues/10) | Evoluções futuras (Redis, ClickHouse, errobserve) |
 
 ## Convenções
@@ -104,39 +222,14 @@ Cada pasta tem seu `AGENTS.md` com regras específicas e definição de pronto.
 - Migration aplicada nunca é editada; mudança destrutiva é expand-and-contract.
 - Termo de negócio novo entra no glossário do `agents/00` no mesmo commit.
 
-## Deploy no servidor de teste
+## Como contribuir (loop de execução)
 
-Scripts prontos em `scripts/ops/` para subir/parar/ver logs do `workspace-api`:
-
-```bash
-# Setup completo em um comando (instala Go/OpenCode, clona, compila, instala serviço)
-curl -fsSL https://raw.githubusercontent.com/gothout/workspace-api/ox-alpha/code/scripts/ops/setup-server.sh | bash
-
-# 1. Compile
-go build -o workspace-api ./cmd/server
-
-# 2. Instala binário, usuário, diretórios e unit do systemd
-sudo ./scripts/ops/install-service.sh ./workspace-api
-
-# 3. Edite a config antes de subir
-sudo nano /etc/workspace-api/configs.json
-
-# 4. Inicie
-sudo ./scripts/ops/start.sh
-
-# 5. Logs em tempo real (Ctrl+C sai, não para o serviço)
-./scripts/ops/logs.sh
-
-# 6. Pare
-sudo ./scripts/ops/stop.sh
-```
-
-Se o servidor **não tiver systemd**, os scripts caem automaticamente para
-`nohup` + pidfile em `/var/run/workspace-api.pid` e logs em
-`/var/log/workspace-api/workspace-api.log`.
-
-> **Segurança:** o unit roda como usuário `workspace-api` sem privilégios,
-> com `ProtectSystem=strict` e `ProtectHome=true`.
+1. Abrir `agents/README.md` e seguir o protocolo.
+2. Pegar a issue aberta mais antiga — uma por vez, nunca pular fase.
+3. Antes de codar, reler `agents/01`, `agents/04`, `agents/05` e o
+   `AGENTS.md` das pastas tocadas.
+4. Fechar com `go build ./... && go vet ./... && go test ./...` verdes
+   (`-race` se tocar invariante disputada) e registrar no log do `agents/06`.
 
 ## Ralph loop (OpenCode)
 
@@ -149,7 +242,6 @@ A automação orientada por PRD está em `scripts/ralph/`:
 Para rodar com **OpenCode**:
 
 ```bash
-# Dentro da pasta do projeto
 opencode run scripts/ralph/run-loop.sh
 ```
 

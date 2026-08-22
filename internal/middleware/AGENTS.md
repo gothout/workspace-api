@@ -39,10 +39,11 @@ para montar rotas — um import de volta fecharia ciclo. Então:
 - **`Atende(efetivas, exigida)`** é o matcher puro do `RequirePermission`,
   exposto para quem filtra catálogo pelo conjunto do ctx (aplicação
   `catalogo`) — a semântica de curinga vive SÓ aqui, nunca duplicada.
-- **Resolvedor de permissões provisório**: na F1 o adaptador do
-  `cmd/bootstrap` consulta as tabelas de autorização (`papel`,
-  `papel_permissao`, `atribuicao`) diretamente; na F4 passa a delegar ao
-  service do `user` — a interface do contrato não muda.
+- **Resolvedor de permissões**: o adaptador do `cmd/bootstrap` delega ao
+  service do `user` (desde a F4 — o SQL direto da F1 saiu); a interface do
+  contrato não mudou. O acesso de suporte (`admin_organization`/
+  `super_admin` em workspace sem atribuição) é auditado pelo próprio
+  service do user com `[SUPORTE]` no log.
 
 ## Decisões que não devem ser "simplificadas"
 

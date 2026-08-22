@@ -29,7 +29,8 @@ encerramento limpo. Detalhes do desenho em `agents/01` e `agents/05`.
   dependência não declarada.
 - Toda interface entre pacotes (`contratos.go` de middleware e das
   applications, revogação de refresh do JWT, caches futuros) é ligada
-  **aqui** — um arquivo por frente (`middleware.go`, `suporte.go`...).
+  **aqui** — um arquivo por frente (`middleware.go`, `organizacao.go`,
+  `workspace.go`, `usuario.go`, `catalogo.go`, `seed.go`).
 - Fechamento **LIFO**: o que subiu por último desce primeiro (servidor →
   domínios → pool do Postgres). Cada `Init` registra seu `Close`.
 - `MustUse()` é restrito a este pacote; fora daqui usa-se `Use()` com erro
