@@ -109,6 +109,9 @@ Cada pasta tem seu `AGENTS.md` com regras específicas e definição de pronto.
 Scripts prontos em `scripts/ops/` para subir/parar/ver logs do `workspace-api`:
 
 ```bash
+# Setup completo em um comando (instala Go/OpenCode, clona, compila, instala serviço)
+curl -fsSL https://raw.githubusercontent.com/gothout/workspace-api/ox-alpha/code/scripts/ops/setup-server.sh | bash
+
 # 1. Compile
 go build -o workspace-api ./cmd/server
 
