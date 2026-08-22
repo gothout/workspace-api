@@ -20,6 +20,17 @@
   antigo que não compila).
 - Regra arch-go do `cmd` precisa listar `workspace-api/cmd` além de
   `internal` — bootstrap/server/cli se importam entre si por design.
+- Dublês de contrato que o service consome com ctx escopado precisam EMULAR
+  o fail-closed do orgctx (org divergente = não encontra) — senão o teste
+  valida um comportamento que não existe.
+- `rest_err.RegistrarCatalogo` PANICA com code duplicado: nunca mapeie duas
+  sentinelas para o mesmo `Codigo` no errors.go — cada uma tem code próprio
+  (mesmo status/mensagem podem repetir).
+- Seed pela CLI exige `migrate up` antes (o CLI não migra sozinho);
+  `migrate down N` recebe N POSICIONAL, sem flag.
+- Todo caminho interno do service que grava/consulta por repositório
+  escopado precisa do MESMO ctx escopado — repassar o ctx "cru" para uma
+  chamada interna quebra fail-closed silenciosamente (virou 500 no smoke).
 
 Started: 2026-08-22
 ---
@@ -130,4 +141,50 @@ Started: 2026-08-22
     test/arch-go/swagger) antes de só carimbar passes:true — o commit anterior
     pode estar incompleto sem que o log diga.
   - gcc segue ausente: `-race` continua na CI (invariantes disputadas F3/F4).
+---
+
+## 2026-08-22 - F4
+- Subdomínio user completo + aplicação auth: migration 0006 (user +
+  refresh_token); model/user (User com hash `json:"-"`, RefreshToken,
+  Atribuicao, Papel/PapelPermissao globais, VO Email, ValidarSenha 8–72
+  = teto do bcrypt); domain/user com os 8 arquivos + permissions.go +
+  contratos.go (ValidadorWorkspaces) — credencial bcrypt DENTRO do
+  subdomínio (`Credenciais`/`NovasCredenciaisBcrypt()`), login INDISTINGUÍVEL
+  (hash de mentira em sync.Once roda a comparação quando o user não existe),
+  revogação persistida por jti, inativar/remover usuário revoga sessões;
+  application/auth sem model/repository (contratos Usuarios/EmissorToken/
+  ResolvedorOrganization; host não resolvido → organization ALEATÓRIA para o
+  caminho ser idêntico ao de senha errada); bootstrap: resolvedorPermissoes
+  DELEGA ao service do user (provisório F1 removido), DefinirRevogador liga
+  a revogação do JWT, `[BOOTSTRAP-DI]` User+Auth; rotas /api/domain/identidade/users
+  (8, rota a rota) e /api/application/identidade/auth/{login,refresh,logout}
+  (sem cadeia completa — só resolução pelo Host dentro do service).
+- Files changed: db/migrations/0006_*; internal/identidade/model/user/*;
+  internal/identidade/domain/user/*; internal/identidade/application/auth/*;
+  cmd/bootstrap/{usuario.go,middleware.go,middleware_test.go,bootstrap.go};
+  cmd/server/routes/routes.go; docs/* (swag init).
+- Docs read: issue #5 (REST API), agents/{01,03,04,05,06}, AGENTS.md de
+  model/, model/user, domain/, domain/user, application/, application/auth,
+  identidade/, internal/, cmd/{,bootstrap,server{,/routes}}, middleware,
+  infra/{,jwt,database}, db/migrations, pkg/{orgctx,rest_err,pagination}.
+- Checks: build/vet/test verdes; arch-go compliance 100 coverage 100; swag
+  init regenerado (paths conferidos por grep); up→down→up real da 0006
+  (testcontainers E CLI smoke); smoke ponta a ponta com postgres efêmero:
+  boot 4 contêineres, login ok, 3 falhas de login com MESMO code/mensagem/
+  status, refresh/logout com revogação persistida (401 no reuso), cadeia
+  401/403/200, [SUPORTE] auditado em workspace sem atribuição, PATCH inativar,
+  atribuição/remoção de papel por workspace, 409 e-mail duplicado.
+- **Learnings for future iterations:**
+  - Dublê de `Usuarios` precisa emular escopo do orgctx — o fake global fez
+    login "sem organization" passar (teste pegou).
+  - Fake injetado em singleton por VALOR não propaga mutação feita depois
+    no teste (organizacoesFake virou ponteiro).
+  - Dois códigos iguais no mesmo errors.go panicam no init do rest_err.
+  - Service interno que chama repo escopado tem que RECEBER o ctx escopado
+    (abrirSessao recebendo ctx cru virou 500 "refresh fora do formato").
+  - Login resolve ORGANIZATION (não workspace): base_domain nu/api./painel.
+    NÃO resolvem org (console master é caso especial futuro) — custom domain
+    nu resolve para a organization dona (portal raiz do parceiro).
+  - Sem rotação de refresh (renovação mantém o antigo até expirar) e sem
+    rate-limit/lockout — ambos evolução futura documentada.
 ---

@@ -86,7 +86,7 @@
         "Login indistinguível (não existe vs senha errada)"
       ],
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "issue": 5,
       "branch": "ox-alpha/fase-4",
       "docs": ["agents/05-padroes-codigo.md", "internal/identidade/domain/user/AGENTS.md", "internal/identidade/model/user/AGENTS.md", "internal/identidade/application/auth/AGENTS.md"]
