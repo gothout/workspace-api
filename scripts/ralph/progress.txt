@@ -76,3 +76,34 @@ Started: 2026-08-22
   - Tabela identidade_workspace_workspace não existe até F3: resolvedor provisório de
     workspace está ligado mas só vira útil na F3 (500 honesto se chamado antes).
 ---
+
+## 2026-08-22 - F2
+- Subdomínio organization completo: pacote model (Organization + ApiKey, VO
+  DominioCustom com ParseDominio validando base_domain/ascendente/descendente/
+  public suffix real via golang.org/x/net/publicsuffix, chaves wka_ com SHA-256,
+  listas jsonb próprias); subdomínio domain com os 8 arquivos + permissions.go +
+  contratos.go (SuspendedorWorkspaces); migrations 0003/0004 com índice único
+  TOTAL no dominio (anti-takeover); bootstrap liga singleton ([BOOTSTRAP-DI]),
+  adaptadores de domínios custom + X-Api-Key delegando ao subdomínio na chamada,
+  seed da organization raiz "Plataforma" (uuid determinístico); 11 rotas em
+  /api/domain/identidade/organizations rota a rota.
+- Files changed: db/migrations/000{3,4}_*; internal/identidade/model/organization/*;
+  internal/identidade/domain/organization/*; cmd/bootstrap/{organizacao,middleware,seed,bootstrap}.go;
+  cmd/server/routes/routes.go; docs/* (swag init); go.mod/go.sum (x/net direto).
+- Docs read: agents/{01,02,03,04,05,06}, AGENTS.md de identidade/{model,domain}/organization,
+  cmd/bootstrap, cmd/server/routes, middleware, pkg/{orgctx,rest_err,pagination,validator},
+  infra/database(+migrations,postgres), db/migrations.
+- **Learnings for future iterations:**
+  - Constante de catálogo `Dominio` colide com o VO do negócio no mesmo pacote:
+    tipo virou DominioCustom mantendo ParseDominio e campo .Dominio — padrão para
+    o workspace/user se o termo do negócio repetir.
+  - Projeções com Table() cru NÃO ganham filtro de soft delete do gorm — lembrar
+    `deleted_at IS NULL` explícito (o teste de integração flagrou).
+  - Tabela raiz não tem organization_uuid: projeção `uuid AS organization_uuid`.
+  - Cascata organization→workspace roda ANTES da persistência (fail-closed) e o
+    adaptador provisório devolve 0,nil com log [DEGRADADO] até a F3.
+  - Singleton do subdomínio é por processo: UM único teste por pacote pode bootar
+    New(db) — os demais usam funções puras/repo fake.
+  - pkill -f "<caminho>" mata o próprio shell do tool (o padrão casa a cmdline);
+    usar pkill -x <binário>.
+---

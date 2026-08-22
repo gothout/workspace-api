@@ -52,7 +52,7 @@
         "Rotas /api/domain/identidade/organizations e /.../{uuid}/api-keys"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "issue": 3,
       "branch": "ox-alpha/fase-2",
       "docs": ["agents/05-padroes-codigo.md", "internal/identidade/domain/organization/AGENTS.md", "internal/identidade/model/organization/AGENTS.md"]
