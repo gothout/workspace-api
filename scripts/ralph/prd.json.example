@@ -1,0 +1,21 @@
+{
+  "project": "workspace-api",
+  "branchName": "ralph/workspace-api",
+  "description": "Descrição resumida do objetivo do Ralph loop",
+  "userStories": [
+    {
+      "id": "F0",
+      "title": "Título da story",
+      "description": "O que essa fase entrega",
+      "acceptanceCriteria": [
+        "Critério 1",
+        "Critério 2"
+      ],
+      "priority": 1,
+      "passes": false,
+      "issue": 1,
+      "branch": "ralph/fase-0",
+      "docs": ["agents/README.md", "agents/05-padroes-codigo.md"]
+    }
+  ]
+}

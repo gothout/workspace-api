@@ -1,0 +1,129 @@
+{
+  "project": "workspace-api",
+  "branchName": "ralph/workspace-api",
+  "description": "Template de API gerenciadora Go com DDD, hierarchy organization -> workspace -> user",
+  "userStories": [
+    {
+      "id": "F0",
+      "title": "Fundação",
+      "description": "Bootstrap, config, Postgres, rest_err, pagination, orgctx, validator, migrations runner, server, Swagger e arch-go.",
+      "acceptanceCriteria": [
+        "go.mod com as dependências iniciais",
+        "CLI cobra com serve/migrate/seed",
+        "internal/pkg/{config,rest_err,pagination,orgctx,validator}",
+        "internal/infra/{database/postgres,database/migrations,jwt}",
+        "cmd/server + cmd/server/routes com /api/status e Swagger",
+        "arch-go.yml com regras de camada e teste na raiz",
+        "go build/vet/test verdes"
+      ],
+      "priority": 1,
+      "passes": false,
+      "issue": 1,
+      "branch": "ralph/fase-0",
+      "docs": ["agents/README.md", "agents/01-arquitetura-ddd.md", "agents/02-stack-e-infra.md", "agents/04-convencoes-api.md", "agents/05-padroes-codigo.md"]
+    },
+    {
+      "id": "F1",
+      "title": "Autenticação e autorização granular",
+      "description": "JWT, middleware fail-closed (SetContextAuthorization -> ResolveWorkspace -> RequirePermission), seed de papéis e resolvedor provisório de permissões.",
+      "acceptanceCriteria": [
+        "infra/jwt singleton fatal",
+        "internal/middleware com contratos.go e adaptadores no bootstrap",
+        "ResolveWorkspace por Host (plataforma + domínio custom) validando pertencimento",
+        "RequirePermission rota a rota",
+        "Migrations de papel/papel_permissao (globais) e atribuicao",
+        "Seed dos 5 papéis"
+      ],
+      "priority": 2,
+      "passes": false,
+      "issue": 2,
+      "branch": "ralph/fase-1",
+      "docs": ["agents/03-identidade-tenancy.md", "internal/middleware/AGENTS.md", "internal/infra/jwt/AGENTS.md", "cmd/bootstrap/AGENTS.md"]
+    },
+    {
+      "id": "F2",
+      "title": "Subdomínio organization",
+      "description": "CRUD de organization com domínio custom white-label e apikeys.",
+      "acceptanceCriteria": [
+        "internal/identidade/model/organization + internal/identidade/domain/organization",
+        "Migration up/down testada",
+        "Campo dominio opcional, único global, ParseDominio validado",
+        "Permissões identidade:organization:{criar,ler,editar,remover,gerenciar_dominio,gerenciar_apikeys}",
+        "Rotas /api/domain/identidade/organizations e /.../{uuid}/api-keys"
+      ],
+      "priority": 3,
+      "passes": false,
+      "issue": 3,
+      "branch": "ralph/fase-2",
+      "docs": ["agents/05-padroes-codigo.md", "internal/identidade/domain/organization/AGENTS.md", "internal/identidade/model/organization/AGENTS.md"]
+    },
+    {
+      "id": "F3",
+      "title": "Subdomínio workspace",
+      "description": "CRUD de workspace com slug global, resolução por Host e acesso de suporte.",
+      "acceptanceCriteria": [
+        "internal/identidade/model/workspace + internal/identidade/domain/workspace",
+        "Slug único global + reservados",
+        "Escopo por organization (ScopeOrganization)",
+        "Resolução por Host validando pertencimento",
+        "Acesso de suporte auditado"
+      ],
+      "priority": 4,
+      "passes": false,
+      "issue": 4,
+      "branch": "ralph/fase-3",
+      "docs": ["agents/05-padroes-codigo.md", "internal/identidade/domain/workspace/AGENTS.md", "internal/identidade/model/workspace/AGENTS.md"]
+    },
+    {
+      "id": "F4",
+      "title": "Subdomínio user + aplicação auth",
+      "description": "CRUD de user, atribuição de papéis por workspace, refresh token persistido e aplicação auth.",
+      "acceptanceCriteria": [
+        "internal/identidade/model/user + internal/identidade/domain/user",
+        "Tabela identidade_user_refresh_token (revogação por jti)",
+        "Credencial fechada no subdomínio, comparação por interface",
+        "Aplicação internal/identidade/application/auth com login/refresh/logout",
+        "Login indistinguível (não existe vs senha errada)"
+      ],
+      "priority": 5,
+      "passes": false,
+      "issue": 5,
+      "branch": "ralph/fase-4",
+      "docs": ["agents/05-padroes-codigo.md", "internal/identidade/domain/user/AGENTS.md", "internal/identidade/model/user/AGENTS.md", "internal/identidade/application/auth/AGENTS.md"]
+    },
+    {
+      "id": "F5",
+      "title": "Catálogos do sistema",
+      "description": "Aplicação catalogo expõe permissões do usuário e mapa completo de erros.",
+      "acceptanceCriteria": [
+        "internal/identidade/application/catalogo",
+        "GET /api/application/identidade/catalogo/permissoes/minhas (árvore filtrada)",
+        "GET /api/system/errors (mapa completo)",
+        "Bootstrap agrega Catalogo() de todos os subdomínios",
+        "Testes de contrato"
+      ],
+      "priority": 6,
+      "passes": false,
+      "issue": 6,
+      "branch": "ralph/fase-5",
+      "docs": ["agents/04-convencoes-api.md", "internal/identidade/application/catalogo/AGENTS.md", "internal/identidade/application/AGENTS.md"]
+    },
+    {
+      "id": "F6",
+      "title": "Hardening do template",
+      "description": "Testes de concorrência, cobertura Swagger, arch-go 100%, Dependency Graph e README final.",
+      "acceptanceCriteria": [
+        "go test -race ./... verde em invariantes disputadas",
+        "Teste de cobertura Swagger (rotas vs docs)",
+        "arch-go compliance/coverage 100",
+        "Dependency Graph conferido e registrado",
+        "README de uso do template finalizado"
+      ],
+      "priority": 7,
+      "passes": false,
+      "issue": 7,
+      "branch": "ralph/fase-6",
+      "docs": ["agents/01-arquitetura-ddd.md", "agents/06-plano-execucao.md"]
+    }
+  ]
+}
