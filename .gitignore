@@ -18,3 +18,9 @@ coverage.html
 .idea/
 .vscode/
 .DS_Store
+
+# Ralph loop (runtime local)
+scripts/ralph/logs/
+scripts/ralph/.ralph.pid
+scripts/ralph/.last-branch
+scripts/ralph/archive/
