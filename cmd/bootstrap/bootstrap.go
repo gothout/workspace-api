@@ -17,7 +17,10 @@ import (
 	"time"
 
 	dominioOrganizacao "workspace-api/internal/identidade/domain/organization"
+	dominioUsuario "workspace-api/internal/identidade/domain/user"
 	dominioWorkspace "workspace-api/internal/identidade/domain/workspace"
+
+	aplicacaoauth "workspace-api/internal/identidade/application/auth"
 
 	"workspace-api/cmd/server"
 	"workspace-api/cmd/server/routes"
@@ -90,6 +93,11 @@ func Serve(caminhoConfig string) error {
 	}
 	slog.Info("[BOOTSTRAP] middleware da cadeia de autorização inicializado")
 
+	// Revogação persistida do refresh (F4): o validador do JWT passa a
+	// conferir identidade_user_refresh_token via adaptador que resolve NA
+	// CHAMADA — a denylist Redis da evolução será só cache desta verdade.
+	gerenciadorJWT.DefinirRevogador(revogadorRefresh{})
+
 	// 7. Domínios — subdomínios de internal/identidade/domain na ordem de
 	// dependência (organization → workspace → user); cada adaptador do
 	// middleware acima resolve estes singletons NA CHAMADA. A cascata
@@ -112,6 +120,24 @@ func Serve(caminhoConfig string) error {
 		return fmt.Errorf("boot: %w", err)
 	}
 	slog.Info("[BOOTSTRAP-DI] Contêiner Identidade/Workspace inicializado.")
+
+	_, err = dominioUsuario.New(db, validadorWorkspaces{})
+	if err != nil {
+		return fmt.Errorf("boot: %w", err)
+	}
+	slog.Info("[BOOTSTRAP-DI] Contêiner Identidade/User inicializado.")
+
+	// Aplicações — orquestrações que cruzam os subdomínios acima. O auth
+	// recebe os três contratos ligados por adaptadores que resolvem os
+	// singletons NA CHAMADA (usuario.go).
+	if _, err := aplicacaoauth.New(aplicacaoauth.Dependencias{
+		Usuarios:     usuariosAuth{},
+		Emissor:      emissorToken{},
+		Organizacoes: resolvedorOrganizacao{},
+	}); err != nil {
+		return fmt.Errorf("boot: %w", err)
+	}
+	slog.Info("[BOOTSTRAP-DI] Contêiner Identidade/Auth inicializado.")
 
 	// 8. HTTP — sondas e provedor de domínios custom injetados como funções;
 	// o servidor drena requisições em voo antes do fechamento LIFO.

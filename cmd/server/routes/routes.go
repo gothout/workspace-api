@@ -18,7 +18,9 @@ import (
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
 
+	aplicacaoauth "workspace-api/internal/identidade/application/auth"
 	organizacao "workspace-api/internal/identidade/domain/organization"
+	usuario "workspace-api/internal/identidade/domain/user"
 	workspace "workspace-api/internal/identidade/domain/workspace"
 	"workspace-api/internal/pkg/config"
 	"workspace-api/internal/pkg/rest_err"
@@ -106,8 +108,13 @@ func registrarConhecidos(dominio, aplicacao *gin.RouterGroup) {
 	registrarRotas("identidade.workspace", dominio, func() (Controlador, error) {
 		return workspace.Use()
 	})
-	// F4+: user no grupo dominio; auth na aplicacao; F5+: catalogo na aplicacao.
-	_ = aplicacao
+	registrarRotas("identidade.user", dominio, func() (Controlador, error) {
+		return usuario.Use()
+	})
+	registrarRotas("identidade.auth", aplicacao, func() (Controlador, error) {
+		return aplicacaoauth.Use()
+	})
+	// F5+: catalogo na aplicacao.
 }
 
 // middlewareAccessLog ocupa o slot do access log: linha estruturada por

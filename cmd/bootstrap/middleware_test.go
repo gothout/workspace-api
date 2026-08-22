@@ -18,10 +18,36 @@ import (
 	"gorm.io/driver/postgres"
 	gormio "gorm.io/gorm"
 
+	dominioUsuario "workspace-api/internal/identidade/domain/user"
+	modeluser "workspace-api/internal/identidade/model/user"
 	"workspace-api/internal/infra/database/migrations"
+	"workspace-api/internal/pkg/orgctx"
 )
 
 // --- Ambiente efêmero (padrão dos testes de infra: sem docker, pula) ------
+
+// Identificadores fixos dos cenários de integração.
+var (
+	orgA          = uuid.MustParse("aaaaaaaa-0000-4000-8000-00000000aa01")
+	orgForasteira = uuid.MustParse("aaaaaaaa-0000-4000-8000-00000000aa09")
+)
+
+// validadorSemprePertence substitui o adaptador do workspace nos testes de
+// service sobre o banco efêmero — o singleton do irmão não existe aqui, e a
+// tabela de atribuição não tem FK para workspaces (vínculo por uuid, F1).
+type validadorSemprePertence struct{}
+
+func (validadorSemprePertence) Pertence(context.Context, uuid.UUID, uuid.UUID) (bool, error) {
+	return true, nil
+}
+
+// semearOrganization cria a organization pai de um cenário — o usuário tem FK
+// para identidade_organization_organization desde a migration 0006.
+func semearOrganization(t *testing.T, amb *ambienteBanco, id uuid.UUID) {
+	t.Helper()
+	require.NoError(t, amb.db.Exec(`INSERT INTO identidade_organization_organization (uuid, nome, status)
+		VALUES (?, ?, 'ativo') ON CONFLICT (uuid) DO NOTHING`, id, "Org de teste").Error)
+}
 
 var travaAmbiente sync.Mutex
 
@@ -127,61 +153,164 @@ func totalPermissoesSeed() int64 {
 	return total
 }
 
-// Resolvedor provisório ponta a ponta sobre o esquema migrado+semeado:
-// atribuição direta, suporte do admin_organization e ausência de vínculo.
-func TestResolvedorPermissoesSobreEsquemaReal(t *testing.T) {
+// Resolvedor de permissões ponta a ponta sobre o esquema migrado+semeado,
+// AGORA via service do subdomínio user (F4): atribuição direta, suporte do
+// admin_organization e do super_admin, ausência de vínculo e união de
+// permissões — sem passar pelo singleton do processo.
+func TestResolvedorPermissoesViaServiceDoUserSobreEsquemaReal(t *testing.T) {
 	amb := subirAmbiente(t)
 	require.NoError(t, semearPapeis(amb.ctx, amb.db))
+	semearOrganization(t, amb, orgA)
 
-	var (
-		orgA       = uuid.MustParse("aaaaaaaa-0000-4000-8000-00000000aa01")
-		wsA        = uuid.MustParse("bbbbbbbb-0000-4000-8000-00000000bb01")
-		wsA2       = uuid.MustParse("bbbbbbbb-0000-4000-8000-00000000bb03")
-		operador   = uuid.MustParse("cccccccc-0000-4000-8000-00000000cc01")
-		dono       = uuid.MustParse("cccccccc-0000-4000-8000-00000000cc02")
-		forasteiro = uuid.MustParse("cccccccc-0000-4000-8000-00000000cc03")
-	)
+	repo := dominioUsuario.NewRepository(amb.db)
+	atrib := dominioUsuario.NewRepositorioAtribuicoes(amb.db)
+	svc := dominioUsuario.NewService(repo, atrib, validadorSemprePertence{}, dominioUsuario.NovasCredenciaisBcrypt())
 
-	uuidPapel := func(nome string) uuid.UUID {
+	uuidDoPapel := func(nome string) uuid.UUID {
 		var idTexto string
 		require.NoError(t, amb.db.Raw(`SELECT uuid::text FROM identidade_user_papel WHERE nome = ?`, nome).
 			Scan(&idTexto).Error)
 		return uuid.MustParse(idTexto)
 	}
-	atribuir := func(usuario uuid.UUID, papel string, org, ws uuid.UUID) {
-		require.NoError(t, amb.db.Exec(`INSERT INTO identidade_user_atribuicao
-			(uuid, organization_uuid, workspace_uuid, user_uuid, papel_uuid) VALUES (?, ?, ?, ?, ?)`,
-			uuid.New(), org, ws, usuario, uuidPapel(papel)).Error)
+
+	criarUsuario := func(email string) uuid.UUID {
+		u, err := svc.Create(orgctx.WithOrganization(amb.ctx, orgA), dominioUsuario.EntradaCriacao{
+			Dados: modeluser.CreateInput{Nome: "Usuário " + email, Email: email},
+			Senha: "senha-segura-123",
+		})
+		require.NoError(t, err)
+		return u.UUID
 	}
 
-	atribuir(operador, papelUsuarioWorkspace, orgA, wsA)
-	atribuir(dono, papelAdminOrganization, orgA, wsA) // dono da organization A
+	var (
+		wsA  = uuid.MustParse("bbbbbbbb-0000-4000-8000-00000000bb01")
+		wsA2 = uuid.MustParse("bbbbbbbb-0000-4000-8000-00000000bb03")
+	)
+
+	operador := criarUsuario("operador@exemplo.com")
+	dono := criarUsuario("dono@exemplo.com")
+	super := criarUsuario("super@exemplo.com")
+
+	ctxOrg := orgctx.WithOrganization(amb.ctx, orgA)
+	_, err := svc.AtribuirPapel(ctxOrg, operador, wsA, uuidDoPapel(papelUsuarioWorkspace))
+	require.NoError(t, err)
+	_, err = svc.AtribuirPapel(ctxOrg, dono, wsA, uuidDoPapel(papelAdminOrganization))
+	require.NoError(t, err)
+	_, err = svc.AtribuirPapel(ctxOrg, super, wsA, uuidDoPapel(papelSuperAdmin))
+	require.NoError(t, err)
 
 	// Atribuição direta: permissões do papel no workspace.
-	vinculo, err := temVinculoNo(amb.ctx, amb.db, operador, orgA, wsA)
+	vinculo, err := svc.TemVinculo(ctxOrg, operador, wsA)
 	require.NoError(t, err)
 	assert.True(t, vinculo)
 
-	permissoes, err := permissoesEfetivasNo(amb.ctx, amb.db, operador, orgA, wsA)
+	permissoes, err := svc.PermissoesEfetivas(ctxOrg, operador, wsA)
 	require.NoError(t, err)
 	assert.ElementsMatch(t, []string{"identidade:workspace:ler"}, permissoes)
 
-	// Suporte auditado: dono entra em OUTRO workspace da própria organization,
-	// mesmo sem atribuição lá…
-	vinculo, err = temVinculoNo(amb.ctx, amb.db, dono, orgA, wsA2)
+	// Suporte auditado: dono entra em OUTRO workspace da própria organization.
+	vinculo, err = svc.TemVinculo(ctxOrg, dono, wsA2)
 	require.NoError(t, err)
 	assert.True(t, vinculo, "admin_organization atravessa a própria organization")
 
-	permissoes, err = permissoesEfetivasNo(amb.ctx, amb.db, dono, orgA, wsA2)
+	permissoes, err = svc.PermissoesEfetivas(ctxOrg, dono, wsA2)
 	require.NoError(t, err)
 	assert.ElementsMatch(t, []string{"identidade:workspace:*", "identidade:user:*",
 		"identidade:organization:gerenciar_apikeys"}, permissoes)
 
-	naoTemVinculo, err := temVinculoNo(amb.ctx, amb.db, forasteiro, orgA, wsA)
+	// Sem vínculo e sem suporte: negativa limpa (forasteiro nem existe aqui).
+	forasteiro := uuid.MustParse("cccccccc-0000-4000-8000-00000000cc03")
+	vinculo, err = svc.TemVinculo(ctxOrg, forasteiro, wsA)
 	require.NoError(t, err)
-	assert.False(t, naoTemVinculo, "sem atribuição e sem suporte não há vínculo")
+	assert.False(t, vinculo)
 
-	permissaoVazia, err := permissoesEfetivasNo(amb.ctx, amb.db, forasteiro, orgA, wsA)
+	permissoes, err = svc.PermissoesEfetivas(ctxOrg, forasteiro, wsA)
 	require.NoError(t, err)
-	assert.Empty(t, permissaoVazia)
+	assert.Empty(t, permissoes)
+
+	// Escopo fail-closed: ctx sem organization recusa a query.
+	_, err = svc.TemVinculo(amb.ctx, operador, wsA)
+	assert.ErrorIs(t, err, orgctx.ErrEscopoAusente)
+}
+
+// Login INDISTINGUÍVEL com bcrypt real + sessão persistida com revogação por
+// jti sobre o esquema migrado.
+func TestAutenticacaoESessaoSobreEsquemaReal(t *testing.T) {
+	amb := subirAmbiente(t)
+	require.NoError(t, semearPapeis(amb.ctx, amb.db))
+	semearOrganization(t, amb, orgA)
+	semearOrganization(t, amb, orgForasteira)
+
+	repo := dominioUsuario.NewRepository(amb.db)
+	atrib := dominioUsuario.NewRepositorioAtribuicoes(amb.db)
+	svc := dominioUsuario.NewService(repo, atrib, validadorSemprePertence{}, dominioUsuario.NovasCredenciaisBcrypt())
+
+	ctx := orgctx.WithOrganization(amb.ctx, orgA)
+	ana, err := svc.Create(ctx, dominioUsuario.EntradaCriacao{
+		Dados: modeluser.CreateInput{Nome: "Ana Real", Email: "ana@real.com"},
+		Senha: "senha-segura-123",
+	})
+	require.NoError(t, err)
+
+	// Senha errada e usuário inexistente: MESMO sentinela.
+	_, err = svc.Autenticar(ctx, "ana@real.com", "errada-de-propósito")
+	assert.ErrorIs(t, err, dominioUsuario.ErrCredenciaisInvalidas)
+	_, err = svc.Autenticar(ctx, "fantasma@real.com", "senha-segura-123")
+	assert.ErrorIs(t, err, dominioUsuario.ErrCredenciaisInvalidas)
+
+	// E-mail de outra organization não existe para esta.
+	_, err = svc.Autenticar(orgctx.WithOrganization(amb.ctx, orgForasteira), "ana@real.com", "senha-segura-123")
+	assert.ErrorIs(t, err, dominioUsuario.ErrCredenciaisInvalidas)
+
+	ok, err := svc.Autenticar(ctx, "ana@real.com", "senha-segura-123")
+	require.NoError(t, err)
+	assert.Equal(t, ana.UUID, ok.UUID)
+
+	// Sessão persistida: ativa → revogada → revogado visível até globalmente.
+	expira := time.Now().UTC().Add(time.Hour)
+	require.NoError(t, svc.RegistrarSessao(ctx, ana.UUID, "jti-real-1", expira))
+	ativa, err := svc.SessaoAtiva(ctx, ana.UUID, "jti-real-1")
+	require.NoError(t, err)
+	assert.True(t, ativa)
+
+	require.NoError(t, svc.EncerrarSessao(ctx, ana.UUID, "jti-real-1"))
+	ativa, err = svc.SessaoAtiva(ctx, ana.UUID, "jti-real-1")
+	require.NoError(t, err)
+	assert.False(t, ativa)
+
+	revogado, err := repo.RefreshTokenRevogado("jti-real-1")
+	require.NoError(t, err)
+	assert.True(t, revogado, "revogação persistida visível ao RevogadorDeRefresh do jwt")
+	revogado, err = repo.RefreshTokenRevogado("nunca-emitido")
+	require.NoError(t, err)
+	assert.False(t, revogado, "linha ausente não é revogada — decisão é das demais validações")
+}
+
+// Inativar usuário encerra as sessões abertas dele na hora.
+func TestInativacaoRevogaSessoesAbertas(t *testing.T) {
+	amb := subirAmbiente(t)
+	semearOrganization(t, amb, orgA)
+	repo := dominioUsuario.NewRepository(amb.db)
+	atrib := dominioUsuario.NewRepositorioAtribuicoes(amb.db)
+	svc := dominioUsuario.NewService(repo, atrib, validadorSemprePertence{}, dominioUsuario.NovasCredenciaisBcrypt())
+
+	ctx := orgctx.WithOrganization(amb.ctx, orgA)
+	ana, err := svc.Create(ctx, dominioUsuario.EntradaCriacao{
+		Dados: modeluser.CreateInput{Nome: "Bruno Real", Email: "bruno@real.com"},
+		Senha: "senha-segura-123",
+	})
+	require.NoError(t, err)
+	require.NoError(t, svc.RegistrarSessao(ctx, ana.UUID, "jti-bruno-1", time.Now().UTC().Add(time.Hour)))
+
+	inativo := modeluser.StatusInativo
+	_, err = svc.Update(ctx, ana.UUID, modeluser.UpdateInput{Status: &inativo})
+	require.NoError(t, err)
+
+	ativa, err := svc.SessaoAtiva(ctx, ana.UUID, "jti-bruno-1")
+	require.NoError(t, err)
+	assert.False(t, ativa, "sessão não sobrevive à conta inativa")
+
+	// Conta inativa não autentica — e a recusa é a genérica.
+	_, err = svc.Autenticar(ctx, "bruno@real.com", "senha-segura-123")
+	assert.ErrorIs(t, err, dominioUsuario.ErrCredenciaisInvalidas)
 }

@@ -24,15 +24,15 @@ func TestParseSlug(t *testing.T) {
 	}
 
 	recusados := map[string]string{
-		"":       "vazio",
-		"ab":     "curto demais (mínimo 3)",
-		"-ruim":  "começando em hífen",
-		"ruim-":  "terminando em hífen",
-		"AiM":    "maiúsculas",
-		"a_b":    "underline",
-		"a.b":    "ponto não é rótulo",
-		"a b":    "espaço",
-		"área":   "acento fora do LDH",
+		"":                      "vazio",
+		"ab":                    "curto demais (mínimo 3)",
+		"-ruim":                 "começando em hífen",
+		"ruim-":                 "terminando em hífen",
+		"AiM":                   "maiúsculas",
+		"a_b":                   "underline",
+		"a.b":                   "ponto não é rótulo",
+		"a b":                   "espaço",
+		"área":                  "acento fora do LDH",
 		strings.Repeat("a", 64): "acima de 63",
 	}
 	for valor, motivo := range recusados {

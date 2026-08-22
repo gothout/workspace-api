@@ -15,6 +15,141 @@ const docTemplate = `{
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
     "paths": {
+        "/api/application/identidade/auth/login": {
+            "post": {
+                "description": "Login com e-mail/senha contra a organization resolvida pelo Host (subdomínio de workspace ou domínio custom). Falhas são indistinguíveis: usuário inexistente, senha errada e host sem organization devolvem o mesmo 401 genérico",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Identidade · Auth"
+                ],
+                "summary": "Autentica e abre uma sessão",
+                "parameters": [
+                    {
+                        "description": "Credenciais",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/auth.LoginRequestDto"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/auth.SessaoResponseDto"
+                        }
+                    },
+                    "400": {
+                        "description": "Corpo malformado",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "401": {
+                        "description": "Credenciais inválidas (genérico)",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/application/identidade/auth/logout": {
+            "post": {
+                "description": "Revoga o refresh token no Postgres (marca revogado_em); a linha do jti nunca é removida",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Identidade · Auth"
+                ],
+                "summary": "Encerra a sessão",
+                "parameters": [
+                    {
+                        "description": "Refresh token a revogar",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/auth.TokenRequestDto"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Corpo malformado",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "401": {
+                        "description": "Sessão inválida ou expirada",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/application/identidade/auth/refresh": {
+            "post": {
+                "description": "Troca um refresh token válido por um novo par de tokens; o jti precisa seguir ativo no Postgres (revogação persistida)",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Identidade · Auth"
+                ],
+                "summary": "Renova a sessão",
+                "parameters": [
+                    {
+                        "description": "Refresh token vigente",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/auth.TokenRequestDto"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/auth.SessaoResponseDto"
+                        }
+                    },
+                    "400": {
+                        "description": "Corpo malformado",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "401": {
+                        "description": "Sessão inválida ou expirada",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    }
+                }
+            }
+        },
         "/api/domain/identidade/organizations": {
             "get": {
                 "security": [
@@ -702,6 +837,536 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/domain/identidade/users": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Lista paginada dos usuários da organization; com workspace_uuid lista só quem tem atribuição nele (via atribuição — a tabela de usuário não tem workspace)",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Identidade · Usuário"
+                ],
+                "summary": "Lista usuários",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "UUID do workspace (fallback quando o host não tem subdomínio)",
+                        "name": "X-Workspace-Id",
+                        "in": "header"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Página (default 1)",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Itens por página (teto 100)",
+                        "name": "pageSize",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filtro por nome",
+                        "name": "nome",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filtro por e-mail",
+                        "name": "email",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filtro por status (ativo|inativo)",
+                        "name": "status",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Lista só usuários atribuídos a este workspace",
+                        "name": "workspace_uuid",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/pagination.Response-user_UserResponseDto"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Cria usuário na organization autenticada; a senha nunca volta em resposta",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Identidade · Usuário"
+                ],
+                "summary": "Cria um usuário",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "UUID do workspace (fallback quando o host não tem subdomínio)",
+                        "name": "X-Workspace-Id",
+                        "in": "header"
+                    },
+                    {
+                        "description": "Dados do usuário",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/user.CreateUserRequestDto"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/user.UserResponseDto"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "409": {
+                        "description": "E-mail já cadastrado nesta organization",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/domain/identidade/users/{uuid}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Devolve o usuário no escopo da organization resolvida — usuário de organization alheia não se distingue de inexistente",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Identidade · Usuário"
+                ],
+                "summary": "Consulta um usuário",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "UUID do workspace (fallback quando o host não tem subdomínio)",
+                        "name": "X-Workspace-Id",
+                        "in": "header"
+                    },
+                    {
+                        "type": "string",
+                        "description": "UUID do usuário",
+                        "name": "uuid",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/user.UserResponseDto"
+                        }
+                    },
+                    "400": {
+                        "description": "UUID malformado",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Remoção lógica no escopo da organization; sessões abertas são revogadas na hora",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Identidade · Usuário"
+                ],
+                "summary": "Remove um usuário",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "UUID do workspace (fallback quando o host não tem subdomínio)",
+                        "name": "X-Workspace-Id",
+                        "in": "header"
+                    },
+                    {
+                        "type": "string",
+                        "description": "UUID do usuário",
+                        "name": "uuid",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "400": {
+                        "description": "UUID malformado",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    }
+                }
+            },
+            "patch": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Atualização parcial; inativar encerra imediatamente as sessões abertas do usuário (revogação persistida dos refresh tokens)",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Identidade · Usuário"
+                ],
+                "summary": "Atualiza um usuário",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "UUID do workspace (fallback quando o host não tem subdomínio)",
+                        "name": "X-Workspace-Id",
+                        "in": "header"
+                    },
+                    {
+                        "type": "string",
+                        "description": "UUID do usuário",
+                        "name": "uuid",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Campos a atualizar",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/user.UpdateUserRequestDto"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/user.UserResponseDto"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "422": {
+                        "description": "Transição de estado proibida",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/domain/identidade/users/{uuid}/atribuicoes": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Vínculos user × workspace × papel do usuário no escopo da organization, com o nome canônico de cada papel",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Identidade · Usuário"
+                ],
+                "summary": "Lista as atribuições do usuário",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "UUID do workspace (fallback quando o host não tem subdomínio)",
+                        "name": "X-Workspace-Id",
+                        "in": "header"
+                    },
+                    {
+                        "type": "string",
+                        "description": "UUID do usuário",
+                        "name": "uuid",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/user.AtribuicaoResponseDto"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "UUID malformado",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Papéis são POR workspace: dar poder a alguém é operação própria, separada de editar. O workspace precisa pertencer à organization e estar ativo",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Identidade · Usuário"
+                ],
+                "summary": "Atribui um papel ao usuário em um workspace",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "UUID do workspace (fallback quando o host não tem subdomínio)",
+                        "name": "X-Workspace-Id",
+                        "in": "header"
+                    },
+                    {
+                        "type": "string",
+                        "description": "UUID do usuário",
+                        "name": "uuid",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Workspace e papel da atribuição",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/user.AtribuirPapelRequestDto"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/user.AtribuicaoResponseDto"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "404": {
+                        "description": "Usuário ou papel não encontrado",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "409": {
+                        "description": "Atribuição duplicada",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "422": {
+                        "description": "Workspace inválido para esta organization",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/domain/identidade/users/{uuid}/atribuicoes/{atribuicaoUuid}": {
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Retira do usuário o papel exercido no workspace identificado pela atribuição",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Identidade · Usuário"
+                ],
+                "summary": "Remove uma atribuição do usuário",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "UUID do workspace (fallback quando o host não tem subdomínio)",
+                        "name": "X-Workspace-Id",
+                        "in": "header"
+                    },
+                    {
+                        "type": "string",
+                        "description": "UUID do usuário",
+                        "name": "uuid",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "UUID da atribuição",
+                        "name": "atribuicaoUuid",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "400": {
+                        "description": "UUID malformado",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    }
+                }
+            }
+        },
         "/api/domain/identidade/workspaces": {
             "get": {
                 "security": [
@@ -1089,6 +1754,66 @@ const docTemplate = `{
         }
     },
     "definitions": {
+        "auth.LoginRequestDto": {
+            "type": "object",
+            "required": [
+                "email",
+                "senha"
+            ],
+            "properties": {
+                "email": {
+                    "type": "string",
+                    "maxLength": 254
+                },
+                "senha": {
+                    "type": "string",
+                    "maxLength": 72,
+                    "minLength": 8
+                }
+            }
+        },
+        "auth.SessaoResponseDto": {
+            "type": "object",
+            "properties": {
+                "access_token": {
+                    "type": "string"
+                },
+                "refresh_token": {
+                    "type": "string"
+                },
+                "token_type": {
+                    "type": "string"
+                },
+                "usuario": {
+                    "$ref": "#/definitions/auth.UsuarioResumo"
+                }
+            }
+        },
+        "auth.TokenRequestDto": {
+            "type": "object",
+            "required": [
+                "refresh_token"
+            ],
+            "properties": {
+                "refresh_token": {
+                    "type": "string"
+                }
+            }
+        },
+        "auth.UsuarioResumo": {
+            "type": "object",
+            "properties": {
+                "email": {
+                    "type": "string"
+                },
+                "nome": {
+                    "type": "string"
+                },
+                "uuid": {
+                    "type": "string"
+                }
+            }
+        },
         "organization.ApiKeyCriadaResponseDto": {
             "type": "object",
             "properties": {
@@ -1312,6 +2037,26 @@ const docTemplate = `{
                 }
             }
         },
+        "pagination.Response-user_UserResponseDto": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/user.UserResponseDto"
+                    }
+                },
+                "page": {
+                    "type": "integer"
+                },
+                "page_size": {
+                    "type": "integer"
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
         "pagination.Response-workspace_WorkspaceResponseDto": {
             "type": "object",
             "properties": {
@@ -1345,6 +2090,111 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "ray_trace": {
+                    "type": "string"
+                }
+            }
+        },
+        "user.AtribuicaoResponseDto": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "papel": {
+                    "type": "string"
+                },
+                "papel_uuid": {
+                    "type": "string"
+                },
+                "user_uuid": {
+                    "type": "string"
+                },
+                "uuid": {
+                    "type": "string"
+                },
+                "workspace_uuid": {
+                    "type": "string"
+                }
+            }
+        },
+        "user.AtribuirPapelRequestDto": {
+            "type": "object",
+            "required": [
+                "papel_uuid",
+                "workspace_uuid"
+            ],
+            "properties": {
+                "papel_uuid": {
+                    "type": "string"
+                },
+                "workspace_uuid": {
+                    "type": "string"
+                }
+            }
+        },
+        "user.CreateUserRequestDto": {
+            "type": "object",
+            "required": [
+                "email",
+                "nome",
+                "senha"
+            ],
+            "properties": {
+                "email": {
+                    "type": "string",
+                    "maxLength": 254
+                },
+                "nome": {
+                    "type": "string",
+                    "maxLength": 120,
+                    "minLength": 2
+                },
+                "senha": {
+                    "type": "string",
+                    "maxLength": 72,
+                    "minLength": 8
+                }
+            }
+        },
+        "user.UpdateUserRequestDto": {
+            "type": "object",
+            "properties": {
+                "nome": {
+                    "type": "string",
+                    "maxLength": 120,
+                    "minLength": 2
+                },
+                "status": {
+                    "type": "string",
+                    "enum": [
+                        "ativo",
+                        "inativo"
+                    ]
+                }
+            }
+        },
+        "user.UserResponseDto": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "email": {
+                    "type": "string"
+                },
+                "nome": {
+                    "type": "string"
+                },
+                "organization_uuid": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "uuid": {
                     "type": "string"
                 }
             }

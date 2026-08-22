@@ -17,10 +17,10 @@ import (
 // --- Dublês (regra: testes de service NUNCA passam pelo singleton) ----------
 
 type repoFake struct {
-	mu       sync.Mutex
-	porUUID  map[uuid.UUID]*modelworkspace.Workspace
-	slugs    map[modelworkspace.Slug]bool // simula o índice único TOTAL do banco
-	erroAoSalvar error                     // sentinela injetada (23505 → ErrSlugEmUso)
+	mu           sync.Mutex
+	porUUID      map[uuid.UUID]*modelworkspace.Workspace
+	slugs        map[modelworkspace.Slug]bool // simula o índice único TOTAL do banco
+	erroAoSalvar error                        // sentinela injetada (23505 → ErrSlugEmUso)
 }
 
 func novoRepoFake() *repoFake {
@@ -148,9 +148,9 @@ func (r *repoFake) SuspenderPorOrganization(_ context.Context, organizationUUID 
 }
 
 type cacheFake struct {
-	mu          sync.Mutex
-	porSlug     map[string]EntradaResolucao
-	orgInvalidadas []string
+	mu              sync.Mutex
+	porSlug         map[string]EntradaResolucao
+	orgInvalidadas  []string
 	slugInvalidados []string
 }
 
