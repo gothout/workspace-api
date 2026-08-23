@@ -878,3 +878,42 @@ Started: 2026-08-22
   - uuid.MustParse aceita só hex: sufixos mnemônicos ("pa01") panicam no
     teste — usar hex válido ("ba01").
 ---
+
+## 2026-08-23 - UX2
+- DTOs de log enriquecidos com user_nome/user_email (issue #29): contrato
+  opcional ResolvedorUsuarios (UsuarioLog uuid/nome/email) declarado na
+  aplicação logs e implementado no bootstrap sobre o REPOSITÓRIO do user —
+  trilha mora no ClickHouse, usuário no Postgres: join entre bases não
+  existe, resolução EM LOTE por uuids DISTINTOS da página sim (uma consulta
+  por resposta, genérico coletarUserUUIDs). BuscarPorUUIDs novo no repo do
+  user (escopada quando o ctx carrega org; global = caminho plataforma,
+  exceção documentada). Enriquecimento é COMPLEMENTAR: falha do resolvedor
+  nunca derruba a consulta (warn + campos vazios); linha sem usuário
+  (sistema/anônimo/fantasma) sai vazia. OpcaoServico variadic mantém
+  chamadores existentes intactos. Swagger regenerado (3 schemas).
+- Files changed: internal/identidade/application/logs/{contratos,service,
+  dto_response,singleton}.go + usuarios_logs_test.go(NOVO) + AGENTS.md;
+  internal/identidade/domain/user/{repository.go,service_test.go(atrFake/
+  repoFake)}; cmd/bootstrap/{logs.go,bootstrap.go,logs_usuarios_test.go(NOVO)};
+  docs/*; prd.json; agents/06; progress.txt.
+- Docs read: issue #29 (gh api), AGENTS.md de application/logs (+application),
+  internal/pkg/log, service/contratos/dto da aplicação logs, repository do
+  user, cmd/bootstrap/logs.go; agents/04 (já lido na UX1).
+- Checks: build/vet/test verdes (30 pacotes, integrações testcontainers
+  reais); CGO_ENABLED=1 go test -race verde em logs+user+bootstrap; arch-go
+  100/100 pelo gate; cobertura Swagger verde com os schemas novos.
+- **Learnings for future iterations:**
+  - Enriquecimento entre bases de dados (CH × PG): declare a interface no
+    consumidor (application), implemente o adaptador no bootstrap resolvendo
+    NA CHAMADA com função de repo INJETÁVEL — integração usa construtor puro
+    sem bootar singleton (mesmo padrão validadorWorkspacesSeed).
+  - Recorte do ctx VALE para o resolvedor também: BuscarPorUUIDs escopa pela
+    organization quando ela existe no ctx; ctx vazio = caminho plataforma
+    (global). Teste prova alheio NÃO resolvido mesmo com uuid na mão.
+  - Falha de leitura complementar degrada (log warn + campos vazios), nunca
+    derruba a resposta principal — mesma filosofia das dependências
+    degradáveis; dublê do resolver com err prova isso.
+  - O recorte fail-closed da aplicação logs EXIGE workspace no ctx para o
+    recorte básico: teste ponta a ponta precisa montar org+ws+PermLer (org
+    sozinha = ErrForaDoEscopo antes de chegar ao consultor).
+---

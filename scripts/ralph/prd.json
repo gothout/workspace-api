@@ -466,7 +466,7 @@
         "build/vet/test verdes"
       ],
       "priority": 21,
-      "passes": false,
+      "passes": true,
       "issue": 29,
       "branch": "ox-alpha/ux-logs-usuario",
       "docs": [
