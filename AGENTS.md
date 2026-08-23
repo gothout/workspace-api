@@ -105,8 +105,11 @@ Especificação completa em `agents/02` e `db/migrations/AGENTS.md`.
   `GET /api/system/errors`.
 - Toda permissão granular é registrada no `permissions.go` (`Catalogo()`) e
   exposta no endpoint de permissões do usuário.
-- O front-end consome ambos como mapping — sem hardcode de código de erro nem
-  de regra de acesso.
+- Todo evento de auditoria é catalogado no `events.go` do subdomínio (ação
+  estável + descrição PT-BR + campos do payload), validado pelo `auditar()`
+  e exposto na rota auxiliar `GET /api/system/eventos`.
+- O front-end consome os três como mapping — sem hardcode de código de erro,
+  regra de acesso nem nome de evento.
 
 ## Regra de trabalho (loop de execução)
 

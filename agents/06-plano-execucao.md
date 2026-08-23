@@ -52,6 +52,7 @@ Correções priorizadas após a revisão técnica do template fechado (R1 e R2 s
 |---|---|---|---|
 | **E1** | Redis — cache, locks, denylist e rate-limit de login | [#8](https://github.com/gothout/workspace-api/issues/8) | `internal/infra/redis` degradável; denylist do JWT em Redis ligada no bootstrap; cache de slug do workspace e de permissões efetivas com TTL + invalidação; rate-limit/lockout de login (429 padronizado, degradável); prefixos de chave documentados; `docker-compose.yml` de dev + `configs_example.json`; testes de degradação/cache/lockout com Redis efêmero; `-race` verde. |
 | **E2** | ClickHouse + trilhas de log assíncronas | [#9](https://github.com/gothout/workspace-api/issues/9) | `internal/infra/clickhouse` degradável com writer em lote (flush por tamanho/intervalo, descarte contado, drain no shutdown); `internal/pkg/log/{audit_log,access_log}` folha com interface `Destino` ligada no bootstrap; log nunca síncrono; middleware global de access log com `ray_trace`; trilha de auditoria das escritas migrada; DDL versionada + `configs_example.json`; stdout degradado; testes de buffer/flush/drain/degradação; `-race` verde. |
+| **E3** | Catálogo de eventos de auditoria | [#26](https://github.com/gothout/workspace-api/issues/26) | `events.go` por subdomínio que audita (ação estável + descrição PT-BR + campos do payload), mesmo padrão do `errors.go`/`permissions.go`; `auditar()` valida a catalogação (evento novo não catalogado reprova); bootstrap agrega; `GET /api/system/eventos` expõe o mapa completo; Swagger regenerado. |
 
 ## Log de iterações
 

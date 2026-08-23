@@ -353,6 +353,30 @@
         "cmd/server/routes/AGENTS.md",
         "cmd/bootstrap/AGENTS.md"
       ]
+    },
+    {
+      "id": "E3",
+      "title": "Catálogo de eventos de auditoria mapeado para o front",
+      "description": "Eventos de auditoria hoje são vocabulário fechado só no código. Cada subdomínio declara seus eventos em events.go (ação estável + descrição PT-BR + campos do payload) no padrão do errors.go/permissions.go; auditar() valida a catalogação; bootstrap agrega; endpoint público expõe o mapa completo.",
+      "acceptanceCriteria": [
+        "events.go em cada subdomínio que audita (organization, workspace, user, auth) com ação estável + descrição PT-BR + campos do payload",
+        "auditar() falha em teste/boot quando a ação não está catalogada no events.go do subdomínio",
+        "Bootstrap agrega CatalogoEventos() de todos os subdomínios",
+        "GET /api/system/eventos (mapa completo) nas rotas de sistema, seguindo convenções do doc 04",
+        "Swagger regenerado + teste de cobertura segue verde",
+        "AGENTS.md raiz e doc 04 atualizados com o padrão",
+        "build/vet/test verdes"
+      ],
+      "priority": 17,
+      "passes": false,
+      "issue": 26,
+      "branch": "ox-alpha/evolucao-eventos",
+      "docs": [
+        "agents/04-convencoes-api.md",
+        "agents/05-padroes-codigo.md",
+        "internal/identidade/application/catalogo/AGENTS.md",
+        "cmd/bootstrap/AGENTS.md"
+      ]
     }
   ]
 }
