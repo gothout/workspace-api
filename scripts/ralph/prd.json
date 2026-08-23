@@ -404,6 +404,32 @@
         "internal/pkg/rest_err/AGENTS.md",
         "cmd/bootstrap/AGENTS.md"
       ]
+    },
+    {
+      "id": "E5",
+      "title": "Endpoints de leitura de logs (auditoria, acesso, erros)",
+      "description": "As trilhas são gravadas no ClickHouse (E2) e catalogadas (E3/E4), mas não há API de consulta. Endpoints de leitura por trilha com escopo fail-closed, filtros, paginação e permissão granular, degradável quando ClickHouse ausente.",
+      "acceptanceCriteria": [
+        "Endpoints de leitura por trilha (ex.: GET /api/application/identidade/logs/auditoria, /acesso, /erros)",
+        "Escopo fail-closed: organization do ctx só vê os próprios logs; filtros por workspace, ação, usuário, janela de tempo e ray_trace",
+        "Paginação padrão + ordenação por instante desc",
+        "Permissão granular nova (identidade:logs:ler) declarada rota a rota, registrada no permissions.go e no seed dos papéis",
+        "ClickHouse ausente = 503 padronizado (nunca 500 nem lista vazia silenciosa)",
+        "Contrato segue o doc 04 e campos alinhados ao catálogo de eventos (E3)",
+        "Catálogo de erros/permissoes/eventos atualizado (endpoints novos entram nos mappings)",
+        "Testes: escopo, filtros, paginação, degradação, permissão — build/vet/test e -race verdes"
+      ],
+      "priority": 19,
+      "passes": false,
+      "issue": 27,
+      "branch": "ox-alpha/evolucao-logs-leitura",
+      "docs": [
+        "agents/04-convencoes-api.md",
+        "agents/05-padroes-codigo.md",
+        "agents/02-stack-e-infra.md",
+        "internal/pkg/log/AGENTS.md",
+        "cmd/bootstrap/AGENTS.md"
+      ]
     }
   ]
 }
