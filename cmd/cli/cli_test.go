@@ -80,6 +80,44 @@ func TestMigrateValidateVerdeSemConexao(t *testing.T) {
 	assert.Contains(t, saida.String(), "migrate validate ok")
 }
 
+// O provisionamento incompleto (e-mail sem senha, ou o contrário) recusa CEDO
+// — antes de ler config ou abrir banco: a config aponta para arquivo que não
+// existe e mesmo assim o erro é o do provisionamento.
+func TestSeedProvisionamentoIncompletoRecusaAntesDoBanco(t *testing.T) {
+	config.ResetarParaTeste()
+	t.Cleanup(config.ResetarParaTeste)
+	casos := [][]string{
+		{"seed", "--super-admin-email", "admin@plataforma.teste"},
+		{"seed", "--super-admin-senha", "senha-forte-123"},
+	}
+	for _, args := range casos {
+		raiz := NovoRootCommand()
+		raiz.SetOut(&bufferTeste{})
+		raiz.SetErr(&bufferTeste{})
+		raiz.SetArgs(append([]string{"--config", filepath.Join(t.TempDir(), "nao-existe.json")}, args...))
+
+		err := raiz.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "--super-admin-email E --super-admin-senha juntos")
+	}
+}
+
+// Flags do provisionamento montadas com padrões documentados.
+func TestSeedFlagsDeProvisionamentoMontadas(t *testing.T) {
+	seed := subComando(NovoRootCommand(), "seed")
+	require.NotNil(t, seed)
+
+	email := seed.Flags().Lookup("super-admin-email")
+	require.NotNil(t, email)
+	senha := seed.Flags().Lookup("super-admin-senha")
+	require.NotNil(t, senha)
+	slug := seed.Flags().Lookup("workspace-slug")
+	require.NotNil(t, slug)
+	assert.Equal(t, "principal", slug.DefValue)
+	assert.NotEmpty(t, email.Usage)
+	assert.NotEmpty(t, senha.Usage)
+}
+
 type bufferTeste struct{ conteudo string }
 
 func (b *bufferTeste) Write(p []byte) (int, error) {

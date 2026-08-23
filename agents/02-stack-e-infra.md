@@ -113,6 +113,8 @@ Ferramenta: `golang-migrate/migrate/v4`, SQL puro, tabela de controle `schema_mi
 
 Seeds rodam via **`workspace-api seed`**, são **idempotentes** e **nunca automáticos no boot** — subir o processo nunca grava dado de negócio sozinho.
 
+O **provisionamento inicial** (R3) é opcional e também só via CLI: com `--super-admin-email`/`--super-admin-senha` (+ `--workspace-slug`, padrão `principal`), o seed cria o **primeiro super_admin** e o **workspace inicial** na organization raiz — idempotente, passando pelas regras dos subdomínios (VOs de slug/e-mail/senha, bcrypt, atribuição validada). Nunca toma slug de outra tenant; sem as flags, o seed continua sendo só papéis + organization raiz.
+
 ### Validate sem conexão
 
 - `migrate validate` roda **sem abrir conexão**: confere par up/down, sequência sem buracos e SQL não vazio. É o gate rápido de CI/local e roda com o banco fora do ar.

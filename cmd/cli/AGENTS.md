@@ -2,7 +2,9 @@
 
 Ponto de entrada do binário, montado com **cobra**. Subcomandos: `serve`
 (sobe a API), `migrate` (opera o runner de migrations) e `seed` (dados
-mínimos: papéis, organization raiz).
+mínimos: papéis, organization raiz; com `--super-admin-email`/
+`--super-admin-senha` [+ `--workspace-slug`], provisiona também o primeiro
+super_admin e o workspace inicial — opcional, idempotente, nunca automático).
 
 ## Regras
 

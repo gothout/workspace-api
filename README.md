@@ -67,6 +67,36 @@ A API sobe em `http://localhost:8080`:
 | `/doc/index.html` | Swagger UI do contrato versionado em `docs/` |
 | `POST /api/application/identidade/auth/login` | autenticação |
 
+### Provisionamento inicial (primeiro super_admin + workspace)
+
+O seed básico cria papéis e a organization raiz — mas **nenhum usuário**.
+Sem o provisionamento opcional abaixo, o template não tem quem entre nele
+(chicken-and-egg): o primeiro `super_admin` e o workspace inicial são criados
+SÓ via CLI, **nunca no boot**, e são idempotentes como o resto do seed
+(reconhecem o que já existe e não alteram nada):
+
+```bash
+go run . seed --config configs.json \
+  --super-admin-email admin@minhaempresa.com \
+  --super-admin-senha 'troque-esta-senha' \
+  --workspace-slug principal        # padrão: principal
+```
+
+- **Nunca automático**: sem as flags/env de provisionamento, o seed só semeia
+  papéis + organization raiz (comportamento de sempre).
+- **Regras de negócio intactas**: e-mail/slug/senha passam pelos VOs e
+  services dos subdomínios — slug reservado/em uso (o provisionamento NUNCA
+  toma endereço de outra tenant), política de senha (8–72 bytes), bcrypt e a
+  atribuição `super_admin` validada pelo tripé usuário × workspace × papel.
+- **Env no lugar das flags** (preferível em produção — senha fora da linha de
+  comando): `WORKSPACE_API_SEED_SUPER_ADMIN_EMAIL`,
+  `WORKSPACE_API_SEED_SUPER_ADMIN_SENHA`, `WORKSPACE_API_SEED_WORKSPACE_SLUG`.
+- Nome do usuário: "Administrador da Plataforma" (renomeável pela API);
+  nome do workspace inicial = próprio slug.
+- Depois do provisionamento, o login já funciona ponta a ponta:
+  `POST /api/application/identidade/auth/login` com Host
+  `principal.{base_domain}` (em dev: `principal.localhost:8080`).
+
 ### CLI completa de migrations
 
 ```bash

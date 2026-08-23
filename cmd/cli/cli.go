@@ -5,7 +5,9 @@ package cli
 
 import (
 	"fmt"
+	"os"
 	"strconv"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"workspace-api/cmd/bootstrap"
@@ -180,13 +182,58 @@ func comandoMigrateCreate(caminho *string) *cobra.Command {
 }
 
 func comandoSeed(caminho *string) *cobra.Command {
-	return &cobra.Command{
+	var (
+		emailSuperAdmin string
+		senhaSuperAdmin string
+		slugWorkspace   string
+	)
+	comando := &cobra.Command{
 		Use:   "seed",
 		Short: "Semeia dados mínimos idempotentes (nunca automático no boot)",
-		RunE: func(_ *cobra.Command, _ []string) error {
-			return bootstrap.Seed(*caminho)
+		Long: "Semeia os dados mínimos da plataforma: 5 papéis globais com suas\n" +
+			"permissões e a organization raiz — idempotente.\n\n" +
+			"Com --super-admin-email e --super-admin-senha, cria TAMBÉM o primeiro\n" +
+			"super_admin e o workspace inicial da organization raiz (provisionamento,\n" +
+			"idempotente como o resto). Nunca roda no boot.",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			email := primeiroValor(emailSuperAdmin, os.Getenv(envSeedEmail))
+			senha := primeiroValor(senhaSuperAdmin, os.Getenv(envSeedSenha))
+			slug := slugWorkspace
+			if !cmd.Flags().Changed("workspace-slug") {
+				slug = primeiroValor(slug, os.Getenv(envSeedSlug))
+			}
+			provisionamento, err := bootstrap.NovoProvisionamento(email, senha, slug)
+			if err != nil {
+				return err
+			}
+			return bootstrap.Seed(*caminho, provisionamento)
 		},
 	}
+	comando.Flags().StringVar(&emailSuperAdmin, "super-admin-email", "",
+		"e-mail do primeiro super_admin (provisionamento opcional; env "+envSeedEmail+")")
+	comando.Flags().StringVar(&senhaSuperAdmin, "super-admin-senha", "",
+		"senha do primeiro super_admin, 8–72 bytes (env "+envSeedSenha+" — preferível em produção)")
+	comando.Flags().StringVar(&slugWorkspace, "workspace-slug",
+		bootstrap.SlugPadraoProvisionamento, "slug DNS do workspace inicial (env "+envSeedSlug+")")
+	return comando
+}
+
+// Variáveis de ambiente do provisionamento opcional do seed — alternativa às
+// flags quando a senha não pode aparecer na linha de comando.
+const (
+	envSeedEmail = "WORKSPACE_API_SEED_SUPER_ADMIN_EMAIL"
+	envSeedSenha = "WORKSPACE_API_SEED_SUPER_ADMIN_SENHA"
+	envSeedSlug  = "WORKSPACE_API_SEED_WORKSPACE_SLUG"
+)
+
+// primeiroValor devolve a primeira string não vazia da lista.
+func primeiroValor(valores ...string) string {
+	for _, v := range valores {
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 // escreverLinha imprime no escritor do cobra (testável), não no os.Stdout.
