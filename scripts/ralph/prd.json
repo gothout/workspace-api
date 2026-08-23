@@ -431,6 +431,71 @@
         "internal/pkg/log/AGENTS.md",
         "cmd/bootstrap/AGENTS.md"
       ]
+    },
+    {
+      "id": "UX1",
+      "title": "Endpoint de listagem de papéis",
+      "description": "Não existe rota que liste papéis — o painel não pode montar o Select de atribuição. GET de papéis globais com uuid, nome e descricao.",
+      "acceptanceCriteria": [
+        "GET /api/domain/identidade/user/papeis devolve {uuid, nome, descricao} dos papéis globais",
+        "Permissão granular declarada rota a rota, registrada no permissions.go e no seed",
+        "Erros mapeados no errors.go do subdomínio",
+        "Swagger regenerado + cobertura verde",
+        "Testes de contrato e integração",
+        "build/vet/test verdes"
+      ],
+      "priority": 20,
+      "passes": false,
+      "issue": 28,
+      "branch": "ox-alpha/ux-papeis",
+      "docs": [
+        "agents/04-convencoes-api.md",
+        "agents/05-padroes-codigo.md",
+        "internal/identidade/domain/user/AGENTS.md"
+      ]
+    },
+    {
+      "id": "UX2",
+      "title": "DTOs de log com nome/e-mail do usuário",
+      "description": "Telas de log mostram UUID truncado porque os DTOs só trazem user_uuid. Enriquecer com user_nome/user_email via join, respeitando escopo.",
+      "acceptanceCriteria": [
+        "AuditoriaItemDto, ErroItemDto e AcessoItemDto incluem user_nome e user_email (join com identidade_user_user)",
+        "Linhas sem usuário (sistema/anônimo) não quebram — campos vazios",
+        "Testes de integração cobrindo o join e o escopo",
+        "Swagger regenerado",
+        "build/vet/test verdes"
+      ],
+      "priority": 21,
+      "passes": false,
+      "issue": 29,
+      "branch": "ox-alpha/ux-logs-usuario",
+      "docs": [
+        "agents/04-convencoes-api.md",
+        "internal/pkg/log/AGENTS.md",
+        "agents/02-stack-e-infra.md"
+      ]
+    },
+    {
+      "id": "UX3",
+      "title": "Opções de filtro de logs por escopo + filtros método/status",
+      "description": "Quem lê logs não tem os :ler de user/organization/workspace para montar Selects. Endpoint de opções de filtro recortado pelo escopo do chamador + filtros método/status na trilha de acesso.",
+      "acceptanceCriteria": [
+        "GET /api/application/identidade/logs/opcoes-filtro devolve usuários/organizations/workspaces (uuid+nome) JÁ recortados pelo escopo do chamador (plataforma tudo, organization a própria, workspace o próprio)",
+        "Permissão identidade:logs:ler basta para as opções do próprio recorte",
+        "Trilha de acesso aceita filtros por método HTTP e classe de status (2xx/4xx/5xx)",
+        "Swagger regenerado + mappings atualizados",
+        "Testes dos três recortes + filtros novos",
+        "build/vet/test verdes"
+      ],
+      "priority": 22,
+      "passes": false,
+      "issue": 30,
+      "branch": "ox-alpha/ux-logs-filtros",
+      "docs": [
+        "agents/04-convencoes-api.md",
+        "agents/03-identidade-tenancy.md",
+        "internal/identidade/application/logs/AGENTS.md"
+      ]
     }
   ]
 }
