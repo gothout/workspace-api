@@ -156,6 +156,13 @@ func (e *emissorFake) Validar(tokenTexto string) (*jwt.Claims, error) {
 	return nil, errSessaoInvalidaFake
 }
 
+// ValidarSemRevogacao espelha a porta do logout: o dublê nunca consultou
+// denylist em Validar, então as duas portas coincidem — mas o método existe
+// para o contrato continuar honrado pelo dublê.
+func (e *emissorFake) ValidarSemRevogacao(tokenTexto string) (*jwt.Claims, error) {
+	return e.Validar(tokenTexto)
+}
+
 type organizacoesFake struct {
 	org       uuid.UUID
 	resolvido bool
@@ -284,6 +291,65 @@ func TestRefreshTrocaOParEExigeLinhaAtiva(t *testing.T) {
 	assert.ErrorIs(t, err, ErrSessaoInvalida)
 }
 
+// R5 (issue #23): refresh com ROTAÇÃO — o jti anterior é revogado na
+// renovação e o reuso dele falha fechado; o logout do token já rodado pela
+// rotação também é sucesso (idempotente).
+func TestRefreshRotacionaERevogaOJtiAnterior(t *testing.T) {
+	svc, usuarios, emissor, orgs, _ := montarApp(t)
+	usuarios.semear(orgs.org, "ana@exemplo.com")
+
+	primeira, err := svc.Login(context.Background(), hostDeTeste, LoginEntrada{Email: "ana@exemplo.com", Senha: "senha-segura-123"})
+	require.NoError(t, err)
+	jtiAntigo, err := emissor.Validar(primeira.RefreshToken)
+	require.NoError(t, err)
+
+	segunda, err := svc.Refresh(context.Background(), primeira.RefreshToken)
+	require.NoError(t, err)
+	jtiNovo, err := emissor.Validar(segunda.RefreshToken)
+	require.NoError(t, err)
+	assert.NotEqual(t, jtiAntigo.JTI, jtiNovo.JTI, "rotação emite jti novo")
+
+	usuarios.mu.Lock()
+	revogado := usuarios.tokens[jtiAntigo.JTI].RevogadoEm != nil
+	novoAtivo := usuarios.tokens[jtiNovo.JTI].RevogadoEm == nil
+	usuarios.mu.Unlock()
+	assert.True(t, revogado, "o jti anterior é revogado NO ARMAZÉM, não só rejeitado na porta")
+	assert.True(t, novoAtivo, "o par novo nasce com a linha ativa")
+
+	// Reuso do refresh antigo: falha fechado.
+	_, err = svc.Refresh(context.Background(), primeira.RefreshToken)
+	assert.ErrorIs(t, err, ErrSessaoInvalida, "refresh renovado não serve de novo")
+
+	// Logout do token já rodado pela rotação: sucesso (idempotente).
+	assert.NoError(t, svc.Logout(context.Background(), primeira.RefreshToken))
+
+	// A sessão atual segue viva depois disso.
+	terceira, err := svc.Refresh(context.Background(), segunda.RefreshToken)
+	require.NoError(t, err)
+	assert.NotEmpty(t, terceira.AccessToken)
+}
+
+// R5 (issue #23): logout IDEMPOTENTE de verdade — repetir com o mesmo token
+// (já revogado pelo próprio logout) é sucesso; só entrada inválida recusa.
+func TestLogoutRepetidoNaoFalha(t *testing.T) {
+	svc, usuarios, _, orgs, _ := montarApp(t)
+	usuarios.semear(orgs.org, "ana@exemplo.com")
+
+	sessao, err := svc.Login(context.Background(), hostDeTeste, LoginEntrada{Email: "ana@exemplo.com", Senha: "senha-segura-123"})
+	require.NoError(t, err)
+
+	require.NoError(t, svc.Logout(context.Background(), sessao.RefreshToken))
+	assert.NoError(t, svc.Logout(context.Background(), sessao.RefreshToken),
+		"segundo logout do mesmo token: caminho idempotente alcançável")
+	assert.NoError(t, svc.Logout(context.Background(), sessao.RefreshToken), "terceiro tanto faz")
+
+	_, err = svc.Refresh(context.Background(), sessao.RefreshToken)
+	assert.ErrorIs(t, err, ErrSessaoInvalida)
+
+	// Lixo/assimétrico continua recusando — idempotente não é porta aberta.
+	assert.ErrorIs(t, svc.Logout(context.Background(), "nao-e-token"), ErrSessaoInvalida)
+}
+
 func TestLogoutRevogaPersistindoNoPostgres(t *testing.T) {
 	svc, usuarios, _, orgs, _ := montarApp(t)
 	usuarios.semear(orgs.org, "ana@exemplo.com")
@@ -320,9 +386,10 @@ func TestContaInativaEncerraASessaoSemVazarEstado(t *testing.T) {
 	assert.ErrorIs(t, err, ErrSessaoInvalida, "mesma recusa genérica — estado da conta não se revela")
 }
 
-// R4 (issue #22): a sessão não sobrevive à organization inativa — refresh e
-// logout falham FECHADO mesmo com jti ativo e conta ativa; a recusa é a
-// genérica (estado da dona não vaza).
+// R4 (issue #22) + R5 (issue #23): a sessão não sobrevive à organization
+// inativa — o refresh falha FECHADO com a dona morta; o LOGOUT, operação de
+// destruição, não é bloqueado por ela: confirma a revogação e responde
+// sucesso (idempotente).
 func TestSessaoNaoSobreviveAOrganizationInativa(t *testing.T) {
 	svc, usuarios, _, orgs, vitalidade := montarApp(t)
 	usuarios.semear(orgs.org, "ana@exemplo.com")
@@ -333,16 +400,17 @@ func TestSessaoNaoSobreviveAOrganizationInativa(t *testing.T) {
 	vitalidade.inativar(orgs.org)
 	_, err = svc.Refresh(context.Background(), sessao.RefreshToken)
 	assert.ErrorIs(t, err, ErrSessaoInvalida, "refresh com dona inativa falha fechado")
-	assert.ErrorIs(t, svc.Logout(context.Background(), sessao.RefreshToken), ErrSessaoInvalida,
-		"logout pela mesma porta: dona morta não abre sessão")
 
 	// No mundo real a cascata (EncerradorSessoesUsuarios) revogou as linhas
-	// NO MOMENTO da inativação — o logout bloqueado pela vitalidade não é quem
-	// revoga. Emulada aqui no dublê.
+	// NO MOMENTO da inativação — emulada aqui no dublê.
 	usuarios.revogarTudo()
 
+	// R5: logout do token já revogado pela cascata NÃO falha — destruição
+	// best-effort; dona morta não tem nada a proteger aqui.
+	assert.NoError(t, svc.Logout(context.Background(), sessao.RefreshToken))
+
 	// Reativação da dona NÃO ressuscita o jti: revogação da cascata é
-	// permanente; a vitalidade segue como defesa em profundidade.
+	// permanente; a vitalidade segue como defesa em profundidade no refresh.
 	vitalidade.ativa[orgs.org] = true
 	_, err = svc.Refresh(context.Background(), sessao.RefreshToken)
 	assert.ErrorIs(t, err, ErrSessaoInvalida)

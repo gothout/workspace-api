@@ -55,9 +55,9 @@ Servido pela aplicação **`internal/identidade/application/auth`** — o login 
 - `POST /api/application/identidade/auth/login` → `access_token` (curto — `security.jwt_ttl_min`) + `refresh_token` (longo — `security.jwt_refresh_ttl_hours`).
 - **O login exige Host que resolva a organization** (subdomínio de workspace ou domínio custom dela); as rotas de auth rodam **só com a resolução da organization**, sem vínculo nem permissão. Host sem organization resolvível = **o mesmo 401 genérico** de credenciais inválidas.
 - Claims do access token: `sub` (user uuid), `org` (organization uuid), `wks` (workspace uuid ativo, quando houver), `name`, `email`, `typ=access`. Refresh: `typ=refresh`, `jti` único.
-- `POST /api/application/identidade/auth/refresh` → novo par de tokens.
-- `POST /api/application/identidade/auth/logout` → revoga o refresh.
-- **O refresh token é persistido no Postgres** (`identidade_user_refresh_token`, uma linha por `jti`): o logout **revoga no banco** (marca `revogado_em`). A denylist Redis é **evolução futura** e vira só **cache dessa revogação** — a interface já é declarada no `infra/jwt`.
+- `POST /api/application/identidade/auth/refresh` → novo par de tokens **com rotação**: o `jti` anterior é revogado no banco antes da emissão do novo (reuso de refresh renovado falha fechado; se a emissão falhar depois da revogação, a sessão morre — direção segura).
+- `POST /api/application/identidade/auth/logout` → revoga o refresh. **Idempotente**: repetir com token já revogado é sucesso (operação de destruição — não exige jti ativo, conta autenticável nem dona viva); só assinatura/tipo/claims inválidos recusam com o 401 genérico.
+- **O refresh token é persistido no Postgres** (`identidade_user_refresh_token`, uma linha por `jti`): logout e rotação **revogam no banco** (marcam `revogado_em`; a linha nunca é removida). A denylist Redis é **evolução futura** e vira só **cache dessa revogação** — a interface já é declarada no `infra/jwt`, que expõe `ValidarAssinatura` como porta EXCLUSIVA do logout idempotente (lê as claims sem consultar a denylist).
 - Resposta de autenticação **não distingue "usuário não existe" de "senha errada"** — nem no erro nem no tempo gasto.
 
 ### 2. X-Api-Key (integrações/server-to-server)

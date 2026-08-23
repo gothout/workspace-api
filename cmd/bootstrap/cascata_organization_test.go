@@ -1,9 +1,10 @@
 // Cenário R4 (issue #22) ponta a ponta sobre o esquema migrado: inativar a
 // organization encerra TODOS os acessos dela — sessões dos usuários
-// (refresh tokens) e chaves de API — e o refresh/logout falham FECHADO com
-// a dona morta mesmo antes de qualquer nova tentativa de acesso. Montagem
-// por construtores PUROS sobre o banco efêmero (o singleton é POR PROCESSO:
-// este pacote tem outro teste que boota os contêineres).
+// (refresh tokens) e chaves de API — e o refresh falha FECHADO com a dona
+// morta mesmo antes de qualquer nova tentativa de acesso; o LOGOUT segue
+// idempotente (R5): operação de destruição não é bloqueada pela dona.
+// Montagem por construtores PUROS sobre o banco efêmero (o singleton é POR
+// PROCESSO: este pacote tem outro teste que boota os contêineres).
 package bootstrap
 
 import (
@@ -93,6 +94,10 @@ func (e emissorLocal) EmitirPar(in jwt.EntradaToken) (string, string, string, ti
 
 func (e emissorLocal) Validar(tokenTexto string) (*jwt.Claims, error) {
 	return e.m.Validar(tokenTexto)
+}
+
+func (e emissorLocal) ValidarSemRevogacao(tokenTexto string) (*jwt.Claims, error) {
+	return e.m.ValidarAssinatura(tokenTexto)
 }
 
 // resolvedorFixo devolve sempre a mesma organization — a resolução REAL por
@@ -201,8 +206,9 @@ func TestCascataDeInativacaoEncerraSessoesEApiKeys(t *testing.T) {
 	// Refresh falha FECHADO com a dona inativa — recusa genérica, sem vazamento.
 	_, err = app.Refresh(amb.ctx, sessao.RefreshToken)
 	assert.ErrorIs(t, err, aplicacaoauth.ErrSessaoInvalida)
-	// Logout pela mesma porta também não abre sessão de dona morta.
-	assert.ErrorIs(t, app.Logout(amb.ctx, sessao.RefreshToken), aplicacaoauth.ErrSessaoInvalida)
+	// R5: logout do token já revogado (rotação + cascata) é SUCESSO —
+	// idempotente de verdade; destruição não pede licença à vitalidade.
+	assert.NoError(t, app.Logout(amb.ctx, sessao.RefreshToken))
 
 	// X-Api-Key de organization inativa falha fechada (defesa em profundidade
 	// do JOIN além da revogação em cascata).

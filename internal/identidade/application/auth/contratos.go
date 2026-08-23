@@ -51,6 +51,11 @@ type EmissorToken interface {
 	// (o jti é a chave da revogação persistida).
 	EmitirPar(in jwt.EntradaToken) (acesso string, refresh string, jti string, expiraRefresh time.Time, err error)
 	Validar(tokenTexto string) (*jwt.Claims, error)
+	// ValidarSemRevogacao confere assinatura/expiração/tipo SEM a denylist —
+	// porta EXCLUSIVA do logout idempotente (R5): o token já revogado precisa
+	// ter as claims lidas para o EncerrarSessao confirmar a revogação. Nunca
+	// usar em caminho que concede acesso (refresh segue por Validar).
+	ValidarSemRevogacao(tokenTexto string) (*jwt.Claims, error)
 }
 
 // ResolvedorOrganization resolve a organization DONA do Host — a mesma fonte

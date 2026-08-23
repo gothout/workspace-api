@@ -445,8 +445,9 @@ paths:
     post:
       consumes:
       - application/json
-      description: Revoga o refresh token no Postgres (marca revogado_em); a linha
-        do jti nunca é removida
+      description: 'Revoga o refresh token no Postgres (marca revogado_em; a linha
+        nunca é removida). Idempotente: repetir com token já revogado é sucesso —
+        só assinatura/tipo/claims inválidos recusam.'
       parameters:
       - description: Refresh token a revogar
         in: body

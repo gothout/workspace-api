@@ -115,6 +115,33 @@ func (m *Manager) EmitirRefresh(in EntradaToken) (string, string, time.Time, err
 // Validar verifica assinatura, método, expiração e revogação (quando há
 // verificador ligado). Refresh revogado = ErrTokenInvalido.
 func (m *Manager) Validar(tokenStr string) (*Claims, error) {
+	claims, err := m.parseValido(tokenStr)
+	if err != nil {
+		return nil, err
+	}
+	if m.revogador != nil && claims.Tipo == ClaimTipoRefresh {
+		revogado, err := m.revogador.Revogado(claims.JTI)
+		if err != nil {
+			return nil, fmt.Errorf("jwt: falha ao conferir revogação: %w", err)
+		}
+		if revogado {
+			return nil, ErrTokenInvalido
+		}
+	}
+	return claims, nil
+}
+
+// ValidarAssinatura confere assinatura, método, expiração e tipo SEM consultar
+// o revogador — é a porta do LOGOUT idempotente (R5): o token já revogado tem
+// que ter as claims lidas para o auth achar a linha do jti e confirmar a
+// revogação. Qualquer outro consumo deve usar Validar — pular a denylist em
+// caminho que CONCEDE acesso nunca é aceitável.
+func (m *Manager) ValidarAssinatura(tokenStr string) (*Claims, error) {
+	return m.parseValido(tokenStr)
+}
+
+// parseValido faz a validação criptográfica/estrutural comum às duas portas.
+func (m *Manager) parseValido(tokenStr string) (*Claims, error) {
 	parsed, err := jwt.ParseWithClaims(tokenStr, &Claims{}, func(t *jwt.Token) (any, error) {
 		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("%w: método inesperado", ErrTokenInvalido)
@@ -136,15 +163,6 @@ func (m *Manager) Validar(tokenStr string) (*Claims, error) {
 	}
 	if claims.Tipo == ClaimTipoRefresh && claims.JTI == "" {
 		return nil, ErrTokenInvalido
-	}
-	if m.revogador != nil && claims.Tipo == ClaimTipoRefresh {
-		revogado, err := m.revogador.Revogado(claims.JTI)
-		if err != nil {
-			return nil, fmt.Errorf("jwt: falha ao conferir revogação: %w", err)
-		}
-		if revogado {
-			return nil, ErrTokenInvalido
-		}
 	}
 	return claims, nil
 }

@@ -20,6 +20,10 @@ Emissão e validação de tokens JWT (golang-jwt, stack em `agents/02`).
   declarada AQUI** (ausência da implementação = "nada revogado"). A
   implementação Redis é **evolução futura**, ligada no `cmd/bootstrap`, e
   vira só **cache dessa revogação** — nunca a fonte da verdade.
+  `Validar` é a porta de quem CONCEDE acesso (consulta o revogador);
+  `ValidarAssinatura` é a porta **EXCLUSIVA do logout idempotente** (R5) —
+  lê as claims sem a denylist para o token já revogado ter sua revogação
+  confirmada em vez de recusada. Nunca usar em caminho que concede acesso.
 - A chave secreta nunca aparece em log, erro ou resposta.
 - Erros de validação distinguem internamente (expirado, assinatura,
   formato) para log, mas a resposta ao cliente é o 401 genérico do

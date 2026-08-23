@@ -89,7 +89,7 @@ func (ctrl *controllerImpl) Refresh(c *gin.Context) {
 }
 
 // @Summary      Encerra a sessão
-// @Description  Revoga o refresh token no Postgres (marca revogado_em); a linha do jti nunca é removida
+// @Description  Revoga o refresh token no Postgres (marca revogado_em; a linha nunca é removida). Idempotente: repetir com token já revogado é sucesso — só assinatura/tipo/claims inválidos recusam.
 // @Tags         Identidade · Auth
 // @Accept       json
 // @Produce      json

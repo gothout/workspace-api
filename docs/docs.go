@@ -63,7 +63,7 @@ const docTemplate = `{
         },
         "/api/application/identidade/auth/logout": {
             "post": {
-                "description": "Revoga o refresh token no Postgres (marca revogado_em); a linha do jti nunca é removida",
+                "description": "Revoga o refresh token no Postgres (marca revogado_em; a linha nunca é removida). Idempotente: repetir com token já revogado é sucesso — só assinatura/tipo/claims inválidos recusam.",
                 "consumes": [
                     "application/json"
                 ],

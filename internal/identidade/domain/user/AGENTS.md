@@ -18,7 +18,10 @@ irmã em `internal/identidade/application/auth`.
   bootstrap), nunca pelo pacote. Controller nenhum toca em hash.
 - **Refresh token persistido** (`identidade_user_refresh_token`): uma linha
   por `jti` com `expira_em` e `revogado_em`; o logout revoga marcando
-  `revogado_em`. A denylist Redis da evolução é só cache dessa revogação.
+  `revogado_em` (idempotente — token já revogado é sucesso; linha ausente é
+  recusa). A rotação do refresh (aplicação `auth`) usa o mesmo caminho:
+  renovação marca o `jti` anterior como revogado. A denylist Redis da
+  evolução é só cache dessa revogação.
 - **A resposta de autenticação não distingue "não existe" de "senha
   errada"** — nem no erro (mesmo `code`, mesma mensagem, mesmo 401) nem no
   **tempo** (comparação de hash roda também quando o user não existe, contra

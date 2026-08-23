@@ -195,6 +195,17 @@ func (emissorToken) Validar(tokenTexto string) (*jwt.Claims, error) {
 	return m.Validar(tokenTexto)
 }
 
+// ValidarSemRevogacao expõe a porta do logout idempotente (R5): sem denylist,
+// o token já revogado tem as claims lidas e o EncerrarSessao confirma a
+// revogação em vez de recusar.
+func (emissorToken) ValidarSemRevogacao(tokenTexto string) (*jwt.Claims, error) {
+	m, err := jwt.Get()
+	if err != nil {
+		return nil, err
+	}
+	return m.ValidarAssinatura(tokenTexto)
+}
+
 // resolvedorOrganizacao casa o Host com a MESMA fonte do ResolveWorkspace:
 // rótulo de workspace no domínio-base da plataforma OU domínio custom
 // white-label (o dono do domínio resolve mesmo sem rótulo — portal raiz do

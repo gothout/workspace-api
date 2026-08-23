@@ -22,9 +22,13 @@ type Service interface {
 	// caminho de comparação de hash (organization aleatória não encontra
 	// ninguém e o service do user queima o bcrypt contra hash de mentira).
 	Login(ctx context.Context, host string, in LoginEntrada) (*SessaoResponseDto, error)
-	// Refresh troca um refresh token válido por um par novo.
+	// Refresh troca um refresh token válido por um par novo COM ROTAÇÃO
+	// (R5): o jti anterior é revogado antes da emissão — reuso de refresh
+	// renovado falha fechado.
 	Refresh(ctx context.Context, refreshToken string) (*SessaoResponseDto, error)
 	// Logout revoga o refresh token no Postgres (revogação persistida).
+	// IDEMPOTENTE: token já revogado é sucesso — repetir o logout nunca
+	// falha; só assinatura/tipo/claims inválidos recusam.
 	Logout(ctx context.Context, refreshToken string) error
 }
 
@@ -73,9 +77,16 @@ func (s *serviceImpl) Login(ctx context.Context, host string, in LoginEntrada) (
 }
 
 func (s *serviceImpl) Refresh(ctx context.Context, refreshToken string) (*SessaoResponseDto, error) {
-	u, ctxOrg, jti, err := s.sessaoDoToken(ctx, refreshToken)
+	u, ctxOrg, jtiAnterior, err := s.sessaoDoToken(ctx, refreshToken)
 	if err != nil {
 		return nil, err
+	}
+	// Rotação (R5) na direção fail-closed: revoga o jti anterior ANTES de
+	// emitir o par novo — se a emissão falhar, a sessão morre (o dono
+	// re-loga); nunca dois refresh válidos coexistem. EncerrarSessao é
+	// idempotente no subdomínio e audita a revogação.
+	if err := s.deps.Usuarios.EncerrarSessao(ctxOrg, u.UUID, jtiAnterior); err != nil {
+		return nil, ErrSessaoInvalida
 	}
 	sessao, err := s.abrirSessao(ctxOrg, u)
 	if err != nil {
@@ -84,21 +95,31 @@ func (s *serviceImpl) Refresh(ctx context.Context, refreshToken string) (*Sessao
 	s.auditar(ctx, "refresh", true,
 		"user_uuid", u.UUID.String(),
 		"organization_uuid", u.OrganizationUUID.String(),
-		"jti_anterior", jti)
+		"jti_anterior", jtiAnterior)
 	return sessao, nil
 }
 
 func (s *serviceImpl) Logout(ctx context.Context, refreshToken string) error {
-	u, ctxOrg, jti, err := s.sessaoDoToken(ctx, refreshToken)
+	usuarioUUID, organizationUUID, jti, err := s.claimsParaEncerrar(refreshToken)
 	if err != nil {
 		return err
 	}
-	if err := s.deps.Usuarios.EncerrarSessao(ctxOrg, u.UUID, jti); err != nil {
+	ctxOrg := orgctx.WithOrganization(ctx, organizationUUID)
+	// Logout NÃO exige jti ativo, conta autenticável nem dona viva: é
+	// operação de DESTRUIÇÃO — nunca concede acesso, então nada nela precisa
+	// de fail-closed além da assinatura. O token já revogado (logout
+	// repetido, rotação do refresh ou cascata da organization) encontra a
+	// linha marcada e EncerrarSessao devolve nil: idempotente de verdade
+	// (R5) — antes deste ajuste esse caminho era inalcançável porque o
+	// logout passava pela mesma porta do refresh.
+	if err := s.deps.Usuarios.EncerrarSessao(ctxOrg, usuarioUUID, jti); err != nil {
+		// Linha ausente/anomalia de infra: recusa honesta — nada foi revogado
+		// e repetir não muda nada até a causa sumir.
 		return ErrSessaoInvalida
 	}
 	s.auditar(ctx, "logout", true,
-		"user_uuid", u.UUID.String(),
-		"organization_uuid", u.OrganizationUUID.String(),
+		"user_uuid", usuarioUUID.String(),
+		"organization_uuid", organizationUUID.String(),
 		"jti", jti)
 	return nil
 }
@@ -106,8 +127,9 @@ func (s *serviceImpl) Logout(ctx context.Context, refreshToken string) error {
 // --- Internos -------------------------------------------------------------------
 
 // abrirSessao emite o PAR de tokens com os dados ATUAIS do usuário e persiste
-// a linha do refresh (jti único). O refresh anterior continua válido até
-// expirar ou logout — rotação de refresh é evolução futura documentada.
+// a linha do refresh (jti único). Chamado pelo login e pelo refresh — que
+// revoga o jti anterior antes (rotação, R5); sozinho ele NUNCA mantém duas
+// sessões vivas do mesmo usuário.
 func (s *serviceImpl) abrirSessao(ctx context.Context, u *modeluser.User) (*SessaoResponseDto, error) {
 	acesso, refresh, jti, expiraRefresh, err := s.deps.Emissor.EmitirPar(jwt.EntradaToken{
 		UserUUID:         u.UUID,
@@ -174,6 +196,30 @@ func (s *serviceImpl) sessaoDoToken(ctx context.Context, refreshToken string) (*
 		return nil, ctx, "", ErrSessaoInvalida
 	}
 	return u, ctxOrg, claims.JTI, nil
+}
+
+// claimsParaEncerrar é a porta do LOGOUT (R5): confere assinatura, tipo e
+// parses das claims — e SÓ isso. Diferente de sessaoDoToken, não exige jti
+// ativo nem consulta estado do usuário/dona: revogar o que já está revogado
+// tem que continuar sendo sucesso. Token malformado/estranho segue recusa
+// genérica (ErrSessaoInvalida).
+func (s *serviceImpl) claimsParaEncerrar(refreshToken string) (usuarioUUID, organizationUUID uuid.UUID, jti string, err error) {
+	// ValidarSemRevogacao: o token JÁ REVOGADO tem que passar aqui — é
+	// exatamente o caso em que o logout repete. Expirado/assinatura ruim/
+	// tipo errado seguem recusa genérica.
+	claims, err := s.deps.Emissor.ValidarSemRevogacao(refreshToken)
+	if err != nil || claims.Tipo != jwt.ClaimTipoRefresh || claims.JTI == "" {
+		return uuid.Nil, uuid.Nil, "", ErrSessaoInvalida
+	}
+	usuarioUUID, err = uuid.Parse(claims.UserUUID)
+	if err != nil || usuarioUUID == uuid.Nil {
+		return uuid.Nil, uuid.Nil, "", ErrSessaoInvalida
+	}
+	organizationUUID, err = uuid.Parse(claims.OrganizationUUID)
+	if err != nil || organizationUUID == uuid.Nil {
+		return uuid.Nil, uuid.Nil, "", ErrSessaoInvalida
+	}
+	return usuarioUUID, organizationUUID, claims.JTI, nil
 }
 
 // auditar registra login/logout/refresh (doc 03): sucesso E falha, payload
