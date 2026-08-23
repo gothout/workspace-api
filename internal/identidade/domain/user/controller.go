@@ -16,6 +16,11 @@ import (
 // PrefixoRotas é o path do subdomínio dentro do grupo /api/domain.
 const PrefixoRotas = "/identidade/users"
 
+// PrefixoRotasPapeis é o path da listagem de papéis globais — recurso de
+// referência do subdomínio fora do CRUD de usuários (contrato da issue #28:
+// /api/domain/identidade/user/papeis).
+const PrefixoRotasPapeis = "/identidade/user/papeis"
+
 type Controller interface {
 	Routes(routes gin.IRouter)
 	Create(c *gin.Context)
@@ -26,6 +31,7 @@ type Controller interface {
 	Atribuicoes(c *gin.Context)
 	AtribuirPapel(c *gin.Context)
 	RemoverAtribuicao(c *gin.Context)
+	Papeis(c *gin.Context)
 }
 
 type controllerImpl struct{ service Service }
@@ -45,6 +51,7 @@ func (ctrl *controllerImpl) Routes(routes gin.IRouter) {
 	g.GET("/:uuid/atribuicoes", middleware.SetContextAuthorization(), middleware.ResolveWorkspace(), middleware.RequirePermission(PermLer), ctrl.Atribuicoes)
 	g.POST("/:uuid/atribuicoes", middleware.SetContextAuthorization(), middleware.ResolveWorkspace(), middleware.RequirePermission(PermAtribuirPapel), ctrl.AtribuirPapel)
 	g.DELETE("/:uuid/atribuicoes/:atribuicaoUuid", middleware.SetContextAuthorization(), middleware.ResolveWorkspace(), middleware.RequirePermission(PermAtribuirPapel), ctrl.RemoverAtribuicao)
+	routes.GET(PrefixoRotasPapeis, middleware.SetContextAuthorization(), middleware.ResolveWorkspace(), middleware.RequirePermission(PermAtribuirPapel), ctrl.Papeis)
 }
 
 // Handlers finos: bind → service → c.JSON. Erro sai SÓ por rest_err.WriteError.
@@ -290,6 +297,24 @@ func (ctrl *controllerImpl) RemoverAtribuicao(c *gin.Context) {
 		return
 	}
 	c.Status(http.StatusNoContent)
+}
+
+// @Summary      Lista os papéis globais da plataforma
+// @Description  Referência para o painel montar o Select de atribuição de papéis: uuid, nome e descrição dos papéis seed (super_admin, admin_organization, admin_workspace, usuario_workspace, somente_leitura)
+// @Tags         Identidade · Usuário
+// @Produce      json
+// @Security     BearerAuth
+// @Param        X-Workspace-Id header string false "UUID do workspace (fallback quando o host não tem subdomínio)"
+// @Success      200 {array}  PapelResponseDto
+// @Failure      403 {object} rest_err.RestErr
+// @Router       /api/domain/identidade/user/papeis [get]
+func (ctrl *controllerImpl) Papeis(c *gin.Context) {
+	papeis, err := ctrl.service.Papeis(c.Request.Context())
+	if err != nil {
+		rest_err.WriteError(c, traduzir(err))
+		return
+	}
+	c.JSON(http.StatusOK, NovosPapeisResponseDto(papeis))
 }
 
 // uuidDoPath faz o parse do parâmetro; inválido = 400 (doc 04).

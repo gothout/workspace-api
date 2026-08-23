@@ -221,6 +221,7 @@ type RepositorioAtribuicoes interface {
 	TemPapelNaOrganization(ctx context.Context, usuarioUUID uuid.UUID, papelNome string) (bool, error)
 	TemPapelEmQualquerOrganization(ctx context.Context, usuarioUUID uuid.UUID, papelNome string) (bool, error)
 	PapelPorUUID(ctx context.Context, papelUUID uuid.UUID) (*modeluser.Papel, error)
+	ListarPapeis(ctx context.Context) ([]modeluser.Papel, error)
 	PermissoesEfetivas(ctx context.Context, usuarioUUID, workspaceUUID uuid.UUID) ([]string, error)
 }
 
@@ -316,6 +317,24 @@ func (r *repositorioAtribuicoesImpl) PapelPorUUID(ctx context.Context, papelUUID
 		return nil, err
 	}
 	return &p, nil
+}
+
+// ListarPapeis devolve TODOS os papéis globais da plataforma (seed da F1) —
+// MESMA EXCEÇÃO de escopo do PapelPorUUID: as tabelas de papéis não têm
+// coluna de escopo (agents/03). Lista de referência para o painel montar o
+// Select de atribuição; ordenada por nome para saída determinística.
+func (r *repositorioAtribuicoesImpl) ListarPapeis(ctx context.Context) ([]modeluser.Papel, error) {
+	var papeis []modeluser.Papel
+	err := r.db.WithContext(ctx).
+		Order("nome ASC").
+		Find(&papeis).Error
+	if err != nil {
+		return nil, err
+	}
+	if papeis == nil {
+		papeis = []modeluser.Papel{}
+	}
+	return papeis, nil
 }
 
 // PermissoesEfetivas devolve a UNIÃO das permissões dos papéis do usuário no

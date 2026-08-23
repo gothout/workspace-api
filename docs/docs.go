@@ -1227,6 +1227,48 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/domain/identidade/user/papeis": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Referência para o painel montar o Select de atribuição de papéis: uuid, nome e descrição dos papéis seed (super_admin, admin_organization, admin_workspace, usuario_workspace, somente_leitura)",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Identidade · Usuário"
+                ],
+                "summary": "Lista os papéis globais da plataforma",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "UUID do workspace (fallback quando o host não tem subdomínio)",
+                        "name": "X-Workspace-Id",
+                        "in": "header"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/user.PapelResponseDto"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    }
+                }
+            }
+        },
         "/api/domain/identidade/users": {
             "get": {
                 "security": [
@@ -2906,6 +2948,20 @@ const docTemplate = `{
                     "type": "string",
                     "maxLength": 72,
                     "minLength": 8
+                }
+            }
+        },
+        "user.PapelResponseDto": {
+            "type": "object",
+            "properties": {
+                "descricao": {
+                    "type": "string"
+                },
+                "nome": {
+                    "type": "string"
+                },
+                "uuid": {
+                    "type": "string"
                 }
             }
         },

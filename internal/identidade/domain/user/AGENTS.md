@@ -42,7 +42,10 @@ irmã em `internal/identidade/application/auth`.
 ## Permissões (`permissions.go` + `Catalogo()`)
 
 `identidade:user:{criar, ler, editar, remover, atribuir_papel}` — rota a
-rota.
+rota. `atribuir_papel` cobre também a listagem dos papéis globais
+(`GET /api/domain/identidade/user/papeis` — referência para o painel montar
+o Select de atribuição; consulta GLOBAL, mesma exceção das tabelas de
+papéis, e leitura sem auditoria).
 
 ## Definição de pronto
 

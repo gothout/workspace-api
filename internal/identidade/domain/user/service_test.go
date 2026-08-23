@@ -2,6 +2,7 @@ package user
 
 import (
 	"context"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -229,6 +230,7 @@ type atrFake struct {
 	papeis       map[uuid.UUID]string
 	papelPorNome map[string][]uuid.UUID
 	permissoes   map[uuid.UUID][]string
+	catalogo     []modeluser.Papel // papéis globais devolvidos por ListarPapeis
 	erroAoSalvar error
 }
 
@@ -317,6 +319,15 @@ func (a *atrFake) PapelPorUUID(_ context.Context, papelUUID uuid.UUID) (*modelus
 	return &modeluser.Papel{UUID: papelUUID, Nome: nome}, nil
 }
 
+func (a *atrFake) ListarPapeis(_ context.Context) ([]modeluser.Papel, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	itens := make([]modeluser.Papel, 0, len(a.catalogo))
+	itens = append(itens, a.catalogo...)
+	sort.Slice(itens, func(i, j int) bool { return itens[i].Nome < itens[j].Nome })
+	return itens, nil
+}
+
 func (a *atrFake) PermissoesEfetivas(_ context.Context, _ uuid.UUID, _ uuid.UUID) ([]string, error) {
 	return []string{}, nil
 }
@@ -327,6 +338,13 @@ func (a *atrFake) seedPapel(id uuid.UUID, nome string) {
 	defer a.mu.Unlock()
 	a.papeis[id] = nome
 	a.papelPorNome[nome] = append(a.papelPorNome[nome], id)
+}
+
+// seedCatalogo popula o catálogo global devolvido por ListarPapeis.
+func (a *atrFake) seedCatalogo(papeis ...modeluser.Papel) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.catalogo = append(a.catalogo, papeis...)
 }
 
 type validadorFake struct{ pertence bool }

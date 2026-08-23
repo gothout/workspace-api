@@ -75,6 +75,11 @@ type Service interface {
 	AtribuirPapel(ctx context.Context, usuarioUUID, workspaceUUID, papelUUID uuid.UUID) (*modeluser.AtribuicaoComPapel, error)
 	Atribuicoes(ctx context.Context, usuarioUUID uuid.UUID) ([]modeluser.AtribuicaoComPapel, error)
 	RemoverAtribuicao(ctx context.Context, usuarioUUID, atribuicaoUUID uuid.UUID) error
+
+	// Papeis lista os papéis GLOBAIS da plataforma (seed da F1) para o painel
+	// montar o Select de atribuição. Leitura de referência: não escopa (as
+	// tabelas de papéis são globais — exceção documentada) e não audita.
+	Papeis(ctx context.Context) ([]modeluser.Papel, error)
 }
 
 type serviceImpl struct {
@@ -402,6 +407,13 @@ func (s *serviceImpl) RemoverAtribuicao(ctx context.Context, usuarioUUID, atribu
 	}
 	s.auditar(ctx, "remover_atribuicao", usuarioUUID, true, "atribuicao_uuid", atribuicaoUUID.String())
 	return nil
+}
+
+// Papeis delega a listagem dos papéis globais ao repositório de atribuições —
+// mesma casa do PapelPorUUID. Leitura: sem auditoria e sem regra além da
+// própria consulta (o acesso é controlado pela permissão da rota).
+func (s *serviceImpl) Papeis(ctx context.Context) ([]modeluser.Papel, error) {
+	return s.atribuicoes.ListarPapeis(ctx)
 }
 
 // --- Internos -------------------------------------------------------------------

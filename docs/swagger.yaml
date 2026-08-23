@@ -478,6 +478,15 @@ definitions:
     - nome
     - senha
     type: object
+  user.PapelResponseDto:
+    properties:
+      descricao:
+        type: string
+      nome:
+        type: string
+      uuid:
+        type: string
+    type: object
   user.UpdateUserRequestDto:
     properties:
       nome:
@@ -1360,6 +1369,34 @@ paths:
       summary: Aponta o domínio custom white-label
       tags:
       - Identidade · Organization
+  /api/domain/identidade/user/papeis:
+    get:
+      description: 'Referência para o painel montar o Select de atribuição de papéis:
+        uuid, nome e descrição dos papéis seed (super_admin, admin_organization, admin_workspace,
+        usuario_workspace, somente_leitura)'
+      parameters:
+      - description: UUID do workspace (fallback quando o host não tem subdomínio)
+        in: header
+        name: X-Workspace-Id
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/user.PapelResponseDto'
+            type: array
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/rest_err.RestErr'
+      security:
+      - BearerAuth: []
+      summary: Lista os papéis globais da plataforma
+      tags:
+      - Identidade · Usuário
   /api/domain/identidade/users:
     get:
       description: Lista paginada dos usuários da organization; com workspace_uuid
