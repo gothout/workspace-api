@@ -132,7 +132,7 @@ func configTeste(t *testing.T, baseDomain string) {
 	conteudo := `{
 	  "app": {"name": "workspace-api", "env": "dev", "version": "0.1.0", "base_domain": "` + baseDomain + `"},
 	  "server": {"http": {"port": 8080, "shutdown_timeout_sec": 5}},
-	  "security": {"jwt_secret": "segredo-de-teste-suficiente!", "jwt_ttl_min": 30, "jwt_refresh_ttl_hours": 24},
+	  "security": {"jwt_secret": "segredo-de-teste-suficiente-para-o-middleware", "jwt_ttl_min": 30, "jwt_refresh_ttl_hours": 24},
 	  "databases": {
 	    "postgres": {"host": "localhost", "port": 5432, "name": "workspace"},
 	    "migrations": {"path": "db/migrations"}

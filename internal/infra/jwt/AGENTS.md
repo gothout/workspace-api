@@ -7,6 +7,9 @@ Emissão e validação de tokens JWT (golang-jwt, stack em `agents/02`).
 - **`Connect(cfg)` puro e testável** + singleton do processo com
   `sync.Once`. JWT é **FATAL**: chave ausente/fraca no boot derruba o
   processo — API que assina token sem chave confiável não pode subir.
+  **Mínimo de 32 bytes no segredo** (R6): HS256 exige chave de 256 bits —
+  abaixo disso a assinatura é força-brutável; `Connect` recusa com erro
+  claro citando o mínimo.
 - **Claims**: `sub` (user_uuid), `org` (organization_uuid), `wks`
   (workspace_uuid), `name`, `email`, `typ` (access/refresh) e `jti`
   (**único por refresh** — é a chave da revogação persistida). Claim nova

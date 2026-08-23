@@ -73,7 +73,7 @@ func configInitParaTeste(t *testing.T, pg config.PostgresConfig) {
 	exemplo := map[string]any{
 		"app":      map[string]any{"name": "workspace-api", "env": "teste", "version": "0.0.0", "base_domain": "localhost"},
 		"server":   map[string]any{"http": map[string]any{"port": 18080, "read_timeout_sec": 15, "write_timeout_sec": 30, "idle_timeout_sec": 60, "shutdown_timeout_sec": 10, "trusted_proxy": []string{}, "cors": map[string]any{"allowed_origins": []string{}}}},
-		"security": map[string]any{"jwt_secret": "segredo-de-teste-do-postgres", "jwt_ttl_min": 60, "jwt_refresh_ttl_hours": 168},
+		"security": map[string]any{"jwt_secret": "segredo-de-teste-suficiente-do-postgres", "jwt_ttl_min": 60, "jwt_refresh_ttl_hours": 168},
 		"databases": map[string]any{
 			"postgres": map[string]any{"host": pg.Host, "port": pg.Port, "user": pg.User, "pass": pg.Pass, "name": pg.Name, "ssl_mode": "disable",
 				"pool": map[string]any{"max_open_conns": pg.Pool.MaxOpenConns, "max_idle_conns": pg.Pool.MaxIdleConns, "conn_max_lifetime_min": 5, "conn_max_idle_time_min": 2}},

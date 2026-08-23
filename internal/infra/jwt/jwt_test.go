@@ -1,6 +1,7 @@
 package jwt
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -11,7 +12,7 @@ import (
 )
 
 func TestConnectValidaParametros(t *testing.T) {
-	manager, err := Connect("segredo-suficientemente-longo", 60, 168)
+	manager, err := Connect("segredo-suficientemente-longo-do-teste", 60, 168)
 	require.NoError(t, err)
 	assert.Equal(t, 60*time.Minute, manager.TTLAccess())
 	assert.Equal(t, 168*time.Hour, manager.TTLRefresh())
@@ -26,8 +27,9 @@ func TestConnectReprovaParametrosInvalidos(t *testing.T) {
 	}{
 		{"segredo vazio", "", 60, 168},
 		{"segredo curto", "curto", 60, 168},
-		{"ttl zero", "segredo-suficientemente-longo", 0, 168},
-		{"refresh zero", "segredo-suficientemente-longo", 60, 0},
+		{"segredo com 31 bytes", strings.Repeat("a", 31), 60, 168},
+		{"ttl zero", "segredo-suficientemente-longo-do-teste", 0, 168},
+		{"refresh zero", "segredo-suficientemente-longo-do-teste", 60, 0},
 	}
 	for _, caso := range casos {
 		t.Run(caso.nome, func(t *testing.T) {
@@ -35,6 +37,18 @@ func TestConnectReprovaParametrosInvalidos(t *testing.T) {
 			assert.Error(t, err)
 		})
 	}
+}
+
+// R6 (issue #24): HS256 exige chave de 256 bits — 31 bytes recusa com erro
+// claro; exatamente 32 bytes passa.
+func TestConnectExigeSegredoDe32Bytes(t *testing.T) {
+	_, err := Connect(strings.Repeat("a", 31), 60, 168)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "32 bytes")
+
+	m, err := Connect(strings.Repeat("a", 32), 60, 168)
+	require.NoError(t, err)
+	require.NotNil(t, m)
 }
 
 // entradaExemplo monta uma identidade de teste reutilizável.
@@ -49,7 +63,7 @@ func entradaExemplo() EntradaToken {
 }
 
 func TestEmitirEValidarAcesso(t *testing.T) {
-	m, err := Connect("segredo-suficientemente-longo", 30, 24)
+	m, err := Connect("segredo-suficientemente-longo-do-teste", 30, 24)
 	require.NoError(t, err)
 
 	token, err := m.EmitirAcesso(entradaExemplo())
@@ -66,7 +80,7 @@ func TestEmitirEValidarAcesso(t *testing.T) {
 }
 
 func TestAcessoSemWorkspaceOmiteClaimWks(t *testing.T) {
-	m, err := Connect("segredo-suficientemente-longo", 30, 24)
+	m, err := Connect("segredo-suficientemente-longo-do-teste", 30, 24)
 	require.NoError(t, err)
 
 	in := entradaExemplo()
@@ -80,7 +94,7 @@ func TestAcessoSemWorkspaceOmiteClaimWks(t *testing.T) {
 }
 
 func TestEmitirEValidarRefreshComJtiUnico(t *testing.T) {
-	m, err := Connect("segredo-suficientemente-longo", 30, 24)
+	m, err := Connect("segredo-suficientemente-longo-do-teste", 30, 24)
 	require.NoError(t, err)
 
 	token1, jti1, expira1, err := m.EmitirRefresh(entradaExemplo())
@@ -98,9 +112,9 @@ func TestEmitirEValidarRefreshComJtiUnico(t *testing.T) {
 }
 
 func TestValidarReprovaCasosDeAtaque(t *testing.T) {
-	m, err := Connect("segredo-suficientemente-longo", 30, 24)
+	m, err := Connect("segredo-suficientemente-longo-do-teste", 30, 24)
 	require.NoError(t, err)
-	outro, _ := Connect("outro-segredo-suficiente!", 30, 24)
+	outro, _ := Connect("outro-segredo-suficiente-para-testar!", 30, 24)
 
 	falsificado, err := outro.EmitirAcesso(entradaExemplo())
 	require.NoError(t, err)
@@ -123,7 +137,7 @@ func TestValidarReprovaCasosDeAtaque(t *testing.T) {
 }
 
 func TestValidarReprovaTokenExpirado(t *testing.T) {
-	m, err := Connect("segredo-suficientemente-longo", 30, 24)
+	m, err := Connect("segredo-suficientemente-longo-do-teste", 30, 24)
 	require.NoError(t, err)
 	// Token vencido: emite com validade negativa direto no manager de teste.
 	m.ttlAccess = -time.Minute
@@ -136,7 +150,7 @@ func TestValidarReprovaTokenExpirado(t *testing.T) {
 }
 
 func TestValidarReprovaMetodoDiferente(t *testing.T) {
-	m, err := Connect("segredo-suficientemente-longo", 30, 24)
+	m, err := Connect("segredo-suficientemente-longo-do-teste", 30, 24)
 	require.NoError(t, err)
 
 	// Assina com NONE — algoritmo fora da lista permitida é recusado.
@@ -154,7 +168,7 @@ func TestValidarReprovaMetodoDiferente(t *testing.T) {
 }
 
 func TestValidarRefreshRevogado(t *testing.T) {
-	m, err := Connect("segredo-suficientemente-longo", 30, 24)
+	m, err := Connect("segredo-suficientemente-longo-do-teste", 30, 24)
 	require.NoError(t, err)
 
 	token, jti, _, err := m.EmitirRefresh(entradaExemplo())
@@ -178,7 +192,7 @@ func (r revogadorFalso) Revogado(jti string) (bool, error) { return r[jti], nil 
 
 // Access token NÃO passa pela conferência de revogação — só o refresh.
 func TestAccessTokenIgnoraRevogador(t *testing.T) {
-	m, err := Connect("segredo-suficientemente-longo", 30, 24)
+	m, err := Connect("segredo-suficientemente-longo-do-teste", 30, 24)
 	require.NoError(t, err)
 	m.DefinirRevogador(revogadorFalso{})
 
@@ -197,7 +211,7 @@ func TestGetAntesDoInitDevolveErro(t *testing.T) {
 
 func TestCicloDoSingletonUmaUnicaVez(t *testing.T) {
 	ResetarParaTeste()
-	primeiro, err := Connect("segredo-do-teste-de-ciclo-unico", 30, 24)
+	primeiro, err := Connect("segredo-do-teste-de-ciclo-do-singleton", 30, 24)
 	require.NoError(t, err)
 
 	// Simula o boot: monta o singleton sem passar por config (injeção direta

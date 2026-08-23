@@ -16,7 +16,9 @@ import (
 	"workspace-api/internal/pkg/config"
 )
 
-const comprimentoMinimoSegredo = 16
+// HS256 exige chave de pelo menos 256 bits (32 bytes): abaixo disso a
+// assinatura é força-brutável e o segredo não é confiável para produção.
+const comprimentoMinimoSegredo = 32
 
 var (
 	instance *Manager
@@ -46,7 +48,7 @@ func (m *Manager) TTLRefresh() time.Duration { return m.ttlRefresh }
 // tocar em estado global — os testes usam só ele.
 func Connect(segredo string, ttlMin, refreshHoras int) (*Manager, error) {
 	if len(strings.TrimSpace(segredo)) < comprimentoMinimoSegredo {
-		return nil, fmt.Errorf("jwt: security.jwt_secret ausente ou curto demais (mínimo %d caracteres)", comprimentoMinimoSegredo)
+		return nil, fmt.Errorf("jwt: security.jwt_secret ausente ou curto demais (mínimo %d bytes — HS256 exige chave de 256 bits)", comprimentoMinimoSegredo)
 	}
 	if ttlMin <= 0 {
 		return nil, errors.New("jwt: security.jwt_ttl_min deve ser maior que zero")

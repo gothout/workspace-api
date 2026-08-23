@@ -165,7 +165,7 @@ func (c *Config) validar() error {
 	if c.Server.HTTP.ShutdownTimeoutSec <= 0 {
 		return errors.New("configuração inválida: server.http.shutdown_timeout_sec deve ser maior que zero")
 	}
-	segredoExemplo := c.Security.JwtSecret == "trocar-em-producao"
+	segredoExemplo := c.Security.JwtSecret == "trocar-em-producao-por-um-segredo-de-32-bytes"
 	if c.Security.JwtSecret == "" || (segredoExemplo && c.App.Env == "producao") {
 		return errors.New("configuração inválida: security.jwt_secret é obrigatório e não pode ser o valor de exemplo em produção")
 	}

@@ -129,7 +129,7 @@ func TestInitValidoCarregaEExpõePorUse(t *testing.T) {
 func TestSegredoExemploReprovaSomenteEmProducao(t *testing.T) {
 	ResetarParaTeste()
 	json := strings.Replace(exemploValido(), `"env": "dev"`, `"env": "producao"`, 1)
-	json = strings.Replace(json, `"segredo-de-teste"`, `"trocar-em-producao"`, 1)
+	json = strings.Replace(json, `"segredo-de-teste"`, `"trocar-em-producao-por-um-segredo-de-32-bytes"`, 1)
 	err := Init(escreverTemporario(t, json))
 	if err == nil || !strings.Contains(err.Error(), "jwt_secret") {
 		t.Fatalf("segredo de exemplo em produção deveria reprovar, obtive: %v", err)

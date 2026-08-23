@@ -49,6 +49,7 @@ testes de integração).
 # 1. Config local (configs.json é ignorado pelo git; o example é o contrato)
 cp configs_example.json configs.json
 #    ajuste databases.postgres.* e security.jwt_secret para o seu ambiente
+#    (jwt_secret: mínimo de 32 bytes — HS256 exige chave de 256 bits)
 
 # 2. Rodar — as migrations sobem SOZINHAS no boot (advisory lock; rollback
 #    nunca é automático). O seed NUNCA é automático.

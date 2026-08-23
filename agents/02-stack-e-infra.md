@@ -42,7 +42,7 @@ Sem Redis, ClickHouse ou errobserve no núcleo — evoluções futuras (fim dest
     }
   },
   "security": {
-    "jwt_secret": "trocar-em-producao",
+    "jwt_secret": "trocar-em-producao-por-um-segredo-de-32-bytes",
     "jwt_ttl_min": 60,
     "jwt_refresh_ttl_hours": 168
   },
