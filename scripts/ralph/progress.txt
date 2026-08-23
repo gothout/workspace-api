@@ -780,3 +780,59 @@ Started: 2026-08-22
   - Go não sobrecarrega métodos (3ª vez): Sink.Registrar(errobserve.Evento) é
     OUTRO contrato — mais um adaptador fino por trilha no bootstrap/logs.go.
 ---
+
+## 2026-08-23 - E5
+- Endpoints de leitura de logs completos (issue #27): aplicação NOVA
+  `internal/identidade/application/logs` com GET /api/application/identidade/
+  logs/{auditoria,acesso,erros} rota a rota (RequirePermission identidade:
+  logs:ler) e RECORTE EM 3 NÍVEIS derivado SEMPRE do ctx — posse EXATA de *:*
+  = plataforma (filtros livres), middleware.Atende(identidade:logs:ler_
+  organization) = organization inteira, demais = par (org, ws) resolvido;
+  filtro apontando fora do recorte = ErrForaDoEscopo 404 (não confirma
+  existência alheia); ClickHouse ausente = ErrIndisponivel → 503 padronizado.
+- Consultor de leitura no infra/clickhouse (FiltroTrilha + Consultor,
+  UseConsultor() no singleton compartilhado); trilha de ACESSO ganhou
+  colunas de tenancy via db/logs/0004 (middleware preenche depois da cadeia);
+  INSERTs do gravador com lista explícita de colunas; seed/permissões/
+  agregador de catálogos/Swagger atualizados; integração real postgres+
+  clickhouse prova escrita→flush→leitura pelos 3 recortes, filtros, ordem,
+  paginação e degradação.
+- Files changed: db/logs/{0004_log_acesso_tenancy.sql,AGENTS.md};
+  internal/pkg/log/access_log/access_log.go; cmd/server/routes/routes.go;
+  internal/infra/clickhouse/{consultor.go(NOVO),gravador.go,clickhouse.go,
+  integracao_test.go,AGENTS.md}; internal/identidade/application/logs/*
+  (NOVO, 9 arquivos + AGENTS.md + testes); cmd/bootstrap/{logs,bootstrap,
+  catalogo,seed,swagger_cobertura_test}.go + logs_leitura_test.go(NOVO) +
+  middleware_test.go; cmd/server/routes/routes.go; docs/* (swag init);
+  agents/04; AGENTS.md raiz; internal/identidade/application/AGENTS.md;
+  README.md; prd.json; agents/06; progress.txt.
+- Docs read: issue #27 (gh api), agents/README, agents/{02,04,05},
+  AGENTS.md de internal/pkg/log, cmd/bootstrap, application/catalogo+auth
+  (referências), infra/clickhouse, pkg/{orgctx,pagination,rest_err,
+  errobserve}, middleware, db/logs, routes.
+- Checks: build/vet/test verdes (30 pacotes, integrações reais);
+  CGO_ENABLED=1 go test -race verde em clickhouse/pkg-log/routes/logs/
+  bootstrap; arch-go 100/100 pelo gate; Swagger regenerado e cobertura verde
+  nos dois sentidos.
+- **Learnings for future iterations:**
+  - A trilha de acesso NÃO TINHA colunas de escopo: recorte por tenant era
+    impossível sem DDL novo — "ler logs" esconde uma migração de schema mesmo
+    em banco de telemetria (db/logs é manual/idempotente: ALTER ADD COLUMN IF
+    NOT EXISTS).
+  - count() do ClickHouse volta UInt64 (scan em int64 reprova) e status é
+    Int32 — tipos de scan do driver são ESTRICTOS; converter na mão.
+  - Driver clickhouse-go v2.40.3 falhou de forma bizarra ("have no arg for
+    param ?") com a fatia de args construída INLINE na chamada variadic
+    (append direto no argumento) — construir a fatia numa variável nova
+    (argumentosConsulta) estabilizou; se bind falhar sem motivo aparente,
+    suspeitar do ciclo de vida da fatia, não do SQL.
+  - Recorte em camadas: permissão de ROTA (:ler = workspace próprio) e
+    permissão de AMPLIAÇÃO (:ler_organization) são strings separadas —
+    RequirePermission continua single-string e o service decide o teto pelo
+    conjunto efetivo; posse de *:* segue por pertencimento EXATO (2 segmentos
+    fora da gramática do Atende).
+  - Testes que bootam singletons de aplicações no bootstrap devem usar
+    CONSTRUTORES PUROS (NewService) quando precisam de dependência própria —
+    sync.Once é do processo e o swagger_cobertura_test já bootou com outro
+    dublê.
+---
