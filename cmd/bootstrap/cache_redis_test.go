@@ -24,8 +24,8 @@ import (
 	dominioOrganizacao "workspace-api/internal/identidade/domain/organization"
 	dominioUsuario "workspace-api/internal/identidade/domain/user"
 	dominioWorkspace "workspace-api/internal/identidade/domain/workspace"
-	modeluser "workspace-api/internal/identidade/model/user"
 	orgmodel "workspace-api/internal/identidade/model/organization"
+	modeluser "workspace-api/internal/identidade/model/user"
 	modelworkspace "workspace-api/internal/identidade/model/workspace"
 	rediscache "workspace-api/internal/infra/redis"
 	"workspace-api/internal/middleware"
@@ -157,7 +157,7 @@ func TestRevogadorComCacheHitMissEEscritaDoPositivo(t *testing.T) {
 }
 
 type fonteRevogadorContadora struct {
-	resposta map[string]bool
+	resposta  map[string]bool
 	consultas map[string]int
 }
 
@@ -312,8 +312,8 @@ func TestDecoradorPermissoesCacheEInvalidacaoPorObservador(t *testing.T) {
 }
 
 type resolvedorBaseContadora struct {
-	chamadas  int
-	vinculos  int
+	chamadas   int
+	vinculos   int
 	permissoes []string
 }
 

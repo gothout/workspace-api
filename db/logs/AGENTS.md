@@ -12,8 +12,10 @@ transacional; ClickHouse não tem golang-migrate no template) — a aplicação 
   auto-suficiente (cria o database se faltar) — rodar duas vezes é inofensivo.
 - **DDL aplicado nunca é editado.** Correção = arquivo novo (fix forward),
   mesmo princípio de `db/migrations`.
-- Tabelas: `workspace_logs.log_acesso` (middleware global) e
-  `workspace_logs.log_auditoria` (escritas dos subdomínios). O nome do
+- Tabelas: `workspace_logs.log_acesso` (middleware global),
+  `workspace_logs.log_auditoria` (escritas dos subdomínios) e
+  `workspace_logs.log_erro` (erros observados — evolução errobserve: código
+  estável, severidade, flag de desconhecido e causa). O nome do
   database vem de `databases.clickhouse.database` (default `workspace_logs`)
   — mudar o default aqui exige mudar lá junto.
 - MergeTree com partição mensal e `ORDER BY (instante, ray_trace)`:
@@ -25,6 +27,7 @@ transacional; ClickHouse não tem golang-migrate no template) — a aplicação 
 # dev (docker-compose sobe o clickhouse):
 docker compose exec -T clickhouse clickhouse-client --multiquery < db/logs/0001_log_acesso.sql
 docker compose exec -T clickhouse clickhouse-client --multiquery < db/logs/0002_log_auditoria.sql
+docker compose exec -T clickhouse clickhouse-client --multiquery < db/logs/0003_log_erros.sql
 ```
 
 Em produção, o mesmo par de comandos contra o servidor gerenciado. O teste de

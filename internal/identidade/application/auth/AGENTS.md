@@ -16,6 +16,12 @@ inválidas.
 
 ## Regras
 
+- **Observação de erros** (evolução errobserve): o `NewService` devolve o
+  service DECORADO (`service_observado.go`) — todo erro que sobe ao chamador
+  vira evento estruturado com o código do `errors.go` e a severidade de
+  `severidadesErros` no `singleton.go` (login bloqueado = error; demais
+  falhas esperadas = warn). O erro sai INTACTO — a indistinguibilidade do
+  login não é tocada. Detalhes no `internal/pkg/errobserve/AGENTS.md`.
 - **Sem `model.go` nem `repository.go`** — aplicação não persiste nada
   próprio. O refresh token persistido (`identidade_user_refresh_token`) é
   tabela do subdomínio `user`, acessada por contrato.

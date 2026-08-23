@@ -71,6 +71,7 @@
     "lote_tamanho": 500,
     "lote_janela_ms": 2000,
     "fila_tamanho": 10000,
-    "drain_timeout_sec": 5
+    "drain_timeout_sec": 5,
+    "alerta_janela_seg": 60
   }
 }

@@ -34,7 +34,7 @@ func dockerDisponivel(t *testing.T) bool {
 // protocolo nativo não aceita multi-statement: cada comando vai separado.
 func aplicarDDL(t *testing.T, conn driver.Conn) {
 	t.Helper()
-	for _, arquivo := range []string{"0001_log_acesso.sql", "0002_log_auditoria.sql"} {
+	for _, arquivo := range []string{"0001_log_acesso.sql", "0002_log_auditoria.sql", "0003_log_erros.sql"} {
 		corpo, err := os.ReadFile(filepath.Join("..", "..", "..", "db", "logs", arquivo))
 		require.NoError(t, err, "DDL %s deve existir", arquivo)
 		// Comentários primeiro (podem conter ';'), depois split de comandos.
@@ -57,7 +57,7 @@ func aplicarDDL(t *testing.T, conn driver.Conn) {
 
 // TestIntegracaoTrilhasGravadasNoClickhouse: DDL versionado + writer em lote
 // ponta a ponta contra ClickHouse efêmero — eventos enfileirados aparecem nas
-// duas tabelas após o drain do shutdown.
+// três tabelas após o drain do shutdown.
 func TestIntegracaoTrilhasGravadasNoClickhouse(t *testing.T) {
 	if !dockerDisponivel(t) {
 		t.Skip("docker indisponível: teste de integração pulado")
@@ -94,10 +94,12 @@ func TestIntegracaoTrilhasGravadasNoClickhouse(t *testing.T) {
 	escritor.EnfileirarAcesso(eventoAcesso())
 	escritor.EnfileirarAuditoria(eventoAuditoria(1))
 	escritor.EnfileirarAuditoria(eventoAuditoria(2))
+	escritor.EnfileirarErros(eventoErro("identidade.workspace.slug_em_uso"))
 	escritor.Fechar() // drain garante a gravação antes das consultas
 
 	require.Equal(t, 1, contarLinhas(t, conn, "workspace_logs.log_acesso"))
 	require.Equal(t, 2, contarLinhas(t, conn, "workspace_logs.log_auditoria"))
+	require.Equal(t, 1, contarLinhas(t, conn, "workspace_logs.log_erro"))
 }
 
 func contarLinhas(t *testing.T, conn driver.Conn, tabela string) int {

@@ -54,7 +54,12 @@ type serviceImpl struct {
 	deps Dependencias
 }
 
-func NewService(deps Dependencias) Service { return &serviceImpl{deps: deps} }
+func NewService(deps Dependencias) Service {
+	return serviceObservado{
+		Service: &serviceImpl{deps: deps},
+		obs:     observadorErros,
+	}
+}
 
 func (s *serviceImpl) Login(ctx context.Context, host string, in LoginEntrada) (*SessaoResponseDto, error) {
 	// Lockout distribuído (issue #8): par e-mail+IP preso = 429 ANTES de

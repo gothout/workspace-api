@@ -5,6 +5,10 @@ import (
 	"sync"
 
 	"gorm.io/gorm"
+
+	modeluser "workspace-api/internal/identidade/model/user"
+
+	"workspace-api/internal/pkg/errobserve"
 )
 
 var (
@@ -16,6 +20,37 @@ var (
 	initErr             error
 	ErrNotInitialized   = errors.New("controller user não inicializado")
 )
+
+// severidadesErros classifica cada sentinela catalogada no errors.go para a
+// observação de erros (evolução errobserve): recusas esperadas de negócio
+// (4xx) = warn; falha interna catalogada (hash não processado, 500) =
+// error. Sentinela nova sem entrada AQUI reprova no boot (errobserve.
+// DoCatalogo panica). Código e mensagem vêm do errorCatalog do errors.go —
+// fonte única; todo retorno de erro do service passa pelo observador via
+// service_observado.go, com o erro devolvido intacto.
+var severidadesErros = map[error]errobserve.Severidade{
+	ErrNotFound:                     errobserve.SeveridadeWarn,
+	ErrInvalidInput:                 errobserve.SeveridadeWarn,
+	ErrEmailEmUso:                   errobserve.SeveridadeWarn,
+	ErrCredenciaisInvalidas:         errobserve.SeveridadeWarn,
+	ErrPapelNaoEncontrado:           errobserve.SeveridadeWarn,
+	ErrAtribuicaoDuplicada:          errobserve.SeveridadeWarn,
+	ErrAtribuicaoNaoEncontrada:      errobserve.SeveridadeWarn,
+	ErrWorkspaceInvalido:            errobserve.SeveridadeWarn,
+	ErrRefreshTokenInvalido:         errobserve.SeveridadeWarn,
+	modeluser.ErrEmailInvalido:      errobserve.SeveridadeWarn,
+	modeluser.ErrNomeInvalido:       errobserve.SeveridadeWarn,
+	modeluser.ErrSenhaInvalida:      errobserve.SeveridadeWarn,
+	modeluser.ErrHashAusente:        errobserve.SeveridadeError, // credencial não processada é falha interna (500)
+	modeluser.ErrJaInativo:          errobserve.SeveridadeWarn,
+	modeluser.ErrJaAtivo:            errobserve.SeveridadeWarn,
+	modeluser.ErrAtribuicaoInvalida: errobserve.SeveridadeWarn,
+	modeluser.ErrRefreshInvalido:    errobserve.SeveridadeWarn,
+}
+
+// observadorErros observa TODO erro devolvido pelo service deste subdomínio.
+var observadorErros = errobserve.For(modeluser.Dominio, modeluser.Subdominio,
+	errobserve.DoCatalogo(errorCatalog, severidadesErros))
 
 // UseUser agrupa todas as camadas (Repository, RepositorioAtribuicoes,
 // Service, Controller).

@@ -9,12 +9,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"workspace-api/cmd/server/routes"
 	aplicacaoauth "workspace-api/internal/identidade/application/auth"
 	aplicacaocatalogo "workspace-api/internal/identidade/application/catalogo"
 	dominioOrganizacao "workspace-api/internal/identidade/domain/organization"
 	dominioUsuario "workspace-api/internal/identidade/domain/user"
 	dominioWorkspace "workspace-api/internal/identidade/domain/workspace"
-	"workspace-api/cmd/server/routes"
 	"workspace-api/internal/pkg/config"
 )
 

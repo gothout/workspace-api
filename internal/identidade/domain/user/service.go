@@ -93,7 +93,9 @@ func NewService(repo Repository, atribuicoes RepositorioAtribuicoes, validador V
 	for _, aplicar := range opcoes {
 		aplicar(s)
 	}
-	return s
+	// Observação de erros (evolução errobserve): todo retorno de erro do
+	// service passa pelo observador do subdomínio — erro sai intacto.
+	return serviceObservado{Service: s, obs: observadorErros}
 }
 
 // --- CRUD -----------------------------------------------------------------------

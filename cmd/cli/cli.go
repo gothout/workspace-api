@@ -34,6 +34,7 @@ func NovoRootCommand() *cobra.Command {
 	raiz.AddCommand(comandoServe(&caminhoConfig))
 	raiz.AddCommand(comandoMigrate(&caminhoConfig))
 	raiz.AddCommand(comandoSeed(&caminhoConfig))
+	raiz.AddCommand(comandoErrors())
 	return raiz
 }
 
@@ -234,6 +235,34 @@ func primeiroValor(valores ...string) string {
 		}
 	}
 	return ""
+}
+
+// comandoErrors imprime o MAPA GLOBAL DE ERROS observáveis (evolução
+// errobserve): código estável, severidade, status HTTP e mensagem PT-BR — o
+// mapping que o front consome (GET /api/system/errors + severidade) direto do
+// terminal. Dado puro de registro: SEM conexão e sem configs.json.
+func comandoErrors() *cobra.Command {
+	return &cobra.Command{
+		Use:   "errors",
+		Short: "Mapa global dos erros do sistema (código, severidade, status, mensagem)",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			saida := cmd.OutOrStdout()
+			grupoAnterior := ""
+			for _, linha := range bootstrap.MapaErrosObservados() {
+				grupo := linha.Dominio + "/" + linha.Subdominio
+				if grupo != grupoAnterior {
+					if grupoAnterior != "" {
+						fmt.Fprintln(saida)
+					}
+					fmt.Fprintf(saida, "%s\n", grupo)
+					grupoAnterior = grupo
+				}
+				fmt.Fprintf(saida, "  %-58s %-8s %3d  %s\n",
+					linha.Codigo, linha.Severidade, linha.Status, linha.Mensagem)
+			}
+			return nil
+		},
+	}
 }
 
 // escreverLinha imprime no escritor do cobra (testável), não no os.Stdout.

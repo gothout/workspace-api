@@ -7,7 +7,10 @@ import (
 
 	"gorm.io/gorm"
 
+	orgmodel "workspace-api/internal/identidade/model/organization"
+
 	"workspace-api/internal/pkg/config"
+	"workspace-api/internal/pkg/errobserve"
 )
 
 var (
@@ -19,6 +22,35 @@ var (
 	initErr            error
 	ErrNotInitialized  = errors.New("controller organization não inicializado")
 )
+
+// severidadesErros classifica cada sentinela catalogada no errors.go para a
+// observação de erros (evolução errobserve): recusas esperadas de negócio
+// (4xx) = warn; sinal operacional relevante = error. Sentinela nova sem
+// entrada AQUI reprova no boot (errobserve.DoCatalogo panica).
+//
+// O código e a mensagem NÃO se repetem: vêm do errorCatalog do errors.go —
+// fonte única (agents/02). Todo retorno de erro do service passa pelo
+// observador via service_observado.go, com o erro devolvido intacto.
+var severidadesErros = map[error]errobserve.Severidade{
+	ErrNotFound:                      errobserve.SeveridadeWarn,
+	ErrInvalidInput:                  errobserve.SeveridadeWarn,
+	ErrDominioEmUso:                  errobserve.SeveridadeWarn,
+	ErrChaveEmUso:                    errobserve.SeveridadeWarn,
+	ErrApiKeyNaoEncontrada:           errobserve.SeveridadeWarn,
+	ErrPermissaoNaoPossuida:          errobserve.SeveridadeError, // tentativa de escalação de privilégio (R1) é sinal de segurança
+	orgmodel.ErrNomeInvalido:         errobserve.SeveridadeWarn,
+	orgmodel.ErrDominioInvalido:      errobserve.SeveridadeWarn,
+	orgmodel.ErrDominioNaoDefinido:   errobserve.SeveridadeWarn,
+	orgmodel.ErrJaInativo:            errobserve.SeveridadeWarn,
+	orgmodel.ErrJaAtivo:              errobserve.SeveridadeWarn,
+	orgmodel.ErrApiKeyInvalida:       errobserve.SeveridadeWarn,
+	orgmodel.ErrPermissaoInvalida:    errobserve.SeveridadeWarn,
+	orgmodel.ErrEscopoApiKeyInvalido: errobserve.SeveridadeWarn,
+}
+
+// observadorErros observa TODO erro devolvido pelo service deste subdomínio.
+var observadorErros = errobserve.For(orgmodel.Dominio, orgmodel.Subdominio,
+	errobserve.DoCatalogo(errorCatalog, severidadesErros))
 
 // UseOrganization agrupa todas as camadas (Repository, Service, Controller).
 type UseOrganization struct {

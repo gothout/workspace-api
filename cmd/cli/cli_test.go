@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"testing"
@@ -26,6 +27,7 @@ func TestNovoRootCommandMontaArvoreSemExecutar(t *testing.T) {
 	assert.True(t, subcomandos["serve"], "serve deve estar montado")
 	assert.True(t, subcomandos["migrate"], "migrate deve estar montado")
 	assert.True(t, subcomandos["seed"], "seed deve estar montado")
+	assert.True(t, subcomandos["errors"], "errors deve estar montado")
 
 	bandeira := raiz.PersistentFlags().Lookup("config")
 	require.NotNil(t, bandeira)
@@ -149,4 +151,23 @@ func caminhoMigrationsVazio(t *testing.T) string {
 	dir := filepath.Join(t.TempDir(), "migrations-vazias")
 	require.NoError(t, os.MkdirAll(dir, 0o755))
 	return dir
+}
+
+// TestErrorsImprimeMapaGlobal: o comando errors roda SEM config e SEM
+// conexão — dado puro de registro — e imprime o namespace reservado da
+// plataforma junto dos grupos de negócio, com severidade e status.
+func TestErrorsImprimeMapaGlobal(t *testing.T) {
+	var saida bytes.Buffer
+	raiz := NovoRootCommand()
+	raiz.SetOut(&saida)
+	raiz.SetArgs([]string{"errors"})
+	require.NoError(t, raiz.Execute())
+
+	texto := saida.String()
+	assert.Contains(t, texto, "sistema/plataforma", "namespace reservado visível")
+	assert.Contains(t, texto, "sistema.migrations.up")
+	assert.Contains(t, texto, "identidade/organization")
+	assert.Contains(t, texto, "identidade.organization.nao_encontrado")
+	assert.Contains(t, texto, "warn")
+	assert.Contains(t, texto, "critical")
 }

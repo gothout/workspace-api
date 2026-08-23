@@ -210,10 +210,10 @@ func montarApp(t *testing.T) (Service, *usuariosFake, *emissorFake, *organizacoe
 	orgs := &organizacoesFake{org: uuid.New(), resolvido: true}
 	vitalidade := novaVitalidadeFake()
 	svc := NewService(Dependencias{
-		Usuarios:   usuarios,
-		Emissor:    emissor,
+		Usuarios:     usuarios,
+		Emissor:      emissor,
 		Organizacoes: orgs,
-		Vitalidade: vitalidade,
+		Vitalidade:   vitalidade,
 	})
 	return svc, usuarios, emissor, orgs, vitalidade
 }
@@ -452,12 +452,12 @@ func TestSemContratoDeVitalidadeNinguemRenovaSessao(t *testing.T) {
 
 // limitadorFake conta as interações do service com o contrato LimitadorLogin.
 type limitadorFake struct {
-	mu        sync.Mutex
-	bloqueado bool
-	espera    time.Duration
-	falhas    int
-	sucessos  int
-	consultas int
+	mu            sync.Mutex
+	bloqueado     bool
+	espera        time.Duration
+	falhas        int
+	sucessos      int
+	consultas     int
 	errAutorizado error
 }
 
@@ -490,11 +490,11 @@ func montarAppComLimite(t *testing.T, limite LimitadorLogin) (Service, *usuarios
 	usuarios := novoUsuariosFake()
 	orgs := &organizacoesFake{org: uuid.New(), resolvido: true}
 	svc := NewService(Dependencias{
-		Usuarios:   usuarios,
-		Emissor:    novoEmissorFake(),
+		Usuarios:     usuarios,
+		Emissor:      novoEmissorFake(),
 		Organizacoes: orgs,
-		Vitalidade: novaVitalidadeFake(),
-		Limite:     limite,
+		Vitalidade:   novaVitalidadeFake(),
+		Limite:       limite,
 	})
 	return svc, usuarios, orgs
 }

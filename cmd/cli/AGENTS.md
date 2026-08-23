@@ -1,10 +1,12 @@
 # AGENTS.md — `cmd/cli`
 
 Ponto de entrada do binário, montado com **cobra**. Subcomandos: `serve`
-(sobe a API), `migrate` (opera o runner de migrations) e `seed` (dados
+(sobe a API), `migrate` (opera o runner de migrations), `seed` (dados
 mínimos: papéis, organization raiz; com `--super-admin-email`/
 `--super-admin-senha` [+ `--workspace-slug`], provisiona também o primeiro
-super_admin e o workspace inicial — opcional, idempotente, nunca automático).
+super_admin e o workspace inicial — opcional, idempotente, nunca automático)
+e `errors` (mapa global dos erros do sistema com as severidades da observação
+— evolução errobserve).
 
 ## Regras
 
@@ -18,6 +20,10 @@ super_admin e o workspace inicial — opcional, idempotente, nunca automático).
   `force V` | `status` | `validate` | `create {descricao}`
   (ver `internal/infra/database/migrations/AGENTS.md`). `validate` roda
   **sem conexão** — é o gate rápido de CI/local.
+- `errors` imprime o mapa global de erros (código estável, severidade
+  warn/error/critical, status HTTP, mensagem PT-BR) a partir dos registros
+  globais do `rest_err` e do `errobserve` — **sem conexão e sem
+  configs.json**; inclui o namespace reservado `sistema/plataforma`.
 - O CLI não conhece regra de negócio: ele traduz argv em chamadas ao
   bootstrap e ao runner. Erro de subcomando sai com mensagem PT-BR e exit
   code não zero.

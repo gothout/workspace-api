@@ -320,8 +320,8 @@ func TestDeleteTambemExecutaACascataDeAcessos(t *testing.T) {
 // acessos encerrados com pai vivo, direção segura).
 func TestCascataFalhaImpedePersistirInativacao(t *testing.T) {
 	casos := []struct {
-		nome      string
-		quebra    func(*repoFake, *chavesFake, *encerradorFake)
+		nome   string
+		quebra func(*repoFake, *chavesFake, *encerradorFake)
 	}{
 		{
 			nome:   "encerrador de sessões falhou",
@@ -495,10 +495,10 @@ func TestCriarApiKeyNaoEscalaPrivilegio(t *testing.T) {
 	}
 
 	casos := []struct {
-		nome       string
-		efetivas   []string // nil = ctx sem permissões injetadas
-		pedidas    []string
-		recusada   bool
+		nome     string
+		efetivas []string // nil = ctx sem permissões injetadas
+		pedidas  []string
+		recusada bool
 	}{
 		{
 			nome:     "admin_organization tentando *:*",

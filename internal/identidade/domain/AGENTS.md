@@ -34,6 +34,12 @@ Subdomínios do domínio **identidade**: `organization`, `workspace`, `user`.
 - **Catálogo de erros**: toda sentinela do `errors.go` tem entrada no
   catálogo do subdomínio (code estável + mensagem + status), registrada no
   `rest_err` — é o que alimenta `GET /api/system/errors`.
+- **Observação de erros** (evolução errobserve): o `NewService` devolve o
+  service DECORADO (`service_observado.go`) — todo erro que sobe ao chamador
+  vira evento estruturado com o código do catálogo e a severidade declarada
+  em `severidadesErros` no `singleton.go` (sentinela nova sem severidade
+  reprova no boot). O erro sai INTACTO; sentinela desconhecida vira evento
+  critical. Detalhes no `internal/pkg/errobserve/AGENTS.md`.
 - **`Catalogo()` de permissões**: `permissions.go` declara as constantes e o
   catálogo com metadados (descrição PT-BR, rota, método, grupo de menu) —
   sem ele o subdomínio não aparece no endpoint de permissões e o checklist

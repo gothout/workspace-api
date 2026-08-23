@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"workspace-api/internal/pkg/config"
+	"workspace-api/internal/pkg/errobserve"
 	"workspace-api/internal/pkg/log/access_log"
 	"workspace-api/internal/pkg/log/audit_log"
 )
@@ -22,6 +23,7 @@ type gravadorFake struct {
 	mutex      sync.Mutex
 	acessos    []access_log.Evento
 	auditorias []audit_log.Evento
+	erros      []errobserve.Evento
 	portao     chan struct{} // fechado = livre; aberto = gravação presa
 	pegouLote  chan struct{}
 	falhar     bool
@@ -45,16 +47,16 @@ func (g *gravadorFake) liberar() {
 	close(g.portao)
 }
 
-func (g *gravadorFake) contagens() (int, int) {
+func (g *gravadorFake) contagens() (int, int, int) {
 	g.mutex.Lock()
 	defer g.mutex.Unlock()
-	return len(g.acessos), len(g.auditorias)
+	return len(g.acessos), len(g.auditorias), len(g.erros)
 }
 
 func (g *gravadorFake) esperarAte(t *testing.T, acessos, auditorias int) {
 	t.Helper()
 	require.Eventually(t, func() bool {
-		a, au := g.contagens()
+		a, au, _ := g.contagens()
 		return a >= acessos && au >= auditorias
 	}, 3*time.Second, 5*time.Millisecond)
 }
@@ -94,6 +96,16 @@ func (g *gravadorFake) InserirAuditorias(_ context.Context, lote []audit_log.Eve
 	return nil
 }
 
+func (g *gravadorFake) InserirErros(_ context.Context, lote []errobserve.Evento) error {
+	if err := g.registrarEntrada(); err != nil {
+		return err
+	}
+	g.mutex.Lock()
+	defer g.mutex.Unlock()
+	g.erros = append(g.erros, lote...)
+	return nil
+}
+
 func eventoAuditoria(i int) audit_log.Evento {
 	return audit_log.Evento{
 		Dominio: "identidade", Subdominio: "workspace", Acao: "criar",
@@ -103,6 +115,13 @@ func eventoAuditoria(i int) audit_log.Evento {
 
 func eventoAcesso() access_log.Evento {
 	return access_log.Evento{Metodo: "GET", Path: "/api/status", Status: 200, RayTrace: "ray"}
+}
+
+func eventoErro(codigo string) errobserve.Evento {
+	return errobserve.Evento{
+		Dominio: "identidade", Subdominio: "workspace", Codigo: codigo,
+		Severidade: errobserve.SeveridadeWarn,
+	}
 }
 
 // TestFlushPorTamanho: lote completo descarrega SEM esperar a janela.
@@ -115,8 +134,8 @@ func TestFlushPorTamanho(t *testing.T) {
 		escritor.EnfileirarAuditoria(eventoAuditoria(i))
 	}
 	fake.esperarAte(t, 0, 3)
-	descartesAcesso, descartesAuditoria := escritor.Descartes()
-	require.Zero(t, descartesAcesso+descartesAuditoria)
+	descartesAcesso, descartesAuditoria, descartesErro := escritor.Descartes()
+	require.Zero(t, descartesAcesso + descartesAuditoria + descartesErro)
 }
 
 // TestFlushPorJanela: trilha abaixo do tamanho do lote sai pela janela de tempo.
@@ -151,16 +170,17 @@ func TestFilaCheiaDescartaEConta(t *testing.T) {
 	}
 	require.Less(t, time.Since(inicio), time.Second, "enfileirar nunca bloqueia")
 
-	_, descartesAuditoria := escritor.Descartes()
+	_, descartesAuditoria, _ := escritor.Descartes()
 	require.Equal(t, uint64(2), descartesAuditoria)
 
 	// Liberando o banco, tudo que estava em voo/fila é entregue no Fechar.
 	fake.liberar()
 	escritor.Fechar()
-	acessos, auditoriasEntregues := fake.contagens()
+	acessos, auditoriasEntregues, errosEntregues := fake.contagens()
 	require.Equal(t, 0, acessos)
 	require.Equal(t, fila+1, auditoriasEntregues) // 1 em voo + 4 drenados
-	_, descartesAuditoria = escritor.Descartes()
+	require.Equal(t, 0, errosEntregues)
+	_, descartesAuditoria, _ = escritor.Descartes()
 	require.Equal(t, uint64(2), descartesAuditoria)
 }
 
@@ -176,9 +196,31 @@ func TestDrainNoShutdown(t *testing.T) {
 	}
 	escritor.Fechar()
 
-	acessos, auditorias := fake.contagens()
+	acessos, auditorias, erros := fake.contagens()
 	require.Equal(t, 7, acessos)
 	require.Equal(t, 7, auditorias)
+	require.Equal(t, 0, erros)
+}
+
+// TestTrilhaDeErrosFlushEDrain: a trilha de ERROS (errobserve) segue as
+// mesmas regras das outras — flush por tamanho de lote SEM esperar a janela
+// e dreno completo no Fechar.
+func TestTrilhaDeErrosFlushEDrain(t *testing.T) {
+	fake := novoGravadorFake()
+	escritor := NovaEscritor(fake, config.LogsConfig{LoteTamanho: 3, LoteJanelaMs: 60_000, FilaTamanho: 100})
+
+	for i := 0; i < 3; i++ { // flush por tamanho: sai sem esperar a janela
+		escritor.EnfileirarErros(eventoErro("identidade.workspace.slug_em_uso"))
+	}
+	require.Eventually(t, func() bool {
+		_, _, erros := fake.contagens()
+		return erros >= 3
+	}, 3*time.Second, 5*time.Millisecond)
+
+	escritor.EnfileirarErros(eventoErro("desconhecido")) // abaixo do lote — drena no Fechar
+	escritor.Fechar()
+	_, _, erros := fake.contagens()
+	require.Equal(t, 4, erros)
 }
 
 // TestFecharIdempotenteENadaDepois: segundo Fechar não pânico; enfileirar
@@ -191,10 +233,12 @@ func TestFecharIdempotenteENadaDepois(t *testing.T) {
 		escritor.Fechar()
 		escritor.EnfileirarAcesso(eventoAcesso())
 		escritor.EnfileirarAuditoria(eventoAuditoria(1))
+		escritor.EnfileirarErros(eventoErro("x.y"))
 	})
-	descartesAcesso, descartesAuditoria := escritor.Descartes()
+	descartesAcesso, descartesAuditoria, descartesErro := escritor.Descartes()
 	require.Equal(t, uint64(1), descartesAcesso)
 	require.Equal(t, uint64(1), descartesAuditoria)
+	require.Equal(t, uint64(1), descartesErro)
 }
 
 // TestFalhaGravacaoContaSemTravar: erro do banco perde o lote COM CONTAGEM,

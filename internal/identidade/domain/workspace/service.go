@@ -75,7 +75,9 @@ func NewService(repo Repository, cache CacheResolucao, opcoes ...OpcaoServico) S
 	for _, aplicar := range opcoes {
 		aplicar(s)
 	}
-	return s
+	// Observação de erros (evolução errobserve): todo retorno de erro do
+	// service passa pelo observador do subdomínio — erro sai intacto.
+	return serviceObservado{Service: s, obs: observadorErros}
 }
 
 // slugsFixos — endereços fixos da plataforma; Host com um deles NUNCA resolve

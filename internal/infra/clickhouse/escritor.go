@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"workspace-api/internal/pkg/config"
+	"workspace-api/internal/pkg/errobserve"
 	"workspace-api/internal/pkg/log/access_log"
 	"workspace-api/internal/pkg/log/audit_log"
 )
@@ -31,9 +32,10 @@ const (
 type gravadorLotes interface {
 	InserirAcessos(ctx context.Context, lote []access_log.Evento) error
 	InserirAuditorias(ctx context.Context, lote []audit_log.Evento) error
+	InserirErros(ctx context.Context, lote []errobserve.Evento) error
 }
 
-// Escritor é o writer assíncrono das duas trilhas: enfileirar NUNCA bloqueia
+// Escritor é o writer assíncrono das trilhas: enfileirar NUNCA bloqueia
 // (fila cheia descarta e conta), o worker descarrega por tamanho de lote ou
 // pela janela de tempo, e Fechar drena tudo que estava pendente.
 type Escritor struct {
@@ -41,6 +43,7 @@ type Escritor struct {
 
 	filaAcesso    chan access_log.Evento
 	filaAuditoria chan audit_log.Evento
+	filaErros     chan errobserve.Evento
 
 	tamanhoLote     int
 	janela          time.Duration
@@ -52,6 +55,7 @@ type Escritor struct {
 
 	descartesAcesso    atomic.Uint64
 	descartesAuditoria atomic.Uint64
+	descartesErro      atomic.Uint64
 	falhasGravacao     atomic.Uint64
 }
 
@@ -77,6 +81,7 @@ func NovaEscritor(gravador gravadorLotes, cfg config.LogsConfig) *Escritor {
 		gravador:        gravador,
 		filaAcesso:      make(chan access_log.Evento, cfg.FilaTamanho),
 		filaAuditoria:   make(chan audit_log.Evento, cfg.FilaTamanho),
+		filaErros:       make(chan errobserve.Evento, cfg.FilaTamanho),
 		tamanhoLote:     cfg.LoteTamanho,
 		janela:          time.Duration(cfg.LoteJanelaMs) * time.Millisecond,
 		timeoutDrenagem: time.Duration(cfg.DrainTimeoutSec) * time.Second,
@@ -119,10 +124,26 @@ func (e *Escritor) EnfileirarAuditoria(ev audit_log.Evento) {
 	}
 }
 
+// EnfileirarErros recebe um evento da trilha de ERROS (errobserve) — mesmas
+// regras do EnfileirarAcesso.
+func (e *Escritor) EnfileirarErros(ev errobserve.Evento) {
+	e.mutex.Lock()
+	defer e.mutex.Unlock()
+	if e.fechado {
+		e.descartesErro.Add(1)
+		return
+	}
+	select {
+	case e.filaErros <- ev:
+	default:
+		e.descartesErro.Add(1)
+	}
+}
+
 // Descartes devolve os contadores de descarte por trilha (fila cheia ou
 // envio após fechamento) — visíveis para teste e para o /api/status futuro.
-func (e *Escritor) Descartes() (acessos, auditorias uint64) {
-	return e.descartesAcesso.Load(), e.descartesAuditoria.Load()
+func (e *Escritor) Descartes() (acessos, auditorias, erros uint64) {
+	return e.descartesAcesso.Load(), e.descartesAuditoria.Load(), e.descartesErro.Load()
 }
 
 // FalhasGravacao devolve quantos eventos foram PERDIDOS por erro de gravação
@@ -142,6 +163,7 @@ func (e *Escritor) Fechar() {
 	e.fechado = true
 	close(e.filaAcesso)
 	close(e.filaAuditoria)
+	close(e.filaErros)
 	e.mutex.Unlock()
 
 	select {
@@ -150,22 +172,25 @@ func (e *Escritor) Fechar() {
 		slog.Warn("clickhouse.escritor.drenagem_timeout",
 			"timeout_seg", int(e.timeoutDrenagem.Seconds()),
 			"acessos_pendentes", len(e.filaAcesso),
-			"auditorias_pendentes", len(e.filaAuditoria))
+			"auditorias_pendentes", len(e.filaAuditoria),
+			"erros_pendentes", len(e.filaErros))
 	}
 }
 
-// trabalhar é o loop do worker: acumula as duas trilhas, descarrega quando um
+// trabalhar é o loop do worker: acumula as trilhas, descarrega quando um
 // lote completa OU a janela estoura; no fechamento das filas, drena o resto.
 func (e *Escritor) trabalhar() {
 	defer close(e.concluido)
 	acessos := make([]access_log.Evento, 0, e.tamanhoLote)
 	auditorias := make([]audit_log.Evento, 0, e.tamanhoLote)
+	erros := make([]errobserve.Evento, 0, e.tamanhoLote)
 	canalAcesso := e.filaAcesso
 	canalAuditoria := e.filaAuditoria
+	canalErros := e.filaErros
 	ticker := time.NewTicker(e.janela)
 	defer ticker.Stop()
 
-	for canalAcesso != nil || canalAuditoria != nil {
+	for canalAcesso != nil || canalAuditoria != nil || canalErros != nil {
 		select {
 		case ev, aberto := <-canalAcesso:
 			if !aberto {
@@ -174,7 +199,7 @@ func (e *Escritor) trabalhar() {
 			}
 			acessos = append(acessos, ev)
 			if len(acessos) >= e.tamanhoLote {
-				e.descarregar(&acessos, &auditorias)
+				e.descarregar(&acessos, &auditorias, &erros)
 			}
 		case ev, aberto := <-canalAuditoria:
 			if !aberto {
@@ -183,10 +208,19 @@ func (e *Escritor) trabalhar() {
 			}
 			auditorias = append(auditorias, ev)
 			if len(auditorias) >= e.tamanhoLote {
-				e.descarregar(&acessos, &auditorias)
+				e.descarregar(&acessos, &auditorias, &erros)
+			}
+		case ev, aberto := <-canalErros:
+			if !aberto {
+				canalErros = nil
+				continue
+			}
+			erros = append(erros, ev)
+			if len(erros) >= e.tamanhoLote {
+				e.descarregar(&acessos, &auditorias, &erros)
 			}
 		case <-ticker.C:
-			e.descarregar(&acessos, &auditorias)
+			e.descarregar(&acessos, &auditorias, &erros)
 		}
 	}
 	// Dreno final: filas fechadas podem ainda ter itens em buffer.
@@ -196,7 +230,10 @@ func (e *Escritor) trabalhar() {
 	for ev := range canalRestante(e.filaAuditoria) {
 		auditorias = append(auditorias, ev)
 	}
-	e.descarregar(&acessos, &auditorias)
+	for ev := range canalRestante(e.filaErros) {
+		erros = append(erros, ev)
+	}
+	e.descarregar(&acessos, &auditorias, &erros)
 }
 
 // canalRestante converte uma fila FECHADA em iterável dos itens remanescentes.
@@ -220,7 +257,7 @@ func canalRestante[T any](fila <-chan T) <-chan T {
 // descarregar grava os lotes parciais e zera os buffers. Erro de gravação
 // PERDE o lote com contagem e log — retry aqui atrasaria o worker e a fila
 // só cresceria (descarte em cascata); honestidade contábil vale mais.
-func (e *Escritor) descarregar(acessos *[]access_log.Evento, auditorias *[]audit_log.Evento) {
+func (e *Escritor) descarregar(acessos *[]access_log.Evento, auditorias *[]audit_log.Evento, erros *[]errobserve.Evento) {
 	if len(*acessos) > 0 {
 		ctx, cancelar := context.WithTimeout(context.Background(), timeoutInsercao)
 		if err := e.gravador.InserirAcessos(ctx, *acessos); err != nil {
@@ -240,5 +277,15 @@ func (e *Escritor) descarregar(acessos *[]access_log.Evento, auditorias *[]audit
 		}
 		cancelar()
 		*auditorias = (*auditorias)[:0]
+	}
+	if len(*erros) > 0 {
+		ctx, cancelar := context.WithTimeout(context.Background(), timeoutInsercao)
+		if err := e.gravador.InserirErros(ctx, *erros); err != nil {
+			e.falhasGravacao.Add(uint64(len(*erros)))
+			slog.Error("clickhouse.escritor.lote_erro_perdido",
+				"tamanho", len(*erros), "causa", err.Error())
+		}
+		cancelar()
+		*erros = (*erros)[:0]
 	}
 }

@@ -1,14 +1,15 @@
 # AGENTS.md — `internal/infra/clickhouse`
 
 Adaptador da dependência **DEGRADÁVEL** de logs assíncronos (evolução #9):
-trilhas de auditoria e acesso escritas em lote no ClickHouse, FORA do caminho
-síncrono do request.
+trilhas de auditoria, acesso e ERROS observados (evolução errobserve) escritas
+em lote no ClickHouse, FORA do caminho síncrono do request.
 
 ## Regras
 
 - Importa só `internal/pkg` + libs externas — nunca outro `infra` (regra 2 de
-  `agents/01`). Os tipos de evento vêm de `pkg/log/{audit_log,access_log}`
-  (folhas); a conformidade com as interfaces `Destino` delas é **estrutural**
+  `agents/01`). Os tipos de evento vêm de
+  `pkg/log/{audit_log,access_log}` e do `pkg/errobserve` (folhas); a
+  conformidade com as interfaces `Destino`/`Sink` delas é **estrutural**
   na cabeça do writer, e os adaptadores finos que implementam cada interface
   moram no `cmd/bootstrap/logs.go` (Go não sobrecarrega métodos: um adaptador
   por trilha).
@@ -19,7 +20,8 @@ síncrono do request.
 - Par função pura + singleton: `Connect`/`NovaEscritor` puros (testes usam só
   eles); `InitClickhouse`/`Use`/`Close` com mutex cobrindo o `once.Do` INTEIRO
   (lição R7). `Close` DRENA o writer antes de fechar a conexão.
-- **Writer em lote (`escritor.go`) é o contrato de performance**:
+- **Writer em lote (`escritor.go`) é o contrato de performance** (três filas:
+  acesso, auditoria e erros — mesmas regras para todas):
   - fila limitada por trilha; enfileirar é O(1) **não-bloqueante**;
   - flush por **tamanho de lote** OU pela **janela** (`logs.lote_*`);
   - **fila cheia DESCARTA E CONTA** (`Descartes()`) — telemetria perde linha,
@@ -42,4 +44,4 @@ síncrono do request.
 - UM teste único exercita o ciclo do singleton; quem re-boota chama
   `ResetarParaTeste` antes.
 - Integração com ClickHouse efêmero (testcontainers, skip sem docker) aplica o
-  DDL real de `db/logs/` e prova as duas trilhas gravadas após o drain.
+  DDL real de `db/logs/` e prova as TRÊS trilhas gravadas após o drain.

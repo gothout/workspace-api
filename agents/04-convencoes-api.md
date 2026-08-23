@@ -227,3 +227,9 @@ Todo evento de auditoria carrega uma **ação estável** (snake_case), declarada
 ```
 
 O front-end consome como **mapping de listagem/tradução**: o `acao` é a chave estável, a `descricao` PT-BR é o default exibido e `campos` descreve as chaves extras que cada emissão pode carregar (lista vazia quando o evento só carrega identidade). Fonte dos dados: `CatalogoEventos()` de cada subdomínio, agregado no bootstrap pela aplicação `catalogo`. Cobertura garantida **nos dois sentidos** por teste executável (ação emitida sem entrada reprova; entrada sem emissão também).
+
+Desde a evolução **errobserve**, a mesma rota carrega também o vocabulário de **ERROS observados** e o **namespace reservado da plataforma**:
+
+- Um **evento por código de erro** de cada subdomínio, no grupo dona dele — `acao` = o MESMO código estável do `/api/system/errors` (ex.: `identidade.workspace.slug_em_uso`), `descricao` = mensagem PT-BR do catálogo e `campos: ["severidade"]` (a severidade real vai no payload do evento quando ele dispara). É o mapping "quais erros existem e com que peso são observados" sem hardcode no front.
+- O grupo **`sistema/plataforma`** expõe o namespace RESERVADO (`sistema.boot`, `sistema.migrations.up`, `sistema.degradacao_dependencia`, `sistema.shutdown`) — eventos de plataforma nunca usam dominio de negócio, e negócio não registra em `sistema.*`.
+- A severidade de cada código também sai na CLI: `workspace-api errors` (código, severidade, status, mensagem) — mesmo dado, outra porta.

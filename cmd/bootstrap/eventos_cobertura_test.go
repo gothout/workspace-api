@@ -17,6 +17,8 @@ import (
 	dominioOrganizacao "workspace-api/internal/identidade/domain/organization"
 	dominioUsuario "workspace-api/internal/identidade/domain/user"
 	dominioWorkspace "workspace-api/internal/identidade/domain/workspace"
+
+	"workspace-api/internal/pkg/errobserve"
 )
 
 // Teste de COBERTURA DE EVENTOS (E3) — espelho executável do teste de
@@ -44,12 +46,13 @@ type metaEvento struct {
 
 var emissoresConhecidos = []struct {
 	dir      string // relativo à raiz do módulo
+	grupo    string // dominio/subdominio dona do vocabulário no agregado
 	catalogo func() []metaEvento
 }{
-	{dir: "internal/identidade/domain/organization", catalogo: metaOrganizacao},
-	{dir: "internal/identidade/domain/workspace", catalogo: metaWorkspace},
-	{dir: "internal/identidade/domain/user", catalogo: metaUsuario},
-	{dir: "internal/identidade/application/auth", catalogo: metaAuth},
+	{dir: "internal/identidade/domain/organization", grupo: "identidade/organization", catalogo: metaOrganizacao},
+	{dir: "internal/identidade/domain/workspace", grupo: "identidade/workspace", catalogo: metaWorkspace},
+	{dir: "internal/identidade/domain/user", grupo: "identidade/user", catalogo: metaUsuario},
+	{dir: "internal/identidade/application/auth", grupo: "identidade/auth", catalogo: metaAuth},
 }
 
 // Conversões dos catálogos NATIVOS (tipos homônimos por pacote) para a forma
@@ -143,11 +146,16 @@ func TestCoberturaDeEventosNosDoisSentidos(t *testing.T) {
 
 // TestAgregadorEventosConverteCatalogosNativos prova que o agregador ligado
 // no boot preserva TODAS as entradas nativas e preenche dominio/subdominio
-// corretamente — sem isso GET /api/system/eventos agruparia errado em silêncio.
+// corretamente — sem isso GET /api/system/eventos agruparia errado em
+// silêncio. Desde a evolução errobserve, o agregado carrega TAMBÉM o
+// vocabulário de erros observados (um evento por código, com severidade) e o
+// namespace reservado sistema/plataforma — aqui se confere que cada grupo tem
+// os nativos DE AUDITORIA intactos MAIS os códigos de erro esperados.
 func TestAgregadorEventosConverteCatalogosNativos(t *testing.T) {
 	agregado := novoAgregadorEventos().CatalogoEventos()
 
 	porGrupo := map[string]int{}
+	porAcaoGrupo := map[string]bool{}
 	for _, meta := range agregado {
 		assert.NotEmpty(t, meta.Dominio, "evento %q sem domínio na conversão", meta.Acao)
 		assert.NotEmpty(t, meta.Subdominio, "evento %q sem subdomínio na conversão", meta.Acao)
@@ -159,6 +167,7 @@ func TestAgregadorEventosConverteCatalogosNativos(t *testing.T) {
 			}
 		}
 		porGrupo[meta.Dominio+"/"+meta.Subdominio]++
+		porAcaoGrupo[meta.Dominio+"/"+meta.Subdominio+"/"+meta.Acao] = true
 	}
 
 	nativos := []struct {
@@ -170,13 +179,39 @@ func TestAgregadorEventosConverteCatalogosNativos(t *testing.T) {
 		{dir: "identidade/user", itens: len(dominioUsuario.CatalogoEventos())},
 		{dir: "identidade/auth", itens: len(aplicacaoauth.CatalogoEventos())},
 	}
-	total := 0
+	totalAuditados := 0
 	for _, nativo := range nativos {
-		assert.Equal(t, nativo.itens, porGrupo[nativo.dir],
-			"grupo %s perdido ou duplicado na conversão do agregador", nativo.dir)
-		total += nativo.itens
+		assert.GreaterOrEqual(t, porGrupo[nativo.dir], nativo.itens,
+			"grupo %s perdeu entradas de auditoria na conversão do agregador", nativo.dir)
+		totalAuditados += nativo.itens
 	}
-	assert.Len(t, agregado, total, "nenhuma entrada pode nascer ou sumir na conversão")
+	// Cada ação auditada nativa segue presente no grupo dona dela.
+	for _, alvo := range emissoresConhecidos {
+		for _, meta := range alvo.catalogo() {
+			assert.True(t, porAcaoGrupo[alvo.grupo+"/"+meta.Acao],
+				"ação auditada %q do grupo %s sumiu do agregado", meta.Acao, alvo.grupo)
+		}
+	}
+
+	// Vocabulário de ERROS observados (errobserve): um evento por código de
+	// cada observador + o namespace RESERVADO visível.
+	totalErrosObservados := 0
+	for _, grupo := range errobserve.CatalogoGlobal() {
+		totalErrosObservados += len(grupo.Erros)
+		for _, meta := range grupo.Erros {
+			chave := grupo.Dominio + "/" + grupo.Subdominio + "/" + meta.Codigo
+			assert.True(t, porAcaoGrupo[chave],
+				"código de erro %q ausente no agregado (grupo %s)", meta.Codigo, chave)
+			assert.Contains(t, []string{"warn", "error", "critical"}, meta.Severidade,
+				"código %q com severidade fora do conjunto fechado", meta.Codigo)
+		}
+	}
+	for _, meta := range errobserve.CatalogoSistema() {
+		assert.True(t, porAcaoGrupo[errobserve.NamespaceReservado+"/plataforma/"+meta.Codigo],
+			"evento de plataforma %q ausente no agregado — namespace reservado deve ficar visível", meta.Codigo)
+	}
+	assert.Len(t, agregado, totalAuditados+totalErrosObservados+len(errobserve.CatalogoSistema()),
+		"agregado = auditoria nativa + códigos de erro observados + vocabulário de plataforma")
 }
 
 // --- Varredura AST -----------------------------------------------------------

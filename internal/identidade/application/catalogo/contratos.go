@@ -54,7 +54,7 @@ type RotaMeta struct {
 type EventoMeta struct {
 	Dominio    string   // dona do vocabulário (ex.: "identidade")
 	Subdominio string   // emissor do evento (ex.: "workspace", "auth")
-	Acao      string   // valor estável emitido no campo acao
-	Descricao string   // PT-BR: o que o evento significa
-	Campos    []string // chaves extras do payload (além das de identidade); vazias = só identidade
+	Acao       string   // valor estável emitido no campo acao
+	Descricao  string   // PT-BR: o que o evento significa
+	Campos     []string // chaves extras do payload (além das de identidade); vazias = só identidade
 }

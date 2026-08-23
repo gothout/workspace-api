@@ -12,15 +12,19 @@ import (
 	usermodel "workspace-api/internal/identidade/model/user"
 	workspacemodel "workspace-api/internal/identidade/model/workspace"
 
+	aplicacaoauth "workspace-api/internal/identidade/application/auth"
+	aplicacaocatalogo "workspace-api/internal/identidade/application/catalogo"
 	dominioOrganizacao "workspace-api/internal/identidade/domain/organization"
 	dominioUsuario "workspace-api/internal/identidade/domain/user"
 	dominioWorkspace "workspace-api/internal/identidade/domain/workspace"
-	aplicacaoauth "workspace-api/internal/identidade/application/auth"
-	aplicacaocatalogo "workspace-api/internal/identidade/application/catalogo"
+
+	"workspace-api/internal/pkg/errobserve"
 )
 
 // agregadorPermissoes é o ProvedorPermissoes da aplicação catalogo.
-type agregadorPermissoes struct{ itens []aplicacaocatalogo.PermissaoMeta }
+type agregadorPermissoes struct {
+	itens []aplicacaocatalogo.PermissaoMeta
+}
 
 func (a agregadorPermissoes) Catalogo() []aplicacaocatalogo.PermissaoMeta { return a.itens }
 
@@ -63,14 +67,19 @@ func novoAgregadorPermissoes() agregadorPermissoes {
 }
 
 // agregadorEventos é o ProvedorEventos da aplicação catalogo.
-type agregadorEventos struct{ itens []aplicacaocatalogo.EventoMeta }
+type agregadorEventos struct {
+	itens []aplicacaocatalogo.EventoMeta
+}
 
 func (a agregadorEventos) CatalogoEventos() []aplicacaocatalogo.EventoMeta { return a.itens }
 
 // novoAgregadorEventos converte os catálogos de eventos NATIVOS de cada
 // subdomínio e da aplicação auth (tipos homônimos, um por pacote) para a
-// forma única do contrato — preenchendo dominio/subdominio na conversão.
-// A ordem do agregado é irrelevante: o mapa sai ordenado da aplicação.
+// forma única do contrato — preenchendo dominio/subdominio na conversão — e
+// acrescenta o vocabulário da observação de ERROS (evolução errobserve): os
+// códigos dos observadores de cada subdomínio (acao = código estável, campos
+// = [severidade]) e o namespace RESERVADO sistema.plataforma. A ordem do
+// agregado é irrelevante: o mapa sai ordenado da aplicação.
 func novoAgregadorEventos() agregadorEventos {
 	itens := make([]aplicacaocatalogo.EventoMeta, 0)
 	for _, meta := range dominioOrganizacao.CatalogoEventos() {
@@ -105,7 +114,39 @@ func novoAgregadorEventos() agregadorEventos {
 			Campos: copiarCampos(meta.Campos),
 		})
 	}
+	// Vocabulário de ERROS observados (errobserve): um evento por código de
+	// erro do subdomínio, no grupo dona dele, com a severidade declarada.
+	itens = append(itens, eventosDeErrosObservados()...)
 	return agregadorEventos{itens: itens}
+}
+
+// eventosDeErrosObservados converte o catálogo global do errobserve + o
+// vocabulário fixo da plataforma para a forma única dos eventos. O campo
+// severidade viaja em Campos — é a chave extra que o evento carrega quando
+// dispara.
+func eventosDeErrosObservados() []aplicacaocatalogo.EventoMeta {
+	itens := make([]aplicacaocatalogo.EventoMeta, 0)
+	for _, meta := range errobserve.CatalogoSistema() {
+		itens = append(itens, aplicacaocatalogo.EventoMeta{
+			Dominio:    errobserve.NamespaceReservado,
+			Subdominio: "plataforma",
+			Acao:       meta.Codigo,
+			Descricao:  meta.Descricao,
+			Campos:     []string{"severidade"},
+		})
+	}
+	for _, grupo := range errobserve.CatalogoGlobal() {
+		for _, meta := range grupo.Erros {
+			itens = append(itens, aplicacaocatalogo.EventoMeta{
+				Dominio:    grupo.Dominio,
+				Subdominio: grupo.Subdominio,
+				Acao:       meta.Codigo,
+				Descricao:  meta.Descricao,
+				Campos:     []string{"severidade"},
+			})
+		}
+	}
+	return itens
 }
 
 // copiarCampos isola o agregado das fatias nativas dos subdomínios

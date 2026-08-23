@@ -3,6 +3,8 @@ package auth
 import (
 	"errors"
 	"sync"
+
+	"workspace-api/internal/pkg/errobserve"
 )
 
 var (
@@ -12,6 +14,24 @@ var (
 	initErr            error
 	ErrNotInitialized  = errors.New("controller auth não inicializado")
 )
+
+// severidadesErros classifica cada sentinela catalogada no errors.go para a
+// observação de erros (evolução errobserve): falhas esperadas do fluxo de
+// sessão (401/400) = warn; login bloqueado por lockout (429) = error — sinal
+// de possível força bruta. Sentinela nova sem entrada AQUI reprova no boot
+// (errobserve.DoCatalogo panica). Código e mensagem vêm do errorCatalog do
+// errors.go — fonte única; todo retorno de erro do service passa pelo
+// observador via service_observado.go, com o erro devolvido intacto.
+var severidadesErros = map[error]errobserve.Severidade{
+	ErrCredenciaisInvalidas: errobserve.SeveridadeWarn,
+	ErrSessaoInvalida:       errobserve.SeveridadeWarn,
+	ErrInvalidInput:         errobserve.SeveridadeWarn,
+	ErrLoginBloqueado:       errobserve.SeveridadeError,
+}
+
+// observadorErros observa TODO erro devolvido pelo service da aplicação.
+var observadorErros = errobserve.For(Dominio, Subdominio,
+	errobserve.DoCatalogo(errorCatalog, severidadesErros))
 
 // UseAuth agrupa as camadas da aplicação (sem repository/model — aplicação
 // não persiste nada próprio).

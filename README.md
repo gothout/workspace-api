@@ -101,19 +101,41 @@ boot): auditoria e acesso saem pelo **stdout** no mesmo formato. Para ligar:
    ```bash
    docker compose exec -T clickhouse clickhouse-client --multiquery < db/logs/0001_log_acesso.sql
    docker compose exec -T clickhouse clickhouse-client --multiquery < db/logs/0002_log_auditoria.sql
+   docker compose exec -T clickhouse clickhouse-client --multiquery < db/logs/0003_log_erros.sql
    ```
 
 2. Em `configs.json`: `"databases.clickhouse.enabled": true` (+ host/porta/
    user/pass/database; porta NATIVA 9000).
 3. Opcionalmente ajuste `logs.*`: tamanho do lote, janela de flush, limite da
-   fila e timeout de drain no shutdown.
+   fila, timeout de drain no shutdown e a janela do alerta
+   (`alerta_janela_seg`, default 60s).
 
 O que ele adiciona: a trilha de **acesso** HTTP (um evento por requisição,
-emitido pelo middleware global com o `ray_trace`) e a trilha de **auditoria**
-das escritas dos subdomínios — ambas gravadas em lote FORA do caminho síncrono
-do request. Fila cheia descarta e conta (a API nunca trava); shutdown drena o
-que ficou pendente. Tabelas consultáveis em `workspace_logs.log_acesso` e
-`workspace_logs.log_auditoria`.
+emitido pelo middleware global com o `ray_trace`), a trilha de **auditoria**
+das escritas dos subdomínios e a trilha de **erros observados** (evolução
+errobserve) — todas gravadas em lote FORA do caminho síncrono do request.
+Fila cheia descarta e conta (a API nunca trava); shutdown drena o que ficou
+pendente. Tabelas consultáveis em `workspace_logs.log_acesso`,
+`workspace_logs.log_auditoria` e `workspace_logs.log_erro`.
+
+### errobserve — todo erro do service é um evento de telemetria
+
+Todo retorno de erro dos services passa pelo observador do subdomínio
+(`internal/pkg/errobserve`) e vira evento estruturado — **o erro sai intacto**,
+telemetria nunca muda a resposta:
+
+- Códigos vêm do próprio catálogo de erros (`errors.go`); as severidades
+  (`warn` = recusa esperada, `error` = sinal de segurança/falha interna
+  catalogada, `critical` = desconhecido ou falha grave) ficam no
+  `singleton.go` de cada subdomínio. Sentinela fora do catálogo vira evento
+  `desconhecido` + critical.
+- Sinks: slog sempre ativo; ClickHouse quando ligado (tabela `log_erro`);
+  `[ALERTA]` agregado por janela para críticos.
+- Namespace reservado `sistema.*`: eventos de plataforma (boot, migrations,
+  shutdown, degradação) — só o bootstrap registra nele.
+- O vocabulário completo sai em `GET /api/system/eventos` (códigos como
+  eventos, com severidade em `campos`) e no terminal:
+  `go run . errors`.
 
 ### Provisionamento inicial (primeiro super_admin + workspace)
 
@@ -153,6 +175,8 @@ go run . migrate down 1    # reverte as últimas N (posicional, manual)
 go run . migrate status    # estado de cada migration
 go run . migrate validate  # confere pares up/down SEM conexão (gate de CI)
 go run . migrate create identidade_workspace_descricao  # novo par up/down
+
+go run . errors            # mapa global dos erros (código, severidade, status) — sem conexão
 ```
 
 ### Deploy em servidor

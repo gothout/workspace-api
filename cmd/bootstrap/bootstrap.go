@@ -31,6 +31,7 @@ import (
 	"workspace-api/internal/infra/jwt"
 	rediscache "workspace-api/internal/infra/redis"
 	"workspace-api/internal/pkg/config"
+	"workspace-api/internal/pkg/errobserve"
 	"workspace-api/internal/pkg/validator"
 )
 
@@ -72,10 +73,16 @@ func Serve(caminhoConfig string) error {
 
 	// 4.5 Redis — DEGRADÁVEL (evolução #8): desabilitado/inacessível NUNCA
 	// derruba o boot; os adaptadores de cache_redis.go tratam a ausência.
-	if _, err := rediscache.InitRedis(); err != nil {
+	// Degradado é EVENTO DE PLATAFORMA (sistema.degradacao_dependencia).
+	clienteRedis, err := rediscache.InitRedis()
+	if err != nil {
 		return fmt.Errorf("boot: %w", err)
 	}
 	fechamentos.empilhar(rediscache.Close)
+	if clienteRedis == nil {
+		observadorPlataforma().Observe(ctxBoot,
+			fmt.Errorf("%w: redis indisponível no boot (cache e lockout desligados)", errobserve.ErrDegradacao))
+	}
 
 	// 4.6 ClickHouse + trilhas de log — DEGRADÁVEL (evolução #9): sem banco,
 	// auditoria e acesso saem pelo stdout; com banco, o writer em lote
@@ -88,10 +95,12 @@ func Serve(caminhoConfig string) error {
 	fechamentos.empilhar(clickhouse.Close)
 
 	// 5. Migrations — `up` automático quando auto_run (advisory lock impede
-	// réplicas de migrar juntas); rollback NUNCA é automático.
+	// réplicas de migrar juntas); rollback NUNCA é automático. Falha aqui é
+	// fatal e vira EVENTO DE PLATAFORMA critical (sistema.migrations.up).
 	if cfg.Databases.Migrations.AutoRun {
 		aplicadas, err := migrations.Subir(ctxBoot, fonteBanco{}, cfg.Databases.Migrations.Path, timeoutsMigracao(cfg))
 		if err != nil {
+			observadorPlataforma().Observe(ctxBoot, fmt.Errorf("%w: %v", errobserve.ErrMigracao, err))
 			return fmt.Errorf("boot: migrations: %w", err)
 		}
 		if aplicadas > 0 {

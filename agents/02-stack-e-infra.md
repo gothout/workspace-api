@@ -19,8 +19,7 @@
 | Testes de integração | `github.com/testcontainers/testcontainers-go` | Banco efêmero do teste `up → down → up` |
 | Redis | `github.com/redis/go-redis/v9` (+ módulo redis do testcontainers) | Evolução #8: cache/lockout **degradável** — seção abaixo |
 | ClickHouse | `github.com/ClickHouse/clickhouse-go/v2` (+ módulo clickhouse do testcontainers) | Evolução #9: trilhas de log assíncronas **degradáveis** — seção abaixo |
-
-ClickHouse e errobserve: o ClickHouse entrou (issue #9); errobserve segue fora do núcleo — evolução futura com issue própria.
+ClickHouse e errobserve: ambos implementados (issues #9 e #10) — seções próprias abaixo.
 
 ## Configuração (`configs.json` / `configs_example.json`)
 
@@ -94,7 +93,8 @@ ClickHouse e errobserve: o ClickHouse entrou (issue #9); errobserve segue fora d
     "lote_tamanho": 500,
     "lote_janela_ms": 2000,
     "fila_tamanho": 10000,
-    "drain_timeout_sec": 5
+    "drain_timeout_sec": 5,
+    "alerta_janela_seg": 60
   }
 }
 ```
@@ -103,7 +103,7 @@ ClickHouse e errobserve: o ClickHouse entrou (issue #9); errobserve segue fora d
 - `config.Init(path)` no boot; `config.Use()` / `config.MustUse()` depois. Erro de config é **fatal**, com mensagem acionável (qual chave faltou, qual valor é inválido).
 - `app.base_domain` é o domínio-base da plataforma — dele derivam a resolução de workspace pelo Host e o CORS (doc 03).
 - `databases.redis` + `cache` são a evolução Redis (#8): dependência **degradável** — `enabled=false` ou servidor inacessível no boot deixam o processo subir sem ela (log `[DEGRADADO]`). Os TTLs têm defaults aplicados em código; TTL curto é obrigatório por desenho, nunca configurável para "eterno".
-- `databases.clickhouse` + `logs` são a evolução ClickHouse (#9), **degradável** pelo mesmo desenho do Redis. Os parâmetros de lote têm defaults aplicados em código (`validar()`).
+- `databases.clickhouse` + `logs` são a evolução ClickHouse (#9), **degradável** pelo mesmo desenho do Redis. Os parâmetros de lote têm defaults aplicados em código (`validar()`); `logs.alerta_janela_seg` é a janela do sink de alerta do errobserve (default 60s).
 
 ## Redis (cache/lockout distribuído) — `internal/infra/redis`
 
@@ -131,6 +131,20 @@ Evolução da issue #9, **degradável por desenho** (mesma regra do Redis): `Con
 | DDL das tabelas | `workspace_logs.log_acesso` e `workspace_logs.log_auditoria`, MergeTree particionado por mês | `db/logs/NNNN_*.sql` versionado, aplicação manual idempotente (ver `db/logs/AGENTS.md`) |
 
 O ClickHouse roda no protocolo NATIVO (9000); o docker-compose de dev sobe um contêiner pronto. Erro de gravação perde o lote COM contagem e log — retry no worker só cresceria a fila.
+
+## errobserve (observador de erros por subdomínio) — `internal/pkg/errobserve`
+
+Evolução da issue #10, implementada: todo retorno de erro do service passa por `obs.Observe(ctx, err)` — que devolve o erro **INTACTO** — e vira evento estruturado (código estável + severidade + identificadores do ctx) entregue aos sinks. Telemetria nunca muda a resposta ao cliente.
+
+| Peça | Para quê | Onde mora |
+|---|---|---|
+| `For(dominio, subdominio, entradas)` | observador do subdomínio, registrado no singleton dele; entradas montadas com `DoCatalogo(errorCatalog, severidades)` — o catálogo do `errors.go` é a FONTE dos códigos, o singleton declara só as severidades (`warn` 4xx / `error` segurança+5xx catalogado / `critical`) | uma linha + mapa de severidades no `singleton.go` de cada subdomínio |
+| Decorador `service_observado.go` | envolve o Service dentro do `NewService`: TODO erro que sobe ao chamador é observado (singleton, seed e testes pelo mesmo caminho) — erro sai intacto | um arquivo por subdomínio/aplicação |
+| Sentinela desconhecida | fora do catálogo vira evento `desconhecido` + critical — pior caso até prova em contrário | `Observe` |
+| Sinks | `SlogPadrao()` SEMPRE ativo; writer ClickHouse da terceira trilha (`log_erro`) quando ligado; sink `[ALERTA]` para críticos com janela de agregação (`logs.alerta_janela_seg`, default 60s) | ligados no `cmd/bootstrap/logs.go`; despachante recupera pânico por sink (falha contada) |
+| Namespace reservado `sistema.*` | eventos de PLATAFORMA (boot, migrations.up, shutdown, degradação) — subdomínio de negócio NÃO registra nele (pânico no boot/teste); vocabulário fixo visível em `/api/system/eventos` e na CLI mesmo sem emissão | `ObservadorPlataforma` + `CatalogoSistema()`, uso exclusivo do bootstrap |
+
+CLI: `workspace-api errors` imprime o mapa global (código, severidade, status, mensagem PT-BR) direto dos registros globais — sem conexão e sem configs.json.
 
 ## PostgreSQL (transacional) — `internal/infra/database/postgres`
 
@@ -223,6 +237,6 @@ Cada uma tem **issue própria no GitHub** (label `evolucao`) e só entra no loop
 |---|---|---|
 | **Redis** ✅ (issue #8, implementada) | Cache de permissões e de workspace por slug, locks de concorrência, denylist de JWT, rate-limit/lockout de login | Cliente **degradável**: `Connect` nunca erra — devolve cliente **nulo** com log `[DEGRADADO]` e o consumidor é obrigado a tratar a ausência. A denylist entra por interface declarada no `infra/jwt`, ligada no bootstrap, e é **só cache da revogação persistida** no Postgres (só positivo cacheado). Cache com **TTL curto obrigatório** + **invalidação ativa** em inativação de organization/workspace e troca de `dominio`; a invariante "filho nunca mais vivo que o pai" tem teste ponta a ponta. |
 | **ClickHouse** ✅ (issue #9, implementada) | Trilhas de log assíncronas (auditoria, acesso) fora do caminho síncrono do request | Writer **em lote** (flush por tamanho/intervalo); log nunca entra no caminho síncrono; com o banco fora, as trilhas caem no **stdout** (`SlogPadrao`) em vez de sumir — nunca bloqueia nem derruba a API. DDL versionado em `db/logs/`. |
-| **errobserve** | Observador de erros por subdomínio: todo erro vira evento estruturado consultável | Uma linha por subdomínio no `singleton.go`; sinks plugáveis (slog sempre ativo, ClickHouse quando existir); o catálogo de erros do `errors.go` (doc 05) é a fonte dos códigos. |
+| **errobserve** ✅ (issue #10, implementada) | Observador de erros por subdomínio: todo erro vira evento estruturado consultável | Uma linha por subdomínio no `singleton.go` (severidades) + decorador no `NewService`; sinks plugáveis (slog sempre ativo, ClickHouse da terceira trilha, alerta agregado para critical); o catálogo de erros do `errors.go` (doc 05) é a fonte dos códigos. Namespace reservado `sistema.*` só da plataforma; CLI `workspace-api errors`. |
 
 Enquanto o errobserve não existe: erros operacionais saem por **log estruturado** (slog), permissões consultam o banco direto quando o Redis está degradado (sem cache), refresh tokens operam sem denylist distribuída (só a revogação persistida).

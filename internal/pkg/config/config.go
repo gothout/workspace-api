@@ -99,6 +99,10 @@ type LogsConfig struct {
 	LoteJanelaMs    int `mapstructure:"lote_janela_ms"`
 	FilaTamanho     int `mapstructure:"fila_tamanho"`
 	DrainTimeoutSec int `mapstructure:"drain_timeout_sec"`
+	// AlertaJanelaSeg é a janela de agregação do sink de alerta da evolução
+	// errobserve (#10): críticos repetidos do mesmo código viram UM [ALERTA]
+	// por janela. Zero vira 60s em validar().
+	AlertaJanelaSeg int `mapstructure:"alerta_janela_seg"`
 }
 
 // RedisConfig é a conexão do cache/lockout distribuído — dependência
@@ -275,6 +279,9 @@ func (c *Config) validar() error {
 	}
 	if c.Logs.DrainTimeoutSec <= 0 {
 		c.Logs.DrainTimeoutSec = 5
+	}
+	if c.Logs.AlertaJanelaSeg <= 0 {
+		c.Logs.AlertaJanelaSeg = 60
 	}
 	if c.Cache.TtlResolucaoSeg <= 0 {
 		c.Cache.TtlResolucaoSeg = 30

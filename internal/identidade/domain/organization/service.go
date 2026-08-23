@@ -7,8 +7,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"workspace-api/internal/middleware"
 	orgmodel "workspace-api/internal/identidade/model/organization"
+	"workspace-api/internal/middleware"
 	"workspace-api/internal/pkg/log/audit_log"
 	"workspace-api/internal/pkg/orgctx"
 	"workspace-api/internal/pkg/pagination"
@@ -83,7 +83,9 @@ func NewService(repo Repository, chaves RepositorioApiKeys, suspensore Suspended
 	for _, aplicar := range opcoes {
 		aplicar(s)
 	}
-	return s
+	// Observação de erros (evolução errobserve): todo retorno de erro do
+	// service passa pelo observador do subdomínio — erro sai intacto.
+	return serviceObservado{Service: s, obs: observadorErros}
 }
 
 // Criar: input cru → entidade VÁLIDA pelo construtor → persistência → auditoria.

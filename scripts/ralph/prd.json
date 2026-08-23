@@ -394,7 +394,7 @@
         "Testes: sentinela desconhecida, namespace reservado, sinks, degradação — build/vet/test e -race verdes"
       ],
       "priority": 18,
-      "passes": false,
+      "passes": true,
       "issue": 10,
       "branch": "ox-alpha/evolucao-errobserve",
       "docs": [

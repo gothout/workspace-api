@@ -5,6 +5,10 @@ import (
 	"sync"
 
 	"gorm.io/gorm"
+
+	modelworkspace "workspace-api/internal/identidade/model/workspace"
+
+	"workspace-api/internal/pkg/errobserve"
 )
 
 var (
@@ -15,6 +19,27 @@ var (
 	initErr            error
 	ErrNotInitialized  = errors.New("controller workspace não inicializado")
 )
+
+// severidadesErros classifica cada sentinela catalogada no errors.go para a
+// observação de erros (evolução errobserve): recusas esperadas de negócio
+// (4xx) = warn. Sentinela nova sem entrada AQUI reprova no boot
+// (errobserve.DoCatalogo panica). Código e mensagem vêm do errorCatalog do
+// errors.go — fonte única; todo retorno de erro do service passa pelo
+// observador via service_observado.go, com o erro devolvido intacto.
+var severidadesErros = map[error]errobserve.Severidade{
+	ErrNotFound:                    errobserve.SeveridadeWarn,
+	ErrInvalidInput:                errobserve.SeveridadeWarn,
+	ErrSlugEmUso:                   errobserve.SeveridadeWarn,
+	ErrSlugReservado:               errobserve.SeveridadeWarn,
+	modelworkspace.ErrSlugInvalido: errobserve.SeveridadeWarn,
+	modelworkspace.ErrNomeInvalido: errobserve.SeveridadeWarn,
+	modelworkspace.ErrJaInativo:    errobserve.SeveridadeWarn,
+	modelworkspace.ErrJaAtivo:      errobserve.SeveridadeWarn,
+}
+
+// observadorErros observa TODO erro devolvido pelo service deste subdomínio.
+var observadorErros = errobserve.For(modelworkspace.Dominio, modelworkspace.Subdominio,
+	errobserve.DoCatalogo(errorCatalog, severidadesErros))
 
 // UseWorkspace agrupa todas as camadas (Repository, Service, Controller).
 type UseWorkspace struct {
