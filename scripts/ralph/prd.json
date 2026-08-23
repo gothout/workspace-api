@@ -20,7 +20,13 @@
       "passes": true,
       "issue": 1,
       "branch": "ox-alpha/fase-0",
-      "docs": ["agents/README.md", "agents/01-arquitetura-ddd.md", "agents/02-stack-e-infra.md", "agents/04-convencoes-api.md", "agents/05-padroes-codigo.md"]
+      "docs": [
+        "agents/README.md",
+        "agents/01-arquitetura-ddd.md",
+        "agents/02-stack-e-infra.md",
+        "agents/04-convencoes-api.md",
+        "agents/05-padroes-codigo.md"
+      ]
     },
     {
       "id": "F1",
@@ -38,7 +44,12 @@
       "passes": true,
       "issue": 2,
       "branch": "ox-alpha/fase-1",
-      "docs": ["agents/03-identidade-tenancy.md", "internal/middleware/AGENTS.md", "internal/infra/jwt/AGENTS.md", "cmd/bootstrap/AGENTS.md"]
+      "docs": [
+        "agents/03-identidade-tenancy.md",
+        "internal/middleware/AGENTS.md",
+        "internal/infra/jwt/AGENTS.md",
+        "cmd/bootstrap/AGENTS.md"
+      ]
     },
     {
       "id": "F2",
@@ -55,7 +66,11 @@
       "passes": true,
       "issue": 3,
       "branch": "ox-alpha/fase-2",
-      "docs": ["agents/05-padroes-codigo.md", "internal/identidade/domain/organization/AGENTS.md", "internal/identidade/model/organization/AGENTS.md"]
+      "docs": [
+        "agents/05-padroes-codigo.md",
+        "internal/identidade/domain/organization/AGENTS.md",
+        "internal/identidade/model/organization/AGENTS.md"
+      ]
     },
     {
       "id": "F3",
@@ -72,7 +87,11 @@
       "passes": true,
       "issue": 4,
       "branch": "ox-alpha/fase-3",
-      "docs": ["agents/05-padroes-codigo.md", "internal/identidade/domain/workspace/AGENTS.md", "internal/identidade/model/workspace/AGENTS.md"]
+      "docs": [
+        "agents/05-padroes-codigo.md",
+        "internal/identidade/domain/workspace/AGENTS.md",
+        "internal/identidade/model/workspace/AGENTS.md"
+      ]
     },
     {
       "id": "F4",
@@ -89,7 +108,12 @@
       "passes": true,
       "issue": 5,
       "branch": "ox-alpha/fase-4",
-      "docs": ["agents/05-padroes-codigo.md", "internal/identidade/domain/user/AGENTS.md", "internal/identidade/model/user/AGENTS.md", "internal/identidade/application/auth/AGENTS.md"]
+      "docs": [
+        "agents/05-padroes-codigo.md",
+        "internal/identidade/domain/user/AGENTS.md",
+        "internal/identidade/model/user/AGENTS.md",
+        "internal/identidade/application/auth/AGENTS.md"
+      ]
     },
     {
       "id": "F5",
@@ -106,7 +130,11 @@
       "passes": true,
       "issue": 6,
       "branch": "ox-alpha/fase-5",
-      "docs": ["agents/04-convencoes-api.md", "internal/identidade/application/catalogo/AGENTS.md", "internal/identidade/application/AGENTS.md"]
+      "docs": [
+        "agents/04-convencoes-api.md",
+        "internal/identidade/application/catalogo/AGENTS.md",
+        "internal/identidade/application/AGENTS.md"
+      ]
     },
     {
       "id": "F6",
@@ -123,7 +151,153 @@
       "passes": true,
       "issue": 7,
       "branch": "ox-alpha/fase-6",
-      "docs": ["agents/01-arquitetura-ddd.md", "agents/06-plano-execucao.md"]
+      "docs": [
+        "agents/01-arquitetura-ddd.md",
+        "agents/06-plano-execucao.md"
+      ]
+    },
+    {
+      "id": "R1",
+      "title": "Escalação de privilégio em CriarApiKey",
+      "description": "CriarApiKey aceita permissões arbitrárias sem conferir o criador. Validar cada permissão contra as efetivas do ctx (middleware.Atende) e proibir *:* salvo quando o criador a possui.",
+      "acceptanceCriteria": [
+        "CriarApiKey rejeita permissão não atendida pelas efetivas do ctx (403/422 conforme convenção)",
+        "*:* só aceito quando o criador possui *:*",
+        "Teste de unidade cobrindo admin_organization tentando *:*",
+        "build/vet/test verdes"
+      ],
+      "priority": 8,
+      "passes": false,
+      "issue": 19,
+      "branch": "ox-alpha/revisao-1",
+      "docs": [
+        "agents/03-identidade-tenancy.md",
+        "agents/05-padroes-codigo.md",
+        "internal/middleware/AGENTS.md",
+        "internal/identidade/domain/organization/AGENTS.md"
+      ]
+    },
+    {
+      "id": "R2",
+      "title": "lock_timeout de migrations em conexão dedicada",
+      "description": "SET lock_timeout no pool compartilhado contamina o pool e pode não valer para a migration. Conexão dedicada para a sessão de migration.",
+      "acceptanceCriteria": [
+        "Sessão de migration usa conexão dedicada (sql.Conn) ou DSN própria",
+        "Nenhuma conexão do pool sai com lock_timeout alterado",
+        "up→down→up real em banco efêmero",
+        "build/vet/test verdes"
+      ],
+      "priority": 9,
+      "passes": false,
+      "issue": 20,
+      "branch": "ox-alpha/revisao-2",
+      "docs": [
+        "agents/02-stack-e-infra.md",
+        "db/migrations/AGENTS.md",
+        "internal/infra/database/migrations/AGENTS.md"
+      ]
+    },
+    {
+      "id": "R3",
+      "title": "Provisionamento inicial (super_admin + workspace)",
+      "description": "Seed cria papéis e org raiz, mas nenhum usuário super_admin nem workspace — sem insert manual o template não sobe ponta a ponta.",
+      "acceptanceCriteria": [
+        "Seed opcional (flag/env) cria super_admin + workspace inicial, idempotente",
+        "Nunca automático no boot",
+        "README documenta o provisionamento",
+        "Teste de integração do seed",
+        "build/vet/test verdes"
+      ],
+      "priority": 10,
+      "passes": false,
+      "issue": 21,
+      "branch": "ox-alpha/revisao-3",
+      "docs": [
+        "agents/02-stack-e-infra.md",
+        "agents/03-identidade-tenancy.md",
+        "cmd/bootstrap/AGENTS.md"
+      ]
+    },
+    {
+      "id": "R4",
+      "title": "Cascata de inativação da organization",
+      "description": "Inativar organization deve revogar sessões dos usuários e API keys dela; Refresh e BuscarApiKeyPorHash checam status da dona.",
+      "acceptanceCriteria": [
+        "Inativar/remover organization revoga refresh tokens dos usuários e API keys",
+        "Refresh falha fechada com organization inativa",
+        "X-Api-Key de organization inativa falha fechada",
+        "Testes de integração cobrindo a cascata",
+        "build/vet/test verdes"
+      ],
+      "priority": 11,
+      "passes": false,
+      "issue": 22,
+      "branch": "ox-alpha/revisao-4",
+      "docs": [
+        "agents/03-identidade-tenancy.md",
+        "internal/identidade/domain/organization/AGENTS.md",
+        "internal/identidade/application/auth/AGENTS.md"
+      ]
+    },
+    {
+      "id": "R5",
+      "title": "Logout idempotente + rotação de refresh",
+      "description": "Logout recusa token já revogado (caminho idempotente inalcançável) e refresh antigo segue válido. Logout idempotente e rotação com revogação do jti anterior.",
+      "acceptanceCriteria": [
+        "Logout com token já revogado não falha (idempotente)",
+        "Refresh revoga o jti anterior e emite novo",
+        "Reuso de refresh revogado falha fechado",
+        "Testes de integração dos dois fluxos",
+        "build/vet/test verdes"
+      ],
+      "priority": 12,
+      "passes": false,
+      "issue": 23,
+      "branch": "ox-alpha/revisao-5",
+      "docs": [
+        "agents/03-identidade-tenancy.md",
+        "internal/identidade/application/auth/AGENTS.md",
+        "internal/infra/jwt/AGENTS.md"
+      ]
+    },
+    {
+      "id": "R6",
+      "title": "Segredo JWT mínimo 32 bytes",
+      "description": "Mínimo de 16 caracteres é fraco para HS256.",
+      "acceptanceCriteria": [
+        "infra/jwt exige 32+ bytes com erro claro",
+        "configs_example.json com segredo de exemplo adequado",
+        "Testes ajustados",
+        "build/vet/test verdes"
+      ],
+      "priority": 13,
+      "passes": false,
+      "issue": 24,
+      "branch": "ox-alpha/revisao-6",
+      "docs": [
+        "agents/02-stack-e-infra.md",
+        "internal/infra/jwt/AGENTS.md"
+      ]
+    },
+    {
+      "id": "R7",
+      "title": "Varredura menor da revisão",
+      "description": "errors.Is nos adaptadores do bootstrap; race em middleware.Use/ResetarParaTeste; trusted_proxy aplicado ao gin; remover código morto (ServirAteSinal); mascarar e-mail em logs de auditoria; dedup regex slugdns; rest_err.DoCatalogo determinístico; doc ResolvedorWorkspaces alinhada.",
+      "acceptanceCriteria": [
+        "Cada item do lote corrigido ou justificado no PR",
+        "go test -race verde",
+        "build/vet/test verdes"
+      ],
+      "priority": 14,
+      "passes": false,
+      "issue": 25,
+      "branch": "ox-alpha/revisao-7",
+      "docs": [
+        "agents/04-convencoes-api.md",
+        "agents/05-padroes-codigo.md",
+        "internal/middleware/AGENTS.md",
+        "cmd/bootstrap/AGENTS.md"
+      ]
     }
   ]
 }

@@ -32,6 +32,20 @@ Uma issue por vez. Nunca pular fase. Nunca deixar o build quebrado.
 | ClickHouse + logs assíncronos | [#9](https://github.com/gothout/workspace-api/issues/9) | Auditoria/acesso/erro fora do caminho síncrono, writer em lote, stdout como destino degradado. |
 | errobserve | [#10](https://github.com/gothout/workspace-api/issues/10) | Observador de erros por subdomínio com sinks plugáveis, alimentado pelo catálogo de erros. |
 
+## Revisão pós-F6 (achados da revisão de código)
+
+Correções priorizadas após a revisão técnica do template fechado (R1 e R2 são críticos; R3–R6 importantes; R7 varredura menor). Rate limiting/login e cache do caminho quente ficam na evolução Redis (#8).
+
+| Story | Tema | Issue | Definição de pronto |
+|---|---|---|---|
+| **R1** | Escalação de privilégio em CriarApiKey | [#19](https://github.com/gothout/workspace-api/issues/19) | CriarApiKey valida cada permissão pedida contra as efetivas do ctx (`middleware.Atende`); `*:*` só se o criador a possui; teste com `admin_organization` tentando `*:*`. |
+| **R2** | lock_timeout de migrations | [#20](https://github.com/gothout/workspace-api/issues/20) | Sessão de migration em conexão dedicada (`sql.Conn`) ou DSN própria — pool do gorm nunca sai com `lock_timeout` alterado; `up→down→up` real. |
+| **R3** | Provisionamento inicial | [#21](https://github.com/gothout/workspace-api/issues/21) | Seed opcional (flag/env, nunca automático no boot) cria super_admin + workspace inicial, idempotente, documentado no README; teste de integração. |
+| **R4** | Cascata de inativação da organization | [#22](https://github.com/gothout/workspace-api/issues/22) | Inativar organization revoga refresh tokens dos usuários e API keys dela; `Refresh` e `BuscarApiKeyPorHash` checam status da dona; testes de integração. |
+| **R5** | Logout idempotente + rotação de refresh | [#23](https://github.com/gothout/workspace-api/issues/23) | Logout com token já revogado não falha; refresh revoga o jti anterior; reuso de refresh revogado falha fechado; testes. |
+| **R6** | Segredo JWT mínimo 32 bytes | [#24](https://github.com/gothout/workspace-api/issues/24) | `infra/jwt` exige 32+ bytes com erro claro; `configs_example.json` e testes ajustados. |
+| **R7** | Varredura menor | [#25](https://github.com/gothout/workspace-api/issues/25) | `errors.Is` nos adaptadores; race em `middleware.Use`/`ResetarParaTeste`; `trusted_proxy` aplicado; código morto removido; e-mail mascarado em logs; regex `slugdns` deduplicada; `rest_err.DoCatalogo` determinístico; doc `ResolvedorWorkspaces` alinhada — cada item corrigido ou justificado; `-race` verde. |
+
 ## Log de iterações
 
 Uma linha por issue fechada. Formato: data ISO, issue (número real), arquivos criados/alterados, resultado do build/testes, observações úteis para a próxima iteração.
