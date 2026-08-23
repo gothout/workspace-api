@@ -361,6 +361,7 @@
       "acceptanceCriteria": [
         "events.go em cada subdomínio que audita (organization, workspace, user, auth) com ação estável + descrição PT-BR + campos do payload",
         "auditar() falha em teste/boot quando a ação não está catalogada no events.go do subdomínio",
+        "Teste de cobertura de eventos (eventos_cobertura_test.go): varre os auditar() de todos os subdomínios e reprova (a) ação usada em auditar() sem entrada no events.go do subdomínio; (b) subdomínio que audita sem events.go no lugar certo; (c) entrada no events.go que nenhuma escrita usa — nos dois sentidos, como o teste de cobertura do Swagger",
         "Bootstrap agrega CatalogoEventos() de todos os subdomínios",
         "GET /api/system/eventos (mapa completo) nas rotas de sistema, seguindo convenções do doc 04",
         "Swagger regenerado + teste de cobertura segue verde",
