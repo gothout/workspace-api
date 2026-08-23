@@ -17,7 +17,7 @@ const docTemplate = `{
     "paths": {
         "/api/application/identidade/auth/login": {
             "post": {
-                "description": "Login com e-mail/senha contra a organization resolvida pelo Host (subdomínio de workspace ou domínio custom). Falhas são indistinguíveis: usuário inexistente, senha errada e host sem organization devolvem o mesmo 401 genérico",
+                "description": "Login com e-mail/senha contra a organization resolvida pelo Host (subdomínio de workspace ou domínio custom). Falhas são indistinguíveis: usuário inexistente, senha errada e host sem organization devolvem o mesmo 401 genérico. Com Redis ligado, repetidas falhas do par e-mail+IP aplicam lockout temporário (429)",
                 "consumes": [
                     "application/json"
                 ],
@@ -54,6 +54,12 @@ const docTemplate = `{
                     },
                     "401": {
                         "description": "Credenciais inválidas (genérico)",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "429": {
+                        "description": "Muitas tentativas — login bloqueado temporariamente",
                         "schema": {
                             "$ref": "#/definitions/rest_err.RestErr"
                         }

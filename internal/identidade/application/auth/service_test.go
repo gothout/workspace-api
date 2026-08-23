@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -445,4 +446,120 @@ func TestSemContratoDeVitalidadeNinguemRenovaSessao(t *testing.T) {
 
 	_, err = svc.Refresh(context.Background(), sessao.RefreshToken)
 	assert.ErrorIs(t, err, ErrSessaoInvalida)
+}
+
+// --- Lockout de login (evolução Redis, issue #8) -------------------------------
+
+// limitadorFake conta as interações do service com o contrato LimitadorLogin.
+type limitadorFake struct {
+	mu        sync.Mutex
+	bloqueado bool
+	espera    time.Duration
+	falhas    int
+	sucessos  int
+	consultas int
+	errAutorizado error
+}
+
+func (l *limitadorFake) Autorizado(_ context.Context, _, _ string) (bool, time.Duration, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.consultas++
+	if l.errAutorizado != nil {
+		return false, 0, l.errAutorizado
+	}
+	return l.bloqueado, l.espera, nil
+}
+
+func (l *limitadorFake) RegistrarFalha(context.Context, string, string) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.falhas++
+	return nil
+}
+
+func (l *limitadorFake) RegistrarSucesso(context.Context, string, string) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.sucessos++
+	return nil
+}
+
+func montarAppComLimite(t *testing.T, limite LimitadorLogin) (Service, *usuariosFake, *organizacoesFake) {
+	t.Helper()
+	usuarios := novoUsuariosFake()
+	orgs := &organizacoesFake{org: uuid.New(), resolvido: true}
+	svc := NewService(Dependencias{
+		Usuarios:   usuarios,
+		Emissor:    novoEmissorFake(),
+		Organizacoes: orgs,
+		Vitalidade: novaVitalidadeFake(),
+		Limite:     limite,
+	})
+	return svc, usuarios, orgs
+}
+
+// Par bloqueado = 429 ANTES de qualquer verificação — nem o caminho de
+// autenticação roda (não há comparação de bcrypt para um par preso).
+func TestLoginBloqueadoNaoChegaAutenticar(t *testing.T) {
+	limite := &limitadorFake{bloqueado: true, espera: 90 * time.Second}
+	svc, usuarios, orgs := montarAppComLimite(t, limite)
+	usuarios.semear(orgs.org, "ana@exemplo.com")
+
+	_, err := svc.Login(context.Background(), hostDeTeste, LoginEntrada{
+		Email: "ana@exemplo.com", Senha: "senha-segura-123", IP: "10.0.0.1",
+	})
+	require.ErrorIs(t, err, ErrLoginBloqueado)
+	require.Equal(t, 1, limite.consultas)
+	usuarios.mu.Lock()
+	defer usuarios.mu.Unlock()
+	require.Zero(t, usuarios.chamadasAut, "par preso NÃO passa pelo bcrypt")
+	require.Zero(t, limite.falhas, "bloqueio não é falha de credencial: não alimenta o próprio contador")
+}
+
+// Falha de credencial alimenta o lockout; login bom limpa o histórico.
+func TestLoginRegistraFalhaESucessoNoLimitador(t *testing.T) {
+	limite := &limitadorFake{}
+	svc, usuarios, orgs := montarAppComLimite(t, limite)
+	usuarios.semear(orgs.org, "ana@exemplo.com")
+
+	_, err := svc.Login(context.Background(), hostDeTeste, LoginEntrada{
+		Email: "ana@exemplo.com", Senha: "errada-de-propósito", IP: "10.0.0.2",
+	})
+	require.ErrorIs(t, err, ErrCredenciaisInvalidas)
+	require.Equal(t, 1, limite.falhas)
+
+	_, err = svc.Login(context.Background(), hostDeTeste, LoginEntrada{
+		Email: "ana@exemplo.com", Senha: "senha-segura-123", IP: "10.0.0.2",
+	})
+	require.NoError(t, err)
+	require.Equal(t, 1, limite.sucessos, "login bom zera o histórico do par")
+	require.Equal(t, 1, limite.falhas)
+}
+
+// Falha do PRÓPRIO limitador nunca impede login: degradação é seguir sem
+// lockout (cache fora do ar não vira indisponibilidade de autenticação).
+func TestLoginSegueSemLockoutQuandoLimitadorFalha(t *testing.T) {
+	limite := &limitadorFake{errAutorizado: errors.New("redis fora")}
+	svc, usuarios, orgs := montarAppComLimite(t, limite)
+	usuarios.semear(orgs.org, "ana@exemplo.com")
+
+	sessao, err := svc.Login(context.Background(), hostDeTeste, LoginEntrada{
+		Email: "ana@exemplo.com", Senha: "senha-segura-123", IP: "10.0.0.3",
+	})
+	require.NoError(t, err, "falha do limitador não pode recusar login")
+	require.NotEmpty(t, sessao.AccessToken)
+}
+
+// Sem limitador nas dependências (Redis ausente): fluxo idêntico ao
+// pré-evolução — nil é operação normal.
+func TestLoginSemLimitadorFuncionaComoAntes(t *testing.T) {
+	svc, usuarios, _, orgs, _ := montarApp(t)
+	usuarios.semear(orgs.org, "ana@exemplo.com")
+
+	sessao, err := svc.Login(context.Background(), hostDeTeste, LoginEntrada{
+		Email: "ana@exemplo.com", Senha: "senha-segura-123",
+	})
+	require.NoError(t, err)
+	require.NotEmpty(t, sessao.RefreshToken)
 }

@@ -28,8 +28,10 @@ type UseUser struct {
 
 // New inicializa o singleton do subdomínio montando repo → service →
 // controller. Chamado UMA vez pelo cmd/bootstrap; o validador de workspaces
-// (contrato com o irmão, ligado no bootstrap) e a credencial bcrypt entram aqui.
-func New(db *gorm.DB, validador ValidadorWorkspaces) (Controller, error) {
+// (contrato com o irmão, ligado no bootstrap) e a credencial bcrypt entram
+// aqui. Opções opcionais (ex.: observador de invalidação de cache da
+// evolução Redis #8) passam retas ao service.
+func New(db *gorm.DB, validador ValidadorWorkspaces, opcoes ...OpcaoServico) (Controller, error) {
 	once.Do(func() {
 		if db == nil {
 			initErr = errors.New("conexão com o banco não pode ser nula")
@@ -41,7 +43,7 @@ func New(db *gorm.DB, validador ValidadorWorkspaces) (Controller, error) {
 		}
 		repositoryInstance = NewRepository(db)
 		atribuicoesInstance = NewRepositorioAtribuicoes(db)
-		serviceInstance = NewService(repositoryInstance, atribuicoesInstance, validador, NovasCredenciaisBcrypt())
+		serviceInstance = NewService(repositoryInstance, atribuicoesInstance, validador, NovasCredenciaisBcrypt(), opcoes...)
 		controllerInstance = NewController(serviceInstance)
 	})
 	return controllerInstance, initErr

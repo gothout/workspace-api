@@ -2,10 +2,12 @@
 // os contratos de internal/middleware.
 //
 // O ResolvedorWorkspaces delega ao subdomínio workspace desde a F3 — vive em
-// workspace.go. O ResolvedorPermissoes delega ao service do user desde a F4 —
-// vive em usuario.go (o provisório da F1, que consultava as tabelas direto,
-// saiu). Os contratos de organization (domínios custom e X-Api-Key) delegam
-// ao subdomínio — organizacao.go.
+// workspace.go. O ResolvedorPermissoes delega ao service do user desde a F4
+// (o provisório da F1, que consultava as tabelas direto, saiu) e, desde a
+// evolução Redis (#8), vem decorado com o cache perm:{org}:{user}:{wks} de
+// cache_redis.go — sem Redis o decorador vira passagem direta. Os contratos
+// de organization (domínios custom e X-Api-Key) delegam ao subdomínio —
+// organizacao.go.
 package bootstrap
 
 import (
@@ -21,7 +23,7 @@ func ligarMiddleware(gerenciador *jwt.Manager) error {
 		JWT:            gerenciador,
 		Workspaces:     resolvedorWorkspaces{},
 		DominiosCustom: provedorDominiosCustom{},
-		Permissoes:     resolvedorPermissoesUser{},
+		Permissoes:     novoResolvedorPermissoesComCache(resolvedorPermissoesUser{}),
 		ApiKeys:        resolvedorApiKeys{},
 	})
 }

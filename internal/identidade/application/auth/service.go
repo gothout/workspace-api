@@ -36,6 +36,7 @@ type Service interface {
 type LoginEntrada struct {
 	Email string
 	Senha string
+	IP    string // origem da tentativa (c.ClientIP() no controller) — chave do lockout
 }
 
 type Dependencias struct {
@@ -43,6 +44,7 @@ type Dependencias struct {
 	Emissor      EmissorToken
 	Organizacoes ResolvedorOrganization
 	Vitalidade   VitalidadeOrganization
+	Limite       LimitadorLogin // opcional: nil = sem lockout (Redis ausente é operação normal)
 }
 
 type serviceImpl struct {
@@ -52,6 +54,21 @@ type serviceImpl struct {
 func NewService(deps Dependencias) Service { return &serviceImpl{deps: deps} }
 
 func (s *serviceImpl) Login(ctx context.Context, host string, in LoginEntrada) (*SessaoResponseDto, error) {
+	// Lockout distribuído (issue #8): par e-mail+IP preso = 429 ANTES de
+	// qualquer verificação. Falha do limitador NUNCA impede login — segue
+	// sem lockout, com log (degradação é a recusa certa aqui: cache fora do
+	// ar não vira indisponibilidade de autenticação).
+	if s.deps.Limite != nil {
+		bloqueado, espera, err := s.deps.Limite.Autorizado(ctx, in.Email, in.IP)
+		if err != nil {
+			slog.WarnContext(ctx, "auth.login_lockout_indisponivel", "erro", err.Error())
+		} else if bloqueado {
+			s.auditar(ctx, "login", false,
+				"email", pii.MascaraEmail(in.Email), "limite_excedido", true,
+				"espera_seg", int(espera.Seconds()))
+			return nil, ErrLoginBloqueado
+		}
+	}
 	org, resolvido, err := s.deps.Organizacoes.Resolver(ctx, host)
 	if err != nil {
 		return nil, err // falha de infraestrutura sobe → 500; nunca vira 401 de mentira
@@ -68,12 +85,14 @@ func (s *serviceImpl) Login(ctx context.Context, host string, in LoginEntrada) (
 		// E-mail é PII e, aqui, input NÃO validado do cliente: vai mascarado
 		// (R7) — auditoria mantém o "quem" aproximado sem ecoar o valor.
 		s.auditar(ctx, "login", false, "email", pii.MascaraEmail(in.Email))
+		s.contarFalhaLogin(ctx, in) // falha alimenta o lockout quando ligado
 		return nil, ErrCredenciaisInvalidas // o motivo exato fica no subdomínio/log
 	}
 	sessao, err := s.abrirSessao(ctxOrg, u)
 	if err != nil {
 		return nil, err
 	}
+	s.limparFalhasLogin(ctx, in) // login bom zera o histórico do par
 	s.auditar(ctx, "login", true,
 		"user_uuid", u.UUID.String(), "organization_uuid", u.OrganizationUUID.String())
 	return sessao, nil
@@ -223,6 +242,29 @@ func (s *serviceImpl) claimsParaEncerrar(refreshToken string) (usuarioUUID, orga
 		return uuid.Nil, uuid.Nil, "", ErrSessaoInvalida
 	}
 	return usuarioUUID, organizationUUID, claims.JTI, nil
+}
+
+// contarFalhaLogin alimenta o lockout com a credencial recusada. Erro do
+// limitador é só log: cache fora do ar não pode falhar a resposta de login
+// (a recusa de credencial já aconteceu e é ela que o cliente recebe).
+func (s *serviceImpl) contarFalhaLogin(ctx context.Context, in LoginEntrada) {
+	if s.deps.Limite == nil {
+		return
+	}
+	if err := s.deps.Limite.RegistrarFalha(ctx, in.Email, in.IP); err != nil {
+		slog.WarnContext(ctx, "auth.login_lockout_indisponivel", "erro", err.Error())
+	}
+}
+
+// limparFalhasLogin zera o histórico do par após login bem-sucedido — mesmo
+// raciocínio do contarFalhaLogin para falhas do próprio limitador.
+func (s *serviceImpl) limparFalhasLogin(ctx context.Context, in LoginEntrada) {
+	if s.deps.Limite == nil {
+		return
+	}
+	if err := s.deps.Limite.RegistrarSucesso(ctx, in.Email, in.IP); err != nil {
+		slog.WarnContext(ctx, "auth.login_lockout_indisponivel", "erro", err.Error())
+	}
 }
 
 // auditar registra login/logout/refresh (doc 03): sucesso E falha, payload

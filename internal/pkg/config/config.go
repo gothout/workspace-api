@@ -32,6 +32,7 @@ type Config struct {
 	Server    ServerConfig    `mapstructure:"server"`
 	Security  SecurityConfig  `mapstructure:"security"`
 	Databases DatabasesConfig `mapstructure:"databases"`
+	Cache     CacheConfig     `mapstructure:"cache"`
 }
 
 type AppConfig struct {
@@ -68,6 +69,38 @@ type SecurityConfig struct {
 type DatabasesConfig struct {
 	Postgres   PostgresConfig   `mapstructure:"postgres"`
 	Migrations MigrationsConfig `mapstructure:"migrations"`
+	Redis      RedisConfig      `mapstructure:"redis"`
+}
+
+// RedisConfig é a conexão do cache/lockout distribuído — dependência
+// DEGRADÁVEL: enabled=false ou servidor inacessível no boot deixam o
+// processo subir sem Redis (log [DEGRADADO]); os consumidores tratam a
+// ausência (sem cache, sem lockout) e nada derruba o processo.
+type RedisConfig struct {
+	Enabled bool   `mapstructure:"enabled"`
+	Host    string `mapstructure:"host"`
+	Port    int    `mapstructure:"port"`
+	Pass    string `mapstructure:"pass"` // nunca logada nem em erro
+	DB      int    `mapstructure:"db"`
+}
+
+func (r RedisConfig) Addr() string {
+	return fmt.Sprintf("%s:%d", r.Host, r.Port)
+}
+
+// CacheConfig agrega os parâmetros dos caches de leitura e do lockout de
+// login. Tudo opcional: zero vira default em validar() — TTL curto é
+// obrigatório por desenho (agents/02), nunca configurável para "eterno".
+type CacheConfig struct {
+	TtlResolucaoSeg  int             `mapstructure:"ttl_resolucao_seg"`
+	TtlPermissoesSeg int             `mapstructure:"ttl_permissoes_seg"`
+	LoginLockout     LoginLockConfig `mapstructure:"login_lockout"`
+}
+
+type LoginLockConfig struct {
+	MaxTentativas int `mapstructure:"max_tentativas"`
+	JanelaSeg     int `mapstructure:"janela_seg"`
+	BloqueioSeg   int `mapstructure:"bloqueio_seg"`
 }
 
 type PostgresConfig struct {
@@ -189,6 +222,24 @@ func (c *Config) validar() error {
 	}
 	if c.Databases.Migrations.StatementTimeoutMin <= 0 {
 		c.Databases.Migrations.StatementTimeoutMin = 10
+	}
+	if c.Databases.Redis.Enabled && (c.Databases.Redis.Host == "" || c.Databases.Redis.Port <= 0 || c.Databases.Redis.Port > 65535) {
+		return errors.New("configuração inválida: databases.redis.enabled=true exige host e port (1–65535)")
+	}
+	if c.Cache.TtlResolucaoSeg <= 0 {
+		c.Cache.TtlResolucaoSeg = 30
+	}
+	if c.Cache.TtlPermissoesSeg <= 0 {
+		c.Cache.TtlPermissoesSeg = 60
+	}
+	if c.Cache.LoginLockout.MaxTentativas <= 0 {
+		c.Cache.LoginLockout.MaxTentativas = 5
+	}
+	if c.Cache.LoginLockout.JanelaSeg <= 0 {
+		c.Cache.LoginLockout.JanelaSeg = 300
+	}
+	if c.Cache.LoginLockout.BloqueioSeg <= 0 {
+		c.Cache.LoginLockout.BloqueioSeg = 900
 	}
 	return nil
 }

@@ -17,8 +17,9 @@
 | Testes | `github.com/stretchr/testify` | Table-driven |
 | Senha/hash | `golang.org/x/crypto` | bcrypt para credenciais |
 | Testes de integração | `github.com/testcontainers/testcontainers-go` | Banco efêmero do teste `up → down → up` |
+| Redis | `github.com/redis/go-redis/v9` (+ módulo redis do testcontainers) | Evolução #8: cache/lockout **degradável** — seção abaixo |
 
-Sem Redis, ClickHouse ou errobserve no núcleo — evoluções futuras (fim deste doc), cada uma com issue própria.
+ClickHouse e errobserve seguem fora do núcleo — evoluções futuras (fim deste doc), cada uma com issue própria.
 
 ## Configuração (`configs.json` / `configs_example.json`)
 
@@ -66,7 +67,19 @@ Sem Redis, ClickHouse ou errobserve no núcleo — evoluções futuras (fim dest
       "auto_run": true,
       "lock_timeout_sec": 5,
       "statement_timeout_min": 10
+    },
+    "redis": {
+      "enabled": false,
+      "host": "localhost",
+      "port": 6379,
+      "pass": "",
+      "db": 0
     }
+  },
+  "cache": {
+    "ttl_resolucao_seg": 30,
+    "ttl_permissoes_seg": 60,
+    "login_lockout": { "max_tentativas": 5, "janela_seg": 300, "bloqueio_seg": 900 }
   }
 }
 ```
@@ -74,6 +87,21 @@ Sem Redis, ClickHouse ou errobserve no núcleo — evoluções futuras (fim dest
 - `configs_example.json` é o modelo **versionado**; `configs.json` é local e ignorado pelo git.
 - `config.Init(path)` no boot; `config.Use()` / `config.MustUse()` depois. Erro de config é **fatal**, com mensagem acionável (qual chave faltou, qual valor é inválido).
 - `app.base_domain` é o domínio-base da plataforma — dele derivam a resolução de workspace pelo Host e o CORS (doc 03).
+- `databases.redis` + `cache` são a evolução Redis (#8): dependência **degradável** — `enabled=false` ou servidor inacessível no boot deixam o processo subir sem ela (log `[DEGRADADO]`). Os TTLs têm defaults aplicados em código; TTL curto é obrigatório por desenho, nunca configurável para "eterno".
+
+## Redis (cache/lockout distribuído) — `internal/infra/redis`
+
+Evolução da issue #8, **degradável por desenho**: `Connect(cfg)` puro NUNCA erra — cliente vivo quando o servidor responde, **cliente nil com log `[DEGRADADO]`** caso contrário; o consumidor é obrigado a tratar a ausência. A fonte da verdade é sempre o Postgres.
+
+| Peça | Para quê | Chave / TTL |
+|---|---|---|
+| CacheResolucao | resultado `{slug}` → workspace consumido pelo Host | `workspace:slug:{slug}` / `cache.ttl_resolucao_seg`; invalidação ativa nas escritas |
+| Cache de permissões | permissões efetivas do par usuário×workspace | `perm:{org}:{user}:{wks}` / `cache.ttl_permissoes_seg`; invalidado pelo contrato `ObservadorAtribuicoes` do user |
+| Denylist do JWT | CACHE da revogação persistida do refresh | `jwt:deny:{jti}` / TTL do refresh; só POSITIVO é cacheado |
+| LimitadorLogin | rate-limit/lockout de login por (e-mail, IP) | `lock:c:{hash}`, `lock:b:{hash}` / janela e bloqueio da config; par hasheado (PII) |
+| idempotência | RESERVADO — nenhum código grava hoje | `idempot:{chave}` |
+
+Prefixos são constantes em `chaves.go` — prefixo novo só entra com motivo documentado no `AGENTS.md` do pacote.
 
 ## PostgreSQL (transacional) — `internal/infra/database/postgres`
 
@@ -164,8 +192,8 @@ Cada uma tem **issue própria no GitHub** (label `evolucao`) e só entra no loop
 
 | Evolução | Para quê | Desenho acordado |
 |---|---|---|
-| **Redis** | Cache de permissões e de workspace por slug, locks de concorrência, denylist de JWT | Cliente **degradável**: `Connect` nunca erra — devolve cliente **nulo** com log `[DEGRADADO]` e o consumidor é obrigado a tratar a ausência. A denylist entra por interface declarada no `infra/jwt`, ligada no bootstrap, e é **só cache da revogação persistida** no Postgres. Cache com **TTL curto obrigatório** + **invalidação ativa** em inativação de organization/workspace e troca de `dominio`; a invariante "filho nunca mais vivo que o pai" ganha teste na evolução. |
+| **Redis** ✅ (issue #8, implementada) | Cache de permissões e de workspace por slug, locks de concorrência, denylist de JWT, rate-limit/lockout de login | Cliente **degradável**: `Connect` nunca erra — devolve cliente **nulo** com log `[DEGRADADO]` e o consumidor é obrigado a tratar a ausência. A denylist entra por interface declarada no `infra/jwt`, ligada no bootstrap, e é **só cache da revogação persistida** no Postgres (só positivo cacheado). Cache com **TTL curto obrigatório** + **invalidação ativa** em inativação de organization/workspace e troca de `dominio`; a invariante "filho nunca mais vivo que o pai" tem teste ponta a ponta. |
 | **ClickHouse** | Logs assíncronos (auditoria, acesso, erro) fora do caminho síncrono do request | Writer em lote (flush por tamanho/intervalo); log nunca entra no caminho síncrono; com o banco fora, o lote cai no **stdout** em vez de sumir — nunca bloqueia nem derruba a API. |
 | **errobserve** | Observador de erros por subdomínio: todo erro vira evento estruturado consultável | Uma linha por subdomínio no `singleton.go`; sinks plugáveis (slog sempre ativo, ClickHouse quando existir); o catálogo de erros do `errors.go` (doc 05) é a fonte dos códigos. |
 
-Enquanto não existem: auditoria sai por **log estruturado** (slog), permissões consultam o banco direto (sem cache), refresh tokens operam sem denylist distribuída.
+Enquanto o ClickHouse não existe: auditoria sai por **log estruturado** (slog), permissões consultam o banco direto quando o Redis está degradado (sem cache), refresh tokens operam sem denylist distribuída (só a revogação persistida).

@@ -38,7 +38,7 @@ func (ctrl *controllerImpl) Routes(routes gin.IRouter) {
 // Handlers finos: bind → service → c.JSON. Erro sai SÓ por rest_err.WriteError.
 
 // @Summary      Autentica e abre uma sessão
-// @Description  Login com e-mail/senha contra a organization resolvida pelo Host (subdomínio de workspace ou domínio custom). Falhas são indistinguíveis: usuário inexistente, senha errada e host sem organization devolvem o mesmo 401 genérico
+// @Description  Login com e-mail/senha contra a organization resolvida pelo Host (subdomínio de workspace ou domínio custom). Falhas são indistinguíveis: usuário inexistente, senha errada e host sem organization devolvem o mesmo 401 genérico. Com Redis ligado, repetidas falhas do par e-mail+IP aplicam lockout temporário (429)
 // @Tags         Identidade · Auth
 // @Accept       json
 // @Produce      json
@@ -46,6 +46,7 @@ func (ctrl *controllerImpl) Routes(routes gin.IRouter) {
 // @Success      200 {object} SessaoResponseDto
 // @Failure      400 {object} rest_err.RestErr "Corpo malformado"
 // @Failure      401 {object} rest_err.RestErr "Credenciais inválidas (genérico)"
+// @Failure      429 {object} rest_err.RestErr "Muitas tentativas — login bloqueado temporariamente"
 // @Router       /api/application/identidade/auth/login [post]
 func (ctrl *controllerImpl) Login(c *gin.Context) {
 	var dto LoginRequestDto
@@ -56,6 +57,7 @@ func (ctrl *controllerImpl) Login(c *gin.Context) {
 	sessao, err := ctrl.service.Login(c.Request.Context(), c.Request.Host, LoginEntrada{
 		Email: dto.Email,
 		Senha: dto.Senha,
+		IP:    c.ClientIP(),
 	})
 	if err != nil {
 		rest_err.WriteError(c, traduzir(err))
@@ -119,6 +121,7 @@ func traduzir(err error) *rest_err.RestErr {
 		return rest_err.Interno(nil)
 	case err == ErrCredenciaisInvalidas,
 		err == ErrSessaoInvalida,
+		err == ErrLoginBloqueado,
 		err == ErrInvalidInput:
 		return rest_err.DoCatalogo(err)
 	default:

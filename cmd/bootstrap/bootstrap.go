@@ -28,6 +28,7 @@ import (
 	"workspace-api/internal/infra/database/migrations"
 	"workspace-api/internal/infra/database/postgres"
 	"workspace-api/internal/infra/jwt"
+	rediscache "workspace-api/internal/infra/redis"
 	"workspace-api/internal/pkg/config"
 	"workspace-api/internal/pkg/validator"
 )
@@ -68,6 +69,13 @@ func Serve(caminhoConfig string) error {
 	fechamentos.empilhar(jwt.Close)
 	slog.Info("[BOOTSTRAP] jwt inicializado")
 
+	// 4.5 Redis — DEGRADÁVEL (evolução #8): desabilitado/inacessível NUNCA
+	// derruba o boot; os adaptadores de cache_redis.go tratam a ausência.
+	if _, err := rediscache.InitRedis(); err != nil {
+		return fmt.Errorf("boot: %w", err)
+	}
+	fechamentos.empilhar(rediscache.Close)
+
 	// 5. Migrations — `up` automático quando auto_run (advisory lock impede
 	// réplicas de migrar juntas); rollback NUNCA é automático.
 	if cfg.Databases.Migrations.AutoRun {
@@ -94,10 +102,11 @@ func Serve(caminhoConfig string) error {
 	}
 	slog.Info("[BOOTSTRAP] middleware da cadeia de autorização inicializado")
 
-	// Revogação persistida do refresh (F4): o validador do JWT passa a
-	// conferir identidade_user_refresh_token via adaptador que resolve NA
-	// CHAMADA — a denylist Redis da evolução será só cache desta verdade.
-	gerenciadorJWT.DefinirRevogador(revogadorRefresh{})
+	// Revogação persistida do refresh (F4) + denylist Redis (#8): o
+	// revogador composto confere o cache jwt:deny:{jti} e cai à tabela
+	// persistida no miss — negativo nunca é cacheado, então logout/rotação
+	// valem na hora (fonte da verdade segue sendo o Postgres).
+	gerenciadorJWT.DefinirRevogador(novoRevogadorComCache(nil))
 
 	// 7. Domínios — subdomínios de internal/identidade/domain na ordem de
 	// dependência (organization → workspace → user); cada adaptador do
@@ -115,15 +124,17 @@ func Serve(caminhoConfig string) error {
 	}
 	slog.Info("[BOOTSTRAP-DI] Contêiner Identidade/Organization inicializado.")
 
-	// Cache de resolução por slug: contrato CacheResolucao do subdomínio;
-	// implementação Redis é evolução (#8) — nil é operação normal.
-	_, err = dominioWorkspace.New(db, nil)
+	// Cache de resolução por slug (#8): contrato CacheResolucao do subdomínio
+	// com implementação Redis — sem Redis o adaptador vira no-op (consulta
+	// direta à fonte, operação normal).
+	_, err = dominioWorkspace.New(db, cacheResolucaoRedis{})
 	if err != nil {
 		return fmt.Errorf("boot: %w", err)
 	}
 	slog.Info("[BOOTSTRAP-DI] Contêiner Identidade/Workspace inicializado.")
 
-	_, err = dominioUsuario.New(db, validadorWorkspaces{})
+	_, err = dominioUsuario.New(db, validadorWorkspaces{},
+		dominioUsuario.ComObservadorAtribuicoes(invalidadorPermissoesRedis{}))
 	if err != nil {
 		return fmt.Errorf("boot: %w", err)
 	}
@@ -132,12 +143,13 @@ func Serve(caminhoConfig string) error {
 	// Aplicações — orquestrações que cruzam os subdomínios acima. O auth
 	// recebe os contratos ligados por adaptadores que resolvem os singletons
 	// NA CHAMADA (usuario.go) — inclusive a vitalidade da organization dona
-	// da sessão (R4: refresh falha fechado com dona inativa/removida).
+	// da sessão (R4) e o lockout de login por e-mail+IP (#8; nil-safe).
 	if _, err := aplicacaoauth.New(aplicacaoauth.Dependencias{
 		Usuarios:     usuariosAuth{},
 		Emissor:      emissorToken{},
 		Organizacoes: resolvedorOrganizacao{},
 		Vitalidade:   vitalidadeOrganizacao{},
+		Limite:       limitadorLoginAuth{},
 	}); err != nil {
 		return fmt.Errorf("boot: %w", err)
 	}

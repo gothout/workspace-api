@@ -25,12 +25,13 @@ Tabela `identidade_workspace_workspace`, rotas em
   então **valida que o workspace pertence à organization dona do domínio**
   (plataforma ou custom). Workspace alheio no domínio do parceiro = **404**.
   O resultado dessas consultas nunca é exposto em rota de administração.
-- **Cache de slug futuro entra por interface** declarada aqui
-  (implementação Redis na evolução, ligada no bootstrap) — ausência de cache
-  é operação normal, só mais cara. Cache com **TTL curto obrigatório** e
-  **invalidação ativa** em inativação de organization/workspace e troca de
-  `dominio`; a invariante "filho nunca mais vivo que o pai" ganha teste na
-  evolução (ver `agents/02`).
+- **Cache de slug entra por interface** declarada aqui — desde a evolução
+  Redis (#8) o bootstrap liga a implementação `workspace:slug:{slug}` com TTL
+  curto (`cache.ttl_resolucao_seg`) e **invalidação ativa** em inativação/
+  reativação/remoção e cascata da organization (`InvalidarOrganization`
+  seletivo); ausência de cache (Redis degradado) segue sendo operação normal,
+  só mais cara. A invariante "filho nunca mais vivo que o pai" tem teste
+  ponta a ponta no bootstrap.
 
 ## Permissões (`permissions.go` + `Catalogo()`)
 

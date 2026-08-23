@@ -81,12 +81,17 @@ type serviceImpl struct {
 	atribuicoes   RepositorioAtribuicoes
 	validador     ValidadorWorkspaces // nil = sem validação de workspace alheio? NÃO: obrigatório no singleton; nil só em teste unitário explícito
 	credenciais   Credenciais
+	observador    ObservadorAtribuicoes // opcional (cache de permissões): nil é operação normal
 	hashDeMentira sync.Once
 	falsoHash     string
 }
 
-func NewService(repo Repository, atribuicoes RepositorioAtribuicoes, validador ValidadorWorkspaces, credenciais Credenciais) Service {
-	return &serviceImpl{repo: repo, atribuicoes: atribuicoes, validador: validador, credenciais: credenciais}
+func NewService(repo Repository, atribuicoes RepositorioAtribuicoes, validador ValidadorWorkspaces, credenciais Credenciais, opcoes ...OpcaoServico) Service {
+	s := &serviceImpl{repo: repo, atribuicoes: atribuicoes, validador: validador, credenciais: credenciais}
+	for _, aplicar := range opcoes {
+		aplicar(s)
+	}
+	return s
 }
 
 // --- CRUD -----------------------------------------------------------------------
@@ -359,6 +364,11 @@ func (s *serviceImpl) AtribuirPapel(ctx context.Context, usuarioUUID, workspaceU
 	if err := s.atribuicoes.Criar(ctx, a); err != nil {
 		return nil, err
 	}
+	// Invalidação de cache de permissões (issue #8): a escrita JÁ VALEU —
+	// falha do observador nunca desfaz a atribuição nem vira erro ao cliente.
+	if s.observador != nil {
+		s.observador.AtribuicaoAlterada(ctx, usuarioUUID, workspaceUUID)
+	}
 	s.auditar(ctx, "atribuir_papel", usuarioUUID, true,
 		"atribuicao_uuid", a.UUID.String(),
 		"workspace_uuid", workspaceUUID.String(),
@@ -379,6 +389,12 @@ func (s *serviceImpl) RemoverAtribuicao(ctx context.Context, usuarioUUID, atribu
 	}
 	if err := s.atribuicoes.Remover(ctx, usuarioUUID, atribuicaoUUID); err != nil {
 		return err
+	}
+	// Invalidação GROSSEIRA e segura (issue #8): a remoção não carrega o par
+	// afetado, então caem TODAS as entradas do usuário na organization —
+	// falha do observador nunca desfaz a remoção.
+	if s.observador != nil {
+		s.observador.AtribuicaoAlterada(ctx, usuarioUUID, uuid.Nil)
 	}
 	s.auditar(ctx, "remover_atribuicao", usuarioUUID, true, "atribuicao_uuid", atribuicaoUUID.String())
 	return nil

@@ -1,0 +1,43 @@
+# docker-compose.yml — ambiente de DESENVOLVIMENTO do workspace-api.
+#
+# Sobe Postgres (obrigatório) e Redis (opcional/degradável). A API roda na
+# máquina do dev (`go run . serve --config configs.json`) apontando para os
+# serviços pelas portas publicadas.
+#
+#   docker compose up -d
+#
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: workspace
+      POSTGRES_PASSWORD: workspace
+      POSTGRES_DB: workspace
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata_dev:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U workspace -d workspace"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Opcional: cache de resolução/permissões, denylist do JWT e lockout de
+  # login. Sem ele a API sobe igual (log [DEGRADADO]) — ligar em
+  # configs.json com databases.redis.enabled=true.
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata_dev:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pgdata_dev:
+  redisdata_dev:

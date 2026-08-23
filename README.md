@@ -34,11 +34,11 @@ Organization ── tem N ──▶ Workspace          (slug DNS: {slug}.{base_d
 ## Stack
 
 gin · Postgres (gorm + pgx) · golang-jwt · golang-migrate · cobra/viper ·
-swaggo (Swagger versionado em `docs/`) · testify · arch-go. Evoluções
-planejadas (issues
-[#8](https://github.com/gothout/workspace-api/issues/8)–[#10](https://github.com/gothout/workspace-api/issues/10)):
-Redis (cache/denylist), ClickHouse (logs assíncronos) e errobserve
-(observador de erros).
+swaggo (Swagger versionado em `docs/`) · testify · arch-go. Evoluções:
+Redis implementado (issue
+[#8](https://github.com/gothout/workspace-api/issues/8) — cache, denylist e
+lockout de login, degradável); ClickHouse (logs assíncronos) e errobserve
+(observador de erros) planejadas.
 
 ## Como subir
 
@@ -46,6 +46,9 @@ Pré-requisitos: Go 1.25+, Postgres 14+ acessível e Docker (para a suíte de
 testes de integração).
 
 ```bash
+# 0. (opcional) Infra de dev com Docker Compose — Postgres + Redis:
+docker compose up -d
+
 # 1. Config local (configs.json é ignorado pelo git; o example é o contrato)
 cp configs_example.json configs.json
 #    ajuste databases.postgres.* e security.jwt_secret para o seu ambiente
@@ -67,6 +70,25 @@ A API sobe em `http://localhost:8080`:
 | `GET /api/status` | sonda de saúde (banco incluído) |
 | `/doc/index.html` | Swagger UI do contrato versionado em `docs/` |
 | `POST /api/application/identidade/auth/login` | autenticação |
+
+### Redis (opcional — degradável)
+
+O template sobe **sem Redis** exatamente igual (log `[DEGRADADO]` no boot):
+sem cache distribuído, sem denylist e **sem lockout de login** — nada quebra,
+só fica mais caro/aberto. Para ligar:
+
+1. Suba o serviço (`docker compose up -d redis`, ou o seu Redis).
+2. Em `configs.json`: `"databases.redis.enabled": true` (+ host/porta/pass).
+3. Opcionalmente ajuste `cache.*`: TTLs dos caches (`ttl_resolucao_seg`,
+   `ttl_permissoes_seg`) e a política do lockout (`login_lockout`).
+
+O que ele adiciona: cache da resolução `{slug}` → workspace
+(`workspace:slug:*`), cache das permissões efetivas por usuário×workspace
+(`perm:*`) com invalidação ativa nas escritas de atribuição, denylist do JWT
+(`jwt:deny:*` — só cache da revogação persistida no Postgres) e
+rate-limit/lockout de login por e-mail+IP (`lock:*`; 429 padronizado após o
+teto de falhas). Prefixos completos documentados em
+`internal/infra/redis/AGENTS.md`.
 
 ### Provisionamento inicial (primeiro super_admin + workspace)
 
@@ -221,7 +243,7 @@ agents/          especificação para quem codifica (ler README.md de lá primei
 cmd/             cli, bootstrap (DI) e server
 internal/
   pkg/           config, rest_err, pagination, orgctx, validator (folha)
-  infra/         database (postgres, migrations), jwt
+  infra/         database (postgres, migrations), jwt, redis (degradável)
   middleware/    cadeia de auth/autorização (fail-closed)
   identidade/    DOMÍNIO
     model/       modelos expostos: entidades, VOs, invariantes (folha)

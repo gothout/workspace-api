@@ -23,6 +23,7 @@ var errorCatalog = map[error]rest_err.ErroCatalogado{
 	ErrCredenciaisInvalidas: {Codigo: "identidade.auth.credenciais_invalidas", Mensagem: "Credenciais inválidas.", Status: http.StatusUnauthorized},
 	ErrSessaoInvalida:       {Codigo: "identidade.auth.sessao_invalida", Mensagem: "Sessão inválida ou expirada.", Status: http.StatusUnauthorized},
 	ErrInvalidInput:         {Codigo: "identidade.auth.requisicao_invalida", Mensagem: "Dados de entrada inválidos.", Status: http.StatusBadRequest},
+	ErrLoginBloqueado:       {Codigo: "identidade.auth.login_bloqueado", Mensagem: "Muitas tentativas de login. Aguarde antes de tentar novamente.", Status: http.StatusTooManyRequests},
 }
 
 // ErrInvalidInput — sentinela operacional local para bind/query malformado.

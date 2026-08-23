@@ -22,6 +22,7 @@ import (
 var (
 	ErrCredenciaisInvalidas = errors.New("auth: credenciais inválidas")
 	ErrSessaoInvalida       = errors.New("auth: sessão inválida ou expirada")
+	ErrLoginBloqueado       = errors.New("auth: muitas tentativas de login")
 )
 
 // Usuarios é a face do subdomínio user de que o login precisa — e SÓ ela.
@@ -74,4 +75,19 @@ type VitalidadeOrganization interface {
 	// Ativa responde se a organization existe e está ativa. Removida/inativa
 	// = false SEM erro; falha de infraestrutura sobe para o chamador decidir.
 	Ativa(ctx context.Context, organizationUUID uuid.UUID) (bool, error)
+}
+
+// LimitadorLogin é a face do rate-limit/lockout distribuído (evolução Redis,
+// issue #8): trava por (e-mail, IP) após repetidas falhas. DEGRADÁVEL — nil
+// nas Dependências = feature desligada (sem Redis não há lockout); falha de
+// infra do limitador NUNCA impede login (segue sem lockout, com log), pois
+// derrubar autenticação por causa de cache seria pior que a ausência dele.
+type LimitadorLogin interface {
+	// Autorizado responde se o par e-mail+IP está bloqueado e há quanto tempo
+	// espera restante.
+	Autorizado(ctx context.Context, email, ip string) (bloqueado bool, espera time.Duration, err error)
+	// RegistrarFalha conta uma credencial recusada para o par.
+	RegistrarFalha(ctx context.Context, email, ip string) error
+	// RegistrarSucesso limpa o histórico do par após login bem-sucedido.
+	RegistrarSucesso(ctx context.Context, email, ip string) error
 }

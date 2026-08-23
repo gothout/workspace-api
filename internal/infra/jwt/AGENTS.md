@@ -20,9 +20,11 @@ Emissão e validação de tokens JWT (golang-jwt, stack em `agents/02`).
 - **Revogação persistida no Postgres**: cada refresh tem `jti` único
   gravado em `identidade_user_refresh_token` (subdomínio `user`); o logout
   marca `revogado_em` e o validador confere a revogação via **interface
-  declarada AQUI** (ausência da implementação = "nada revogado"). A
-  implementação Redis é **evolução futura**, ligada no `cmd/bootstrap`, e
-  vira só **cache dessa revogação** — nunca a fonte da verdade.
+  declarada AQUI** (ausência da implementação = "nada revogado"). Desde a
+  evolução Redis (#8), o revogador ligado no `cmd/bootstrap` é COMPOSTO:
+  cache `jwt:deny:{jti}` na frente, fonte persistida no miss — e só o
+  resultado POSITIVO é cacheado (revogação é permanente), então negativos
+  sempre alcançam a verdade e logout/rotação valem na hora.
   `Validar` é a porta de quem CONCEDE acesso (consulta o revogador);
   `ValidarAssinatura` é a porta **EXCLUSIVA do logout idempotente** (R5) —
   lê as claims sem a denylist para o token já revogado ter sua revogação

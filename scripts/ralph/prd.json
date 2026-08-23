@@ -315,7 +315,7 @@
         "build/vet/test verdes + -race nos pacotes tocados"
       ],
       "priority": 15,
-      "passes": false,
+      "passes": true,
       "issue": 8,
       "branch": "ox-alpha/evolucao-redis",
       "docs": [
