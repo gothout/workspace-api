@@ -714,3 +714,69 @@ Started: 2026-08-22
     + swagger_cobertura_test.go) e todos os NewService de teste — grep pelo
     construtor acha tudo.
 ---
+
+## 2026-08-23 - E4
+- errobserve (issue #10) completa: `internal/pkg/errobserve` NOVO (folha) —
+  `Observe(ctx, err)` devolve o erro INTACTO; casamento por errors.Is com as
+  sentinelas declaradas via `DoCatalogo(errorCatalog, severidades)` (códigos e
+  mensagens vêm do PRÓPRIO catálogo do errors.go — fonte única; o singleton
+  declara só `severidadesErros`: warn=4xx esperado, error=escalação R1/
+  login_bloqueado/hash_ausente, critical=desconhecido); sentinela fora do
+  catálogo vira evento "desconhecido"+critical. Namespace RESERVADO sistema.*
+  exclusivo da plataforma (`ObservadorPlataforma` exige o prefixo; negócio que
+  tentar dominio sistema ou prefixo sistema. PANICA no boot/import);
+  vocabulário fixo `CatalogoSistema()` (boot/migrations.up/shutdown/
+  degradação) visível sem emissão. Sinks: SlogPadrao SEMPRE primeiro
+  (garantia estrutural do DefinirSinks), ClickHouse como TERCEIRA trilha
+  (fila/EnfileirarErros/drain/descarte contado + tabela log_erro no DDL
+  versionado db/logs/0003), Alerta(janela) agrega críticos por código com
+  [ALERTA] uma vez por janela (logs.alerta_janela_seg, default 60s);
+  despachante recupera pânico POR sink com contagem FalhasSink(). Decoradores
+  service_observado.go nos 3 subdomínios + auth montados DENTRO do NewService.
+  Bootstrap: logs.go define os sinks, observador de plataforma emite REALMENTE
+  na falha de migrations (sistema.migrations.up critical) e na degradação
+  redis/clickhouse (sistema.degradacao_dependencia warn); catalogo.go agrega
+  erros+sistema em /api/system/eventos; CLI NOVA `workspace-api errors` (mapa
+  global código/severidade/status/mensagem — sem conexão nem config).
+- Files changed: internal/pkg/errobserve/*(NOVO, 5+AGENTS.md+2 testes);
+  internal/identidade/domain/{organization,workspace,user}/{singleton,
+  service,service_observado(NOVO)}.go; application/auth/{singleton,service,
+  service_observado(NOVO)}.go; internal/infra/clickhouse/{escritor,gravador,
+  escritor_test,integracao_test}.go; db/logs/0003_log_erros.sql(NOVO)+
+  AGENTS.md; cmd/bootstrap/{logs,catalogo,bootstrap,eventos_cobertura_test,
+  swagger_cobertura_test,cache_redis*}.go + errobserve.go(NOVO)+
+  errobserve_cobertura_test.go(NOVO)+mapa_erros.go(NOVO); cmd/cli/{cli,
+  cli_test,AGENTS.md}; internal/pkg/config/config.go; configs_example.json;
+  agents/{02,04,06}; AGENTS.md raiz + domain/auth AGENTS.md; README.md;
+  prd.json; progress.txt. (gofmt alinhou structs de sessões anteriores:
+  catalogo/contratos.go etc.)
+- Docs read: issue #10 (gh api), agents/README, agents/{01,02,04,05},
+  AGENTS.md de internal/pkg, pkg/rest_err, pkg/log(+audit_log),
+  infra/clickhouse(+redis), cmd/{,bootstrap,cli}, identidade/domain(+AGENTS.md
+  dos subdomínios), application/catalogo, application/auth, db/logs.
+- Checks: build/vet/test verdes (29 pacotes, integração postgres+redis+
+  clickhouse reais); CGO_ENABLED=1 go test -race verde em errobserve/
+  clickhouse/config/rest_err/domínios/auth/bootstrap/cli; arch-go segue
+  compliance/coverage 100 pelo gate do go test (pkg→pkg permitido pela regra
+  existente); Swagger regenerado SEM diff (nenhuma rota nova); CLI smoke
+  `go run . errors` confere saída agrupada com severidades.
+- **Learnings for future iterations:**
+  - ResetarParaTeste apaga o registro populado por vars de pacote NA
+    IMPORTAÇÃO: teste que precisa do catálogo global deve trocar SÓ os sinks
+    (DefinirSinks() sem extras restaura o padrão slog-only) e nunca resetar —
+    o registro não se repopula sozinho.
+  - errors.Is NÃO casa erro reconstruído por concatenação de string —
+    wrapping sempre com fmt.Errorf("%w"); o próprio teste de plataforma caiu
+    nesse engano antes do commit.
+  - Contrato de sink inclui segurança para CONCORRÊNCIA: o -race pegou o
+    dublê do teste (append sem mutex) antes de qualquer problema no código
+    real — doubles compartilhados entre goroutines precisam de lock.
+  - Decorador com embedding de interface delega métodos não sobrescritos
+    (SlugsFixos) de graça — envolver o Service DENTRO do NewService dá
+    observação uniforme para singleton/seed/testes sem ripple nos chamadores.
+  - Severidade é declaração do singleton; código/mensagem vêm do errorCatalog:
+    sentinela nova SEM severidade PANICA já no import (fail-fast antes de
+    qualquer boot/teste).
+  - Go não sobrecarrega métodos (3ª vez): Sink.Registrar(errobserve.Evento) é
+    OUTRO contrato — mais um adaptador fino por trilha no bootstrap/logs.go.
+---
