@@ -298,6 +298,61 @@
         "internal/middleware/AGENTS.md",
         "cmd/bootstrap/AGENTS.md"
       ]
+    },
+    {
+      "id": "E1",
+      "title": "Redis — cache, locks, denylist e rate-limit de login",
+      "description": "Infra Redis degradável por interface: cache de resolução de workspace por slug e de permissões efetivas, implementação Redis da denylist do JWT, e rate-limit/lockout de login (pendência da revisão). Ausência do Redis degrada com log [DEGRADADO] e nunca derruba o processo.",
+      "acceptanceCriteria": [
+        "internal/infra/redis: Connect puro + singleton degradável (cliente nulo + log [DEGRADADO]; consumidor trata a ausência)",
+        "Implementação Redis da denylist do JWT (interface já declarada em internal/infra/jwt), ligada no bootstrap",
+        "Cache de slug do workspace via interface CacheResolucao (F3) com TTL e invalidação nas escritas",
+        "Cache de permissões efetivas por (usuario, workspace) com TTL e invalidação em atribuição/remoção de papel",
+        "Rate-limit/lockout de login por e-mail+IP com janela via Redis; degradável (sem Redis = sem lockout, com log) e resposta 429 padronizada",
+        "Prefixos de chave fixos documentados (perm:, workspace:slug:, lock:, idempot:, jwt:deny:)",
+        "docker-compose.yml de dev + seção no configs_example.json",
+        "Testes: degradação sem Redis, cache hit/miss, invalidação, lockout — integração com Redis efêmero se docker disponível",
+        "build/vet/test verdes + -race nos pacotes tocados"
+      ],
+      "priority": 15,
+      "passes": false,
+      "issue": 8,
+      "branch": "ox-alpha/evolucao-redis",
+      "docs": [
+        "agents/02-stack-e-infra.md",
+        "agents/03-identidade-tenancy.md",
+        "internal/infra/AGENTS.md",
+        "internal/infra/jwt/AGENTS.md",
+        "internal/identidade/application/auth/AGENTS.md",
+        "cmd/bootstrap/AGENTS.md"
+      ]
+    },
+    {
+      "id": "E2",
+      "title": "ClickHouse + trilhas de log assíncronas",
+      "description": "Banco de logs: trilhas de auditoria, acesso e erro fora do caminho síncrono, com writer assíncrono em lote e destino stdout degradado.",
+      "acceptanceCriteria": [
+        "internal/infra/clickhouse: Connect puro + singleton degradável; writer assíncrono em lote (flush por tamanho/intervalo; fila cheia descarta e conta; drain no shutdown)",
+        "internal/pkg/log/audit_log e access_log como pacotes-folha com interface Destino ligada no bootstrap",
+        "Log nunca no caminho síncrono do request (enqueue não-bloqueante)",
+        "Middleware global de access log (primeiro da cadeia) com ray_trace do request, substituindo o slog síncrono atual",
+        "Trilha de auditoria das escritas dos subdomínios migrada para o destino assíncrono (sem perder o payload montado à mão)",
+        "DDL das tabelas de log versionada (db/logs/ ou equivalente documentado) + seção no configs_example.json",
+        "stdout como destino degradado quando ClickHouse ausente (log [DEGRADADO])",
+        "Testes: buffer/flush/descarte contado, drain no shutdown, degradação — integração com ClickHouse efêmero se docker disponível",
+        "build/vet/test verdes + -race nos pacotes tocados"
+      ],
+      "priority": 16,
+      "passes": false,
+      "issue": 9,
+      "branch": "ox-alpha/evolucao-clickhouse",
+      "docs": [
+        "agents/02-stack-e-infra.md",
+        "agents/01-arquitetura-ddd.md",
+        "internal/infra/AGENTS.md",
+        "cmd/server/routes/AGENTS.md",
+        "cmd/bootstrap/AGENTS.md"
+      ]
     }
   ]
 }

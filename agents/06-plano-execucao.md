@@ -24,13 +24,13 @@ Uma issue por vez. Nunca pular fase. Nunca deixar o build quebrado.
 | **F5** | Catálogos do sistema | [#6](https://github.com/gothout/workspace-api/issues/6) | `internal/identidade/application/catalogo` agregando os registros no bootstrap; `GET /api/application/identidade/catalogo/permissoes/minhas` (árvore filtrada do usuário) e `GET /api/system/errors` (mapa completo) no ar, conforme os contratos do `04`. |
 | **F6** | Hardening do template | [#7](https://github.com/gothout/workspace-api/issues/7) | Testes de concorrência onde houver invariante (slug, e-mail, unicidade), cobertura Swagger conferida por teste, arch-go com coverage 100, grafo de dependências validado com o Go Architect (registro no log abaixo), README de uso do template. |
 
-## Evoluções futuras (label `evolucao` — fora do loop até o F6 fechar)
+## Evoluções futuras (label `evolucao`)
 
 | Tema | Issue | Resumo (desenho no doc 02) |
 |---|---|---|
-| Redis | [#8](https://github.com/gothout/workspace-api/issues/8) | Cache de permissões e de workspace por slug, locks, denylist de JWT — cliente degradável, ligado por interface. |
-| ClickHouse + logs assíncronos | [#9](https://github.com/gothout/workspace-api/issues/9) | Auditoria/acesso/erro fora do caminho síncrono, writer em lote, stdout como destino degradado. |
-| errobserve | [#10](https://github.com/gothout/workspace-api/issues/10) | Observador de erros por subdomínio com sinks plugáveis, alimentado pelo catálogo de erros. |
+| Redis | [#8](https://github.com/gothout/workspace-api/issues/8) | Cache de permissões e de workspace por slug, locks, denylist de JWT — cliente degradável, ligado por interface. **Entrou no loop pós-revisão (story E1).** |
+| ClickHouse + logs assíncronos | [#9](https://github.com/gothout/workspace-api/issues/9) | Auditoria/acesso/erro fora do caminho síncrono, writer em lote, stdout como destino degradado. **Entrou no loop pós-revisão (story E2).** |
+| errobserve | [#10](https://github.com/gothout/workspace-api/issues/10) | Observador de erros por subdomínio com sinks plugáveis, alimentado pelo catálogo de erros. Fora do loop por ora. |
 
 ## Revisão pós-F6 (achados da revisão de código)
 
@@ -45,6 +45,13 @@ Correções priorizadas após a revisão técnica do template fechado (R1 e R2 s
 | **R5** | Logout idempotente + rotação de refresh | [#23](https://github.com/gothout/workspace-api/issues/23) | Logout com token já revogado não falha; refresh revoga o jti anterior; reuso de refresh revogado falha fechado; testes. |
 | **R6** | Segredo JWT mínimo 32 bytes | [#24](https://github.com/gothout/workspace-api/issues/24) | `infra/jwt` exige 32+ bytes com erro claro; `configs_example.json` e testes ajustados. |
 | **R7** | Varredura menor | [#25](https://github.com/gothout/workspace-api/issues/25) | `errors.Is` nos adaptadores; race em `middleware.Use`/`ResetarParaTeste`; `trusted_proxy` aplicado; código morto removido; e-mail mascarado em logs; regex `slugdns` deduplicada; `rest_err.DoCatalogo` determinístico; doc `ResolvedorWorkspaces` alinhada — cada item corrigido ou justificado; `-race` verde. |
+
+## Evoluções no loop (pós-revisão)
+
+| Story | Tema | Issue | Definição de pronto |
+|---|---|---|---|
+| **E1** | Redis — cache, locks, denylist e rate-limit de login | [#8](https://github.com/gothout/workspace-api/issues/8) | `internal/infra/redis` degradável; denylist do JWT em Redis ligada no bootstrap; cache de slug do workspace e de permissões efetivas com TTL + invalidação; rate-limit/lockout de login (429 padronizado, degradável); prefixos de chave documentados; `docker-compose.yml` de dev + `configs_example.json`; testes de degradação/cache/lockout com Redis efêmero; `-race` verde. |
+| **E2** | ClickHouse + trilhas de log assíncronas | [#9](https://github.com/gothout/workspace-api/issues/9) | `internal/infra/clickhouse` degradável com writer em lote (flush por tamanho/intervalo, descarte contado, drain no shutdown); `internal/pkg/log/{audit_log,access_log}` folha com interface `Destino` ligada no bootstrap; log nunca síncrono; middleware global de access log com `ray_trace`; trilha de auditoria das escritas migrada; DDL versionada + `configs_example.json`; stdout degradado; testes de buffer/flush/drain/degradação; `-race` verde. |
 
 ## Log de iterações
 
