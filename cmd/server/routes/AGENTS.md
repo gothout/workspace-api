@@ -5,8 +5,11 @@ rotas de cada subdomínio. Convenções de API em `agents/04`.
 
 ## Regras
 
-- **Middlewares globais, nesta ordem**: access log (evolução futura — o slot
-  já fica reservado na cadeia) → `recovery` → CORS. O CORS aceita
+- **Middlewares globais, nesta ordem**: access log → `recovery` → CORS. O
+  access log é a trilha assíncrona da evolução #9: PRIMEIRO da cadeia,
+  enfileira um evento por requisição (`pkg/log/access_log.Destino` injetado
+  pelo bootstrap via `Opcoes.AcessoLog`; nil = stdout degradado). Nunca
+  bloqueia nem muda a resposta — só observa. O CORS aceita
   `*.{base_domain}` da plataforma **e** os domínios custom registrados pelas
   organizations (white-label) — origem fora dessa lista é recusada. Origens
   exatas extras vêm de `server.http.cors.allowed_origins` (casamento por

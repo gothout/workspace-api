@@ -25,6 +25,8 @@ import (
 	usuario "workspace-api/internal/identidade/domain/user"
 	workspace "workspace-api/internal/identidade/domain/workspace"
 	"workspace-api/internal/pkg/config"
+	"workspace-api/internal/pkg/log/access_log"
+	"workspace-api/internal/pkg/orgctx"
 	"workspace-api/internal/pkg/rest_err"
 )
 
@@ -51,6 +53,10 @@ type Opcoes struct {
 	// organizations (lowercase, sem porta); nil = só o domínio-base. Erro na
 	// consulta recusa a origem (fail-closed), nunca abre.
 	DominiosCustom func(context.Context) ([]string, error)
+	// AcessoLog é o destino da trilha de acesso assíncrona (evolução #9),
+	// ligado pelo bootstrap (writer do ClickHouse ou stdout degradado). Nil =
+	// stdout (mesma linha estruturada do slog legado).
+	AcessoLog access_log.Destino
 }
 
 // Controlador é o que todo subdomínio expõe para pendurar rotas.
@@ -88,10 +94,13 @@ func Montar(opcoes Opcoes) (*gin.Engine, error) {
 		return nil, fmt.Errorf("routes: server.http.trusted_proxy inválido: %w", err)
 	}
 
-	// Middlewares globais, nesta ordem: access log (slot reservado — a
-	// observabilidade assíncrona é evolução futura; slog básico por ora) →
-	// recovery → CORS.
-	engine.Use(middlewareAccessLog())
+	// Middlewares globais, nesta ordem: access log (primeiro da cadeia —
+	// enfileira o evento assíncrono, evolução #9) → recovery → CORS.
+	destinoAcesso := opcoes.AcessoLog
+	if destinoAcesso == nil {
+		destinoAcesso = access_log.SlogPadrao()
+	}
+	engine.Use(middlewareAccessLog(destinoAcesso))
 	engine.Use(gin.Recovery())
 	engine.Use(politicaCors(opcoes))
 
@@ -141,16 +150,32 @@ func registrarConhecidos(engine *gin.Engine, dominio, aplicacao *gin.RouterGroup
 	}
 }
 
-// middlewareAccessLog ocupa o slot do access log: linha estruturada por
-// requisição até a evolução ClickHouse assumir o destino.
-func middlewareAccessLog() gin.HandlerFunc {
+// middlewareAccessLog é a trilha de ACESSO: primeiro da cadeia, emite um
+// evento por requisição para o destino (writer do ClickHouse quando ligado,
+// stdout degradado caso contrário). O caminho do request SÓ enfileira —
+// telemetria nunca bloqueia nem muda a resposta. ray_trace vem do ctx
+// injetado pela cadeia de autorização e cai para o header X-Request-Id nas
+// requisições que não passam por ela (404, /doc).
+func middlewareAccessLog(destino access_log.Destino) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		inicio := time.Now()
 		c.Next()
-		slog.InfoContext(c.Request.Context(), "requisicao",
-			"metodo", c.Request.Method, "path", c.Request.URL.Path,
-			"status", c.Writer.Status(), "duracao_ms", time.Since(inicio).Milliseconds(),
-			"ray_trace", c.GetHeader("X-Request-Id"))
+
+		ray := orgctx.RayTrace(c.Request.Context())
+		if ray == "" {
+			ray = c.GetHeader("X-Request-Id")
+		}
+		destino.Registrar(access_log.Evento{
+			Instante:  inicio.UTC(),
+			Metodo:    c.Request.Method,
+			Path:      c.Request.URL.Path,
+			Rota:      c.FullPath(),
+			Status:    c.Writer.Status(),
+			DuracaoMS: time.Since(inicio).Milliseconds(),
+			IP:        c.ClientIP(),
+			UserAgent: c.Request.UserAgent(),
+			RayTrace:  ray,
+		})
 	}
 }
 

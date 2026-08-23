@@ -3,11 +3,13 @@ package auth
 import (
 	"context"
 	"log/slog"
+	"time"
 
 	"github.com/google/uuid"
 
 	modeluser "workspace-api/internal/identidade/model/user"
 	"workspace-api/internal/infra/jwt"
+	"workspace-api/internal/pkg/log/audit_log"
 	"workspace-api/internal/pkg/orgctx"
 	"workspace-api/internal/pkg/pii"
 )
@@ -44,7 +46,8 @@ type Dependencias struct {
 	Emissor      EmissorToken
 	Organizacoes ResolvedorOrganization
 	Vitalidade   VitalidadeOrganization
-	Limite       LimitadorLogin // opcional: nil = sem lockout (Redis ausente é operação normal)
+	Limite       LimitadorLogin    // opcional: nil = sem lockout (Redis ausente é operação normal)
+	Trilha       audit_log.Destino // opcional (#9): nil = slog legado nos auditar()
 }
 
 type serviceImpl struct {
@@ -85,7 +88,7 @@ func (s *serviceImpl) Login(ctx context.Context, host string, in LoginEntrada) (
 		// E-mail é PII e, aqui, input NÃO validado do cliente: vai mascarado
 		// (R7) — auditoria mantém o "quem" aproximado sem ecoar o valor.
 		s.auditar(ctx, "login", false, "email", pii.MascaraEmail(in.Email))
-		s.contarFalhaLogin(ctx, in) // falha alimenta o lockout quando ligado
+		s.contarFalhaLogin(ctx, in)         // falha alimenta o lockout quando ligado
 		return nil, ErrCredenciaisInvalidas // o motivo exato fica no subdomínio/log
 	}
 	sessao, err := s.abrirSessao(ctxOrg, u)
@@ -267,9 +270,24 @@ func (s *serviceImpl) limparFalhasLogin(ctx context.Context, in LoginEntrada) {
 	}
 }
 
-// auditar registra login/logout/refresh (doc 03): sucesso E falha, payload
-// montado à mão com vocabulário fechado — nunca texto livre.
+// auditar registra login/logout/refresh (doc 03) na trilha assíncrona (#9):
+// sucesso E falha, payload montado à mão com vocabulário fechado — nunca
+// texto livre. Sem trilha ligada (montagem direta em teste), cai para o slog
+// legado — mesmo payload, caminho síncrono.
 func (s *serviceImpl) auditar(ctx context.Context, acao string, success bool, extras ...any) {
+	evento := audit_log.Evento{
+		Instante:   time.Now().UTC(),
+		Dominio:    Dominio,
+		Subdominio: Subdominio,
+		Acao:       acao,
+		Sucesso:    success,
+		RayTrace:   orgctx.RayTrace(ctx),
+		Detalhes:   audit_log.Detalhes(extras...),
+	}
+	if s.deps.Trilha != nil {
+		s.deps.Trilha.Registrar(evento)
+		return
+	}
 	args := []any{
 		"dominio", Dominio, "subdominio", Subdominio, "acao", acao,
 		"ray_trace", orgctx.RayTrace(ctx),

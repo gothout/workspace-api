@@ -9,6 +9,7 @@ import (
 
 	"workspace-api/internal/middleware"
 	orgmodel "workspace-api/internal/identidade/model/organization"
+	"workspace-api/internal/pkg/log/audit_log"
 	"workspace-api/internal/pkg/orgctx"
 	"workspace-api/internal/pkg/pagination"
 )
@@ -65,10 +66,24 @@ type serviceImpl struct {
 	suspensore SuspendedorWorkspaces
 	sessoes    EncerradorSessoesUsuarios
 	baseDomain LeitorBaseDomain
+	trilha     audit_log.Destino // trilha de auditoria assíncrona (#9); nil = slog legado
 }
 
-func NewService(repo Repository, chaves RepositorioApiKeys, suspensore SuspendedorWorkspaces, sessoes EncerradorSessoesUsuarios, baseDomain LeitorBaseDomain) Service {
-	return &serviceImpl{repo: repo, chaves: chaves, suspensore: suspensore, sessoes: sessoes, baseDomain: baseDomain}
+// OpcaoServico adiciona peça opcional ao service na montagem (padrão da F4/
+// E1): hoje, a trilha de auditoria assíncrona ligada pelo bootstrap.
+type OpcaoServico func(*serviceImpl)
+
+// ComTrilha liga o destino assíncrono da auditoria (evolução #9).
+func ComTrilha(t audit_log.Destino) OpcaoServico {
+	return func(s *serviceImpl) { s.trilha = t }
+}
+
+func NewService(repo Repository, chaves RepositorioApiKeys, suspensore SuspendedorWorkspaces, sessoes EncerradorSessoesUsuarios, baseDomain LeitorBaseDomain, opcoes ...OpcaoServico) Service {
+	s := &serviceImpl{repo: repo, chaves: chaves, suspensore: suspensore, sessoes: sessoes, baseDomain: baseDomain}
+	for _, aplicar := range opcoes {
+		aplicar(s)
+	}
+	return s
 }
 
 // Criar: input cru → entidade VÁLIDA pelo construtor → persistência → auditoria.
@@ -398,10 +413,26 @@ func exigirPermissoesPossuidas(ctx context.Context, pedidas []string) error {
 	return nil
 }
 
-// auditar registra toda ESCRITA com payload montado à mão (doc 04):
-// identificadores e vocabulário fechado, nunca texto livre — e nunca o valor
-// de segredos.
+// auditar registra toda ESCRITA na trilha assíncrona (#9) com payload
+// montado à mão (doc 04): identificadores e vocabulário fechado, nunca texto
+// livre — e nunca o valor de segredos. Sem trilha ligada (montagem direta em
+// teste), cai para o slog legado — mesmo payload, caminho síncrono.
 func (s *serviceImpl) auditar(ctx context.Context, acao string, organizationUUID uuid.UUID, success bool, extras ...any) {
+	evento := audit_log.Evento{
+		Instante:         time.Now().UTC(),
+		Dominio:          orgmodel.Dominio,
+		Subdominio:       orgmodel.Subdominio,
+		Acao:             acao,
+		Sucesso:          success,
+		OrganizationUUID: organizationUUID.String(),
+		UserUUID:         orgctx.UserUUID(ctx).String(),
+		RayTrace:         orgctx.RayTrace(ctx),
+		Detalhes:         audit_log.Detalhes(extras...),
+	}
+	if s.trilha != nil {
+		s.trilha.Registrar(evento)
+		return
+	}
 	args := []any{
 		"dominio", orgmodel.Dominio, "subdominio", orgmodel.Subdominio, "acao", acao,
 		"organization_uuid", organizationUUID.String(),

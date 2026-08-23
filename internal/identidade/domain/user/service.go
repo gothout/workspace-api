@@ -11,6 +11,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	modeluser "workspace-api/internal/identidade/model/user"
+	"workspace-api/internal/pkg/log/audit_log"
 	"workspace-api/internal/pkg/orgctx"
 	"workspace-api/internal/pkg/pii"
 )
@@ -82,6 +83,7 @@ type serviceImpl struct {
 	validador     ValidadorWorkspaces // nil = sem validação de workspace alheio? NÃO: obrigatório no singleton; nil só em teste unitário explícito
 	credenciais   Credenciais
 	observador    ObservadorAtribuicoes // opcional (cache de permissões): nil é operação normal
+	trilha        audit_log.Destino     // trilha de auditoria assíncrona (#9); nil = slog legado
 	hashDeMentira sync.Once
 	falsoHash     string
 }
@@ -421,9 +423,26 @@ func (credenciaisBcrypt) Comparar(hash, senha string) bool {
 	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(senha)) == nil
 }
 
-// auditar registra toda ESCRITA com payload montado à mão (doc 04):
-// identificadores e vocabulário fechado, nunca texto livre.
+// auditar registra toda ESCRITA na trilha assíncrona (#9) com payload
+// montado à mão (doc 04): identificadores e vocabulário fechado, nunca texto
+// livre. Sem trilha ligada (montagem direta em teste), cai para o slog
+// legado — mesmo payload, caminho síncrono.
 func (s *serviceImpl) auditar(ctx context.Context, acao string, usuarioUUID uuid.UUID, success bool, extras ...any) {
+	evento := audit_log.Evento{
+		Instante:         time.Now().UTC(),
+		Dominio:          modeluser.Dominio,
+		Subdominio:       modeluser.Subdominio,
+		Acao:             acao,
+		Sucesso:          success,
+		UserUUID:         usuarioUUID.String(),
+		OrganizationUUID: orgctx.OrganizationUUID(ctx).String(),
+		RayTrace:         orgctx.RayTrace(ctx),
+		Detalhes:         audit_log.Detalhes(extras...),
+	}
+	if s.trilha != nil {
+		s.trilha.Registrar(evento)
+		return
+	}
 	args := []any{
 		"dominio", modeluser.Dominio, "subdominio", modeluser.Subdominio, "acao", acao,
 		"user_uuid", usuarioUUID.String(),

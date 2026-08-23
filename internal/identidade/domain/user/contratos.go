@@ -17,6 +17,8 @@ import (
 	"context"
 
 	"github.com/google/uuid"
+
+	"workspace-api/internal/pkg/log/audit_log"
 )
 
 type ValidadorWorkspaces interface {
@@ -36,10 +38,17 @@ type ObservadorAtribuicoes interface {
 }
 
 // OpcaoServico compõe peças opcionais no NewService sem mudar assinaturas
-// dos chamadores existentes (seed, testes) — hoje, só o observador.
+// dos chamadores existentes (seed, testes) — observador de invalidação e
+// trilha de auditoria assíncrona (#9).
 type OpcaoServico func(*serviceImpl)
 
 // ComObservadorAtribuicoes liga o gancho de invalidação ao service.
 func ComObservadorAtribuicoes(o ObservadorAtribuicoes) OpcaoServico {
 	return func(s *serviceImpl) { s.observador = o }
+}
+
+// ComTrilha liga o destino assíncrono da auditoria (evolução #9); nil
+// (default) mantém o slog legado nos auditar().
+func ComTrilha(t audit_log.Destino) OpcaoServico {
+	return func(s *serviceImpl) { s.trilha = t }
 }

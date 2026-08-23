@@ -3,10 +3,12 @@ package workspace
 import (
 	"context"
 	"log/slog"
+	"time"
 
 	"github.com/google/uuid"
 
 	modelworkspace "workspace-api/internal/identidade/model/workspace"
+	"workspace-api/internal/pkg/log/audit_log"
 	"workspace-api/internal/pkg/orgctx"
 )
 
@@ -54,12 +56,26 @@ type Resolvido struct {
 func (r Resolvido) Ativo() bool { return r.Status == string(modelworkspace.StatusAtivo) }
 
 type serviceImpl struct {
-	repo  Repository
-	cache CacheResolucao // nil é operação normal: sem cache, só mais caro
+	repo   Repository
+	cache  CacheResolucao    // nil é operação normal: sem cache, só mais caro
+	trilha audit_log.Destino // trilha de auditoria assíncrona (#9); nil = slog legado
 }
 
-func NewService(repo Repository, cache CacheResolucao) Service {
-	return &serviceImpl{repo: repo, cache: cache}
+// OpcaoServico adiciona peça opcional ao service na montagem (padrão F4/E1):
+// hoje, a trilha de auditoria assíncrona ligada pelo bootstrap.
+type OpcaoServico func(*serviceImpl)
+
+// ComTrilha liga o destino assíncrono da auditoria (evolução #9).
+func ComTrilha(t audit_log.Destino) OpcaoServico {
+	return func(s *serviceImpl) { s.trilha = t }
+}
+
+func NewService(repo Repository, cache CacheResolucao, opcoes ...OpcaoServico) Service {
+	s := &serviceImpl{repo: repo, cache: cache}
+	for _, aplicar := range opcoes {
+		aplicar(s)
+	}
+	return s
 }
 
 // slugsFixos — endereços fixos da plataforma; Host com um deles NUNCA resolve
@@ -263,9 +279,27 @@ func entradaParaResolvido(e *EntradaResolucao) *Resolvido {
 	return &Resolvido{UUID: id, OrganizationUUID: org, Status: e.Status}
 }
 
-// auditar registra toda ESCRITA com payload montado à mão (doc 04):
-// identificadores e vocabulário fechado, nunca texto livre.
+// auditar registra toda ESCRITA na trilha assíncrona (#9) com payload
+// montado à mão (doc 04): identificadores e vocabulário fechado, nunca texto
+// livre. Sem trilha ligada (montagem direta em teste), cai para o slog
+// legado — mesmo payload, caminho síncrono.
 func (s *serviceImpl) auditar(ctx context.Context, acao string, workspaceUUID, organizationUUID uuid.UUID, success bool, extras ...any) {
+	evento := audit_log.Evento{
+		Instante:         time.Now().UTC(),
+		Dominio:          modelworkspace.Dominio,
+		Subdominio:       modelworkspace.Subdominio,
+		Acao:             acao,
+		Sucesso:          success,
+		WorkspaceUUID:    workspaceUUID.String(),
+		OrganizationUUID: organizationUUID.String(),
+		UserUUID:         orgctx.UserUUID(ctx).String(),
+		RayTrace:         orgctx.RayTrace(ctx),
+		Detalhes:         audit_log.Detalhes(extras...),
+	}
+	if s.trilha != nil {
+		s.trilha.Registrar(evento)
+		return
+	}
 	args := []any{
 		"dominio", modelworkspace.Dominio, "subdominio", modelworkspace.Subdominio, "acao", acao,
 		"workspace_uuid", workspaceUUID.String(),

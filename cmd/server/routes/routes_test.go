@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -13,6 +14,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"workspace-api/internal/pkg/config"
+	"workspace-api/internal/pkg/log/access_log"
+	"workspace-api/internal/pkg/orgctx"
 )
 
 func opcoesTeste(sonda func(context.Context) error) Opcoes {
@@ -111,4 +114,61 @@ func TestSwaggerMontadoEmDoc(t *testing.T) {
 	require.NoError(t, err)
 	resp := requisicao(engine, http.MethodGet, "/doc/index.html")
 	assert.Less(t, resp.Code, 500, "UI do swagger deveria estar montada (redirect/200), obtive %d", resp.Code)
+}
+
+// destinoAcessoFake captura eventos da trilha de acesso nos testes.
+type destinoAcessoFake struct {
+	mutex   sync.Mutex
+	eventos []access_log.Evento
+}
+
+func (d *destinoAcessoFake) Registrar(ev access_log.Evento) {
+	d.mutex.Lock()
+	defer d.mutex.Unlock()
+	d.eventos = append(d.eventos, ev)
+}
+
+func (d *destinoAcessoFake) total() int {
+	d.mutex.Lock()
+	defer d.mutex.Unlock()
+	return len(d.eventos)
+}
+
+// TestAccessLogPrimeiroDaCadeiaComRayTrace: todo request gera evento na
+// trilha; o ray_trace injetado pela cadeia de autorização é o do ctx (não o
+// header cru) e requisições sem cadeia caem para o header X-Request-Id.
+func TestAccessLogPrimeiroDaCadeiaComRayTrace(t *testing.T) {
+	destino := &destinoAcessoFake{}
+	opcoes := opcoesTeste(nil)
+	opcoes.AcessoLog = destino
+
+	// Middleware que emula a cadeia de autorização: injeta ray_trace no ctx.
+	engine, err := Montar(opcoes)
+	require.NoError(t, err)
+	engine.GET("/api/teste/ray", func(c *gin.Context) {
+		c.Request = c.Request.WithContext(orgctx.WithRayTrace(c.Request.Context(), "ray-do-ctx"))
+		c.Status(http.StatusOK)
+	})
+	engine.GET("/api/teste/sem-cadeia", func(c *gin.Context) { c.Status(200) })
+
+	req := httptest.NewRequest(http.MethodGet, "/api/teste/ray", nil)
+	resp := httptest.NewRecorder()
+	engine.ServeHTTP(resp, req)
+
+	require.Equal(t, 1, destino.total())
+	ev := destino.eventos[0]
+	assert.Equal(t, http.StatusOK, ev.Status)
+	assert.Equal(t, "GET", ev.Metodo)
+	assert.Equal(t, "/api/teste/ray", ev.Path)
+	assert.Equal(t, "/api/teste/ray", ev.Rota)
+	assert.Equal(t, "ray-do-ctx", ev.RayTrace)
+	assert.Positive(t, ev.DuracaoMS+1)
+
+	// Sem cadeia: cai para o header X-Request-Id (caso de rota de sistema).
+	req2 := httptest.NewRequest(http.MethodGet, "/api/status", nil)
+	req2.Header.Set("X-Request-Id", "ray-do-header")
+	resp2 := httptest.NewRecorder()
+	engine.ServeHTTP(resp2, req2)
+	require.Equal(t, 2, destino.total())
+	assert.Equal(t, "ray-do-header", destino.eventos[1].RayTrace)
 }

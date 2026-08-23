@@ -603,3 +603,60 @@ Started: 2026-08-22
     núcleo testcontainers (v0.39): deixar o tidy resolver deu v0.44 e a API
     de MappedPort mudou (build quebrou).
 ---
+
+## 2026-08-23 - E2
+- Evolução ClickHouse (issue #9) completa: `internal/infra/clickhouse` degradável
+  por desenho (Connect puro NUNCA erra → conexão nil + log [DEGRADADO]; singleton
+  com mutex cobrindo o once.Do inteiro) com writer assíncrono EM LOTE — filas
+  limitadas por trilha, flush por tamanho OU janela (`logs.lote_*`), fila cheia
+  DESCARTA E CONTA, falha de gravação perde o lote COM contagem e log, `Fechar()`
+  drena filas + lotes parciais no shutdown. Pacotes-folha NOVOS
+  `internal/pkg/log/{audit_log,access_log}` definem `Evento` + interface
+  `Destino` + `SlogPadrao` (stdout determinístico) — a entrega é ligada no
+  bootstrap: adaptadores finos em `logs.go` resolvem a sobrecarga impossível dos
+  dois `Registrar` (Go não sobrecarrega métodos). Middleware global de access log
+  PRIMEIRO da cadeia substituindo o slog síncrono (ray_trace do ctx caindo ao
+  header X-Request-Id); trilha de auditoria das escritas migrada nos 4 services
+  (organization/workspace ganharam OpcaoServico variadic; user reusou o padrão da
+  E1; auth ganhou Deps.Trilha) SEM perder o payload montado à mão. DDL versionado
+  idempotente em `db/logs/` (aplicação manual documentada); seções novas no
+  configs_example.json + docker-compose de dev; README + agents/02 atualizados.
+- Files changed: internal/pkg/log/{audit_log,access_log}/*(NOVO);
+  internal/infra/clickhouse/*(NOVO); db/logs/*(NOVO); internal/pkg/config/config.go;
+  cmd/server/routes/{routes,routes_test}.go; cmd/bootstrap/{logs(NOVO),
+  bootstrap.go,trilhas_log_test.go(NOVO)}; internal/identidade/domain/
+  {organization/{service,singleton},workspace/{service,singleton},
+  user/{contratos,service}}.go; application/auth/service.go;
+  docker-compose.yml; configs_example.json; README.md; agents/02;
+  AGENTS.md de infra/clickhouse/pkg-log/routes/bootstrap; prd.json;
+  agents/06; progress.txt.
+- Docs read: issue #9 (gh api), agents/README, agents/01, agents/02,
+  AGENTS.md de internal/infra, infra/redis (+testes como referência),
+  cmd/bootstrap, cmd/server{,/routes}, pkg/config, identidade/domain(+AGENTS.md
+  dos 3 subdomínios), application/auth.
+- Checks: build/vet/test verdes (27 pacotes, integração postgres+redis+
+  clickhouse reais); CGO_ENABLED=1 go test -race verde em clickhouse, pkg/log,
+  routes, domínios tocados, auth e bootstrap; arch-go segue compliance/coverage
+  100 pelo gate do go test; smoke ponta a ponta REAL com postgres+clickhouse
+  efêmeros: boot ligado ao CH, login falho/bom e criar organization via HTTP,
+  as DUAS trilhas consultáveis em workspace_logs após SIGTERM (detalhes JSON
+  ordenado, e-mail mascarado preservado, ray_trace correlacionando).
+- **Learnings for future iterations:**
+  - Go NÃO sobrecarrega métodos: quando dois contratos declaram o MESMO nome
+    de método com tipos diferentes (os dois Destino.Registrar), um pacote só
+    pode implementar um deles — adaptador fino por contrato morando no único
+    lugar que conhece os dois lados (bootstrap/logs.go).
+  - Worker que descarrega só por tamanho/janela não entra na gravação antes do
+    lote completar: teste de "fila cheia" precisa LoteTamanho=1 + sinal de
+    "pegouLote" para sincronizar sem esperar o ticker (60s de espera silenciosa
+    na primeira tentativa).
+  - Protocolo nativo do ClickHouse recusa multi-statement E comentário no meio:
+    aplicar DDL via driver = strip de linhas de comentário ANTES do split por
+    ';' (comentários com ';' quebram o split ingênuo).
+  - Ping do Connect valida EXISTÊNCIA do database do Auth — aplicar DDL que cria
+    o database exige uma conexão bootstrap apontando ao database default antes.
+  - Módulo testcontainers clickhouse v0.39 sobe user=default password=default;
+    manter TODOS os módulos pinados na mesma versão do núcleo (lição E1 reconfirmada).
+  - go get de UMA dependência pode arrastar upgrade transversal (testcontainers
+    0.39→0.43): conferir go.mod depois de cada get e repinar.
+---

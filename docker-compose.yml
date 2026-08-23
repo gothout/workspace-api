@@ -1,8 +1,9 @@
 # docker-compose.yml — ambiente de DESENVOLVIMENTO do workspace-api.
 #
-# Sobe Postgres (obrigatório) e Redis (opcional/degradável). A API roda na
-# máquina do dev (`go run . serve --config configs.json`) apontando para os
-# serviços pelas portas publicadas.
+# Sobe Postgres (obrigatório), Redis (opcional/degradável) e ClickHouse
+# (opcional/degradável). A API roda na máquina do dev
+# (`go run . serve --config configs.json`) apontando para os serviços pelas
+# portas publicadas.
 #
 #   docker compose up -d
 #
@@ -38,6 +39,27 @@ services:
       timeout: 3s
       retries: 10
 
+  # Opcional: trilhas de log assíncronas (auditoria e acesso, evolução #9).
+  # Sem ele a API sobe igual (log [DEGRADADO], trilhas no stdout) — ligar em
+  # configs.json com databases.clickhouse.enabled=true. Porta NATIVA 9000
+  # (o driver clickhouse-go não usa a HTTP 8123). DDL das tabelas: db/logs/.
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.3-alpine
+    environment:
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: default
+      CLICKHOUSE_DB: workspace_logs
+    ports:
+      - "9000:9000"
+    volumes:
+      - clickhousedata_dev:/var/lib/clickhouse
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8123/ping || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
 volumes:
   pgdata_dev:
   redisdata_dev:
+  clickhousedata_dev:

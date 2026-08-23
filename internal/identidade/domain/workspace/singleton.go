@@ -25,16 +25,17 @@ type UseWorkspace struct {
 
 // New inicializa o singleton do subdomínio montando repo → service →
 // controller. Chamado UMA vez pelo cmd/bootstrap; o cache de resolução
-// (contrato CacheResolucao, implementação Redis é evolução) entra aqui —
-// nil é operação normal (sem cache, só mais caro).
-func New(db *gorm.DB, cache CacheResolucao) (Controller, error) {
+// (contrato CacheResolucao, implementação Redis da #8) e a trilha de
+// auditoria assíncrona (#9, opção variadic) entram aqui — nil é operação
+// normal (sem cache, só mais caro; sem trilha, slog legado).
+func New(db *gorm.DB, cache CacheResolucao, opcoes ...OpcaoServico) (Controller, error) {
 	once.Do(func() {
 		if db == nil {
 			initErr = errors.New("conexão com o banco não pode ser nula")
 			return
 		}
 		repositoryInstance = NewRepository(db)
-		serviceInstance = NewService(repositoryInstance, cache)
+		serviceInstance = NewService(repositoryInstance, cache, opcoes...)
 		controllerInstance = NewController(serviceInstance)
 	})
 	return controllerInstance, initErr

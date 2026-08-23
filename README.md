@@ -46,7 +46,7 @@ Pré-requisitos: Go 1.25+, Postgres 14+ acessível e Docker (para a suíte de
 testes de integração).
 
 ```bash
-# 0. (opcional) Infra de dev com Docker Compose — Postgres + Redis:
+# 0. (opcional) Infra de dev com Docker Compose — Postgres + Redis + ClickHouse:
 docker compose up -d
 
 # 1. Config local (configs.json é ignorado pelo git; o example é o contrato)
@@ -89,6 +89,31 @@ O que ele adiciona: cache da resolução `{slug}` → workspace
 rate-limit/lockout de login por e-mail+IP (`lock:*`; 429 padronizado após o
 teto de falhas). Prefixos completos documentados em
 `internal/infra/redis/AGENTS.md`.
+
+### ClickHouse — trilhas de log assíncronas (opcional — degradável)
+
+O template sobe **sem ClickHouse** exatamente igual (log `[DEGRADADO]` no
+boot): auditoria e acesso saem pelo **stdout** no mesmo formato. Para ligar:
+
+1. Suba o serviço (`docker compose up -d clickhouse`, ou o seu servidor) e
+   aplique o DDL versionado (manual, idempotente):
+
+   ```bash
+   docker compose exec -T clickhouse clickhouse-client --multiquery < db/logs/0001_log_acesso.sql
+   docker compose exec -T clickhouse clickhouse-client --multiquery < db/logs/0002_log_auditoria.sql
+   ```
+
+2. Em `configs.json`: `"databases.clickhouse.enabled": true` (+ host/porta/
+   user/pass/database; porta NATIVA 9000).
+3. Opcionalmente ajuste `logs.*`: tamanho do lote, janela de flush, limite da
+   fila e timeout de drain no shutdown.
+
+O que ele adiciona: a trilha de **acesso** HTTP (um evento por requisição,
+emitido pelo middleware global com o `ray_trace`) e a trilha de **auditoria**
+das escritas dos subdomínios — ambas gravadas em lote FORA do caminho síncrono
+do request. Fila cheia descarta e conta (a API nunca trava); shutdown drena o
+que ficou pendente. Tabelas consultáveis em `workspace_logs.log_acesso` e
+`workspace_logs.log_auditoria`.
 
 ### Provisionamento inicial (primeiro super_admin + workspace)
 

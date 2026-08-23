@@ -343,7 +343,7 @@
         "build/vet/test verdes + -race nos pacotes tocados"
       ],
       "priority": 16,
-      "passes": false,
+      "passes": true,
       "issue": 9,
       "branch": "ox-alpha/evolucao-clickhouse",
       "docs": [

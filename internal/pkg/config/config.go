@@ -33,6 +33,7 @@ type Config struct {
 	Security  SecurityConfig  `mapstructure:"security"`
 	Databases DatabasesConfig `mapstructure:"databases"`
 	Cache     CacheConfig     `mapstructure:"cache"`
+	Logs      LogsConfig      `mapstructure:"logs"`
 }
 
 type AppConfig struct {
@@ -70,6 +71,34 @@ type DatabasesConfig struct {
 	Postgres   PostgresConfig   `mapstructure:"postgres"`
 	Migrations MigrationsConfig `mapstructure:"migrations"`
 	Redis      RedisConfig      `mapstructure:"redis"`
+	ClickHouse ClickHouseConfig `mapstructure:"clickhouse"`
+}
+
+// ClickHouseConfig é a conexão do banco de logs assíncronos (evolução #9) —
+// dependência DEGRADÁVEL como o Redis: enabled=false ou servidor inacessível
+// no boot deixam o processo subir sem ele (log [DEGRADADO]) e as trilhas caem
+// para o stdout. Nunca derruba o boot.
+type ClickHouseConfig struct {
+	Enabled bool   `mapstructure:"enabled"`
+	Host    string `mapstructure:"host"`
+	Port    int    `mapstructure:"port"` // protocolo NATIVO (9000), não HTTP
+	User    string `mapstructure:"user"`
+	Pass    string `mapstructure:"pass"` // nunca logada nem em erro
+	Database string `mapstructure:"database"`
+}
+
+func (c ClickHouseConfig) Addr() string {
+	return fmt.Sprintf("%s:%d", c.Host, c.Port)
+}
+
+// LogsConfig agrega os parâmetros dos writers em lote das trilhas de log
+// (evolução #9). Tudo opcional: zero vira default em validar() — fila limitada
+// é obrigatória por desenho (memória finita; fila cheia descarta e conta).
+type LogsConfig struct {
+	LoteTamanho     int `mapstructure:"lote_tamanho"`
+	LoteJanelaMs    int `mapstructure:"lote_janela_ms"`
+	FilaTamanho     int `mapstructure:"fila_tamanho"`
+	DrainTimeoutSec int `mapstructure:"drain_timeout_sec"`
 }
 
 // RedisConfig é a conexão do cache/lockout distribuído — dependência
@@ -225,6 +254,27 @@ func (c *Config) validar() error {
 	}
 	if c.Databases.Redis.Enabled && (c.Databases.Redis.Host == "" || c.Databases.Redis.Port <= 0 || c.Databases.Redis.Port > 65535) {
 		return errors.New("configuração inválida: databases.redis.enabled=true exige host e port (1–65535)")
+	}
+	if c.Databases.ClickHouse.Enabled && (c.Databases.ClickHouse.Host == "" || c.Databases.ClickHouse.Port <= 0 || c.Databases.ClickHouse.Port > 65535) {
+		return errors.New("configuração inválida: databases.clickhouse.enabled=true exige host e port (1–65535)")
+	}
+	if c.Databases.ClickHouse.User == "" {
+		c.Databases.ClickHouse.User = "default"
+	}
+	if c.Databases.ClickHouse.Database == "" {
+		c.Databases.ClickHouse.Database = "workspace_logs"
+	}
+	if c.Logs.LoteTamanho <= 0 {
+		c.Logs.LoteTamanho = 500
+	}
+	if c.Logs.LoteJanelaMs <= 0 {
+		c.Logs.LoteJanelaMs = 2000
+	}
+	if c.Logs.FilaTamanho <= 0 {
+		c.Logs.FilaTamanho = 10000
+	}
+	if c.Logs.DrainTimeoutSec <= 0 {
+		c.Logs.DrainTimeoutSec = 5
 	}
 	if c.Cache.TtlResolucaoSeg <= 0 {
 		c.Cache.TtlResolucaoSeg = 30

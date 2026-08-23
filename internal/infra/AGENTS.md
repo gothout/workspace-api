@@ -1,7 +1,7 @@
 # AGENTS.md — `internal/infra`
 
-Adaptadores técnicos: Postgres, JWT, runner de migrations, Redis. Infra não
-tem regra de negócio — sabe conectar, executar e fechar.
+Adaptadores técnicos: Postgres, JWT, runner de migrations, Redis, ClickHouse.
+Infra não tem regra de negócio — sabe conectar, executar e fechar.
 
 ## Regras
 
@@ -17,9 +17,9 @@ tem regra de negócio — sabe conectar, executar e fechar.
   (`agents/05`): `Connect(...)` puro, testável e sem estado; `Init*`/
   `Get*`/`Close` com `sync.Once` para o uso do processo.
 - Postgres e JWT são **fatais**: erro no boot derruba o processo.
-  Dependências degradáveis (**Redis** hoje; ClickHouse depois) devolvem
-  cliente nulo com log `[DEGRADADO]`, e o consumidor é obrigado a tratar a
-  ausência.
+  Dependências degradáveis (**Redis**; **ClickHouse** — trilhas de log
+  assíncronas) devolvem cliente nulo com log `[DEGRADADO]`, e o consumidor é
+  obrigado a tratar a ausência.
 - Credenciais nunca aparecem em log nem em mensagem de erro.
 
 ## Definição de pronto

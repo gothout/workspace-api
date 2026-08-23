@@ -18,8 +18,9 @@
 | Senha/hash | `golang.org/x/crypto` | bcrypt para credenciais |
 | Testes de integração | `github.com/testcontainers/testcontainers-go` | Banco efêmero do teste `up → down → up` |
 | Redis | `github.com/redis/go-redis/v9` (+ módulo redis do testcontainers) | Evolução #8: cache/lockout **degradável** — seção abaixo |
+| ClickHouse | `github.com/ClickHouse/clickhouse-go/v2` (+ módulo clickhouse do testcontainers) | Evolução #9: trilhas de log assíncronas **degradáveis** — seção abaixo |
 
-ClickHouse e errobserve seguem fora do núcleo — evoluções futuras (fim deste doc), cada uma com issue própria.
+ClickHouse e errobserve: o ClickHouse entrou (issue #9); errobserve segue fora do núcleo — evolução futura com issue própria.
 
 ## Configuração (`configs.json` / `configs_example.json`)
 
@@ -74,12 +75,26 @@ ClickHouse e errobserve seguem fora do núcleo — evoluções futuras (fim dest
       "port": 6379,
       "pass": "",
       "db": 0
+    },
+    "clickhouse": {
+      "enabled": false,
+      "host": "localhost",
+      "port": 9000,
+      "user": "default",
+      "pass": "default",
+      "database": "workspace_logs"
     }
   },
   "cache": {
     "ttl_resolucao_seg": 30,
     "ttl_permissoes_seg": 60,
     "login_lockout": { "max_tentativas": 5, "janela_seg": 300, "bloqueio_seg": 900 }
+  },
+  "logs": {
+    "lote_tamanho": 500,
+    "lote_janela_ms": 2000,
+    "fila_tamanho": 10000,
+    "drain_timeout_sec": 5
   }
 }
 ```
@@ -88,6 +103,7 @@ ClickHouse e errobserve seguem fora do núcleo — evoluções futuras (fim dest
 - `config.Init(path)` no boot; `config.Use()` / `config.MustUse()` depois. Erro de config é **fatal**, com mensagem acionável (qual chave faltou, qual valor é inválido).
 - `app.base_domain` é o domínio-base da plataforma — dele derivam a resolução de workspace pelo Host e o CORS (doc 03).
 - `databases.redis` + `cache` são a evolução Redis (#8): dependência **degradável** — `enabled=false` ou servidor inacessível no boot deixam o processo subir sem ela (log `[DEGRADADO]`). Os TTLs têm defaults aplicados em código; TTL curto é obrigatório por desenho, nunca configurável para "eterno".
+- `databases.clickhouse` + `logs` são a evolução ClickHouse (#9), **degradável** pelo mesmo desenho do Redis. Os parâmetros de lote têm defaults aplicados em código (`validar()`).
 
 ## Redis (cache/lockout distribuído) — `internal/infra/redis`
 
@@ -102,6 +118,19 @@ Evolução da issue #8, **degradável por desenho**: `Connect(cfg)` puro NUNCA e
 | idempotência | RESERVADO — nenhum código grava hoje | `idempot:{chave}` |
 
 Prefixos são constantes em `chaves.go` — prefixo novo só entra com motivo documentado no `AGENTS.md` do pacote.
+
+## ClickHouse (trilhas de log assíncronas) — `internal/infra/clickhouse`
+
+Evolução da issue #9, **degradável por desenho** (mesma regra do Redis): `Connect(cfg)` puro NUNCA erra — conexão viva quando o servidor responde, **conexão nil com log `[DEGRADADO]`** caso contrário; o bootstrap então liga as trilhas ao stdout. Telemetria nunca vale disponibilidade: **log nunca entra no caminho síncrono do request**.
+
+| Peça | Para quê | Onde mora |
+|---|---|---|
+| `pkg/log/access_log` | contrato da trilha de ACESSO (evento por requisição, com ray_trace) + fallback stdout | pacote-folha; middleware global é o produtor |
+| `pkg/log/audit_log` | contrato da trilha de AUDITORIA (evento por escrita, payload montado à mão) + fallback stdout | pacote-folha; os `auditar()` dos subdomínios e do auth produzem via `ComTrilha` |
+| `Escritor` | writer assíncrono EM LOTE: fila limitada por trilha, flush por tamanho OU janela (`logs.lote_*`), fila cheia DESCARTA E CONTA, drain no shutdown (`logs.drain_timeout_sec`) | `internal/infra/clickhouse`; adaptadores finos por trilha no `cmd/bootstrap/logs.go` |
+| DDL das tabelas | `workspace_logs.log_acesso` e `workspace_logs.log_auditoria`, MergeTree particionado por mês | `db/logs/NNNN_*.sql` versionado, aplicação manual idempotente (ver `db/logs/AGENTS.md`) |
+
+O ClickHouse roda no protocolo NATIVO (9000); o docker-compose de dev sobe um contêiner pronto. Erro de gravação perde o lote COM contagem e log — retry no worker só cresceria a fila.
 
 ## PostgreSQL (transacional) — `internal/infra/database/postgres`
 
@@ -193,7 +222,7 @@ Cada uma tem **issue própria no GitHub** (label `evolucao`) e só entra no loop
 | Evolução | Para quê | Desenho acordado |
 |---|---|---|
 | **Redis** ✅ (issue #8, implementada) | Cache de permissões e de workspace por slug, locks de concorrência, denylist de JWT, rate-limit/lockout de login | Cliente **degradável**: `Connect` nunca erra — devolve cliente **nulo** com log `[DEGRADADO]` e o consumidor é obrigado a tratar a ausência. A denylist entra por interface declarada no `infra/jwt`, ligada no bootstrap, e é **só cache da revogação persistida** no Postgres (só positivo cacheado). Cache com **TTL curto obrigatório** + **invalidação ativa** em inativação de organization/workspace e troca de `dominio`; a invariante "filho nunca mais vivo que o pai" tem teste ponta a ponta. |
-| **ClickHouse** | Logs assíncronos (auditoria, acesso, erro) fora do caminho síncrono do request | Writer em lote (flush por tamanho/intervalo); log nunca entra no caminho síncrono; com o banco fora, o lote cai no **stdout** em vez de sumir — nunca bloqueia nem derruba a API. |
+| **ClickHouse** ✅ (issue #9, implementada) | Trilhas de log assíncronas (auditoria, acesso) fora do caminho síncrono do request | Writer **em lote** (flush por tamanho/intervalo); log nunca entra no caminho síncrono; com o banco fora, as trilhas caem no **stdout** (`SlogPadrao`) em vez de sumir — nunca bloqueia nem derruba a API. DDL versionado em `db/logs/`. |
 | **errobserve** | Observador de erros por subdomínio: todo erro vira evento estruturado consultável | Uma linha por subdomínio no `singleton.go`; sinks plugáveis (slog sempre ativo, ClickHouse quando existir); o catálogo de erros do `errors.go` (doc 05) é a fonte dos códigos. |
 
-Enquanto o ClickHouse não existe: auditoria sai por **log estruturado** (slog), permissões consultam o banco direto quando o Redis está degradado (sem cache), refresh tokens operam sem denylist distribuída (só a revogação persistida).
+Enquanto o errobserve não existe: erros operacionais saem por **log estruturado** (slog), permissões consultam o banco direto quando o Redis está degradado (sem cache), refresh tokens operam sem denylist distribuída (só a revogação persistida).

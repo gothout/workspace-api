@@ -25,6 +25,7 @@ import (
 
 	"workspace-api/cmd/server"
 	"workspace-api/cmd/server/routes"
+	"workspace-api/internal/infra/clickhouse"
 	"workspace-api/internal/infra/database/migrations"
 	"workspace-api/internal/infra/database/postgres"
 	"workspace-api/internal/infra/jwt"
@@ -76,6 +77,16 @@ func Serve(caminhoConfig string) error {
 	}
 	fechamentos.empilhar(rediscache.Close)
 
+	// 4.6 ClickHouse + trilhas de log — DEGRADÁVEL (evolução #9): sem banco,
+	// auditoria e acesso saem pelo stdout; com banco, o writer em lote
+	// consome as duas trilhas fora do caminho síncrono do request. O Close
+	// DRENA o writer (lotes pendentes vão ao banco) antes do pool fechar.
+	trilhasLog, err := iniciarTrilhas()
+	if err != nil {
+		return fmt.Errorf("boot: %w", err)
+	}
+	fechamentos.empilhar(clickhouse.Close)
+
 	// 5. Migrations — `up` automático quando auto_run (advisory lock impede
 	// réplicas de migrar juntas); rollback NUNCA é automático.
 	if cfg.Databases.Migrations.AutoRun {
@@ -118,7 +129,10 @@ func Serve(caminhoConfig string) error {
 	if err != nil {
 		return fmt.Errorf("boot: %w", err)
 	}
-	_, err = dominioOrganizacao.New(db, suspendedorWorkspaces{}, encerradorSessoesUsuario{})
+	// A trilha de auditoria assíncrona (#9) entra em TODOS os subdomínios e
+	// na aplicação auth — destino ClickHouse quando existe, stdout quando não.
+	opcaoTrilha := dominioOrganizacao.ComTrilha(trilhasLog.auditoria)
+	_, err = dominioOrganizacao.New(db, suspendedorWorkspaces{}, encerradorSessoesUsuario{}, opcaoTrilha)
 	if err != nil {
 		return fmt.Errorf("boot: %w", err)
 	}
@@ -127,14 +141,15 @@ func Serve(caminhoConfig string) error {
 	// Cache de resolução por slug (#8): contrato CacheResolucao do subdomínio
 	// com implementação Redis — sem Redis o adaptador vira no-op (consulta
 	// direta à fonte, operação normal).
-	_, err = dominioWorkspace.New(db, cacheResolucaoRedis{})
+	_, err = dominioWorkspace.New(db, cacheResolucaoRedis{}, dominioWorkspace.ComTrilha(trilhasLog.auditoria))
 	if err != nil {
 		return fmt.Errorf("boot: %w", err)
 	}
 	slog.Info("[BOOTSTRAP-DI] Contêiner Identidade/Workspace inicializado.")
 
 	_, err = dominioUsuario.New(db, validadorWorkspaces{},
-		dominioUsuario.ComObservadorAtribuicoes(invalidadorPermissoesRedis{}))
+		dominioUsuario.ComObservadorAtribuicoes(invalidadorPermissoesRedis{}),
+		dominioUsuario.ComTrilha(trilhasLog.auditoria))
 	if err != nil {
 		return fmt.Errorf("boot: %w", err)
 	}
@@ -143,13 +158,15 @@ func Serve(caminhoConfig string) error {
 	// Aplicações — orquestrações que cruzam os subdomínios acima. O auth
 	// recebe os contratos ligados por adaptadores que resolvem os singletons
 	// NA CHAMADA (usuario.go) — inclusive a vitalidade da organization dona
-	// da sessão (R4) e o lockout de login por e-mail+IP (#8; nil-safe).
+	// da sessão (R4), o lockout de login por e-mail+IP (#8; nil-safe) e a
+	// mesma trilha de auditoria dos subdomínios (#9).
 	if _, err := aplicacaoauth.New(aplicacaoauth.Dependencias{
 		Usuarios:     usuariosAuth{},
 		Emissor:      emissorToken{},
 		Organizacoes: resolvedorOrganizacao{},
 		Vitalidade:   vitalidadeOrganizacao{},
 		Limite:       limitadorLoginAuth{},
+		Trilha:       trilhasLog.auditoria,
 	}); err != nil {
 		return fmt.Errorf("boot: %w", err)
 	}
@@ -164,14 +181,16 @@ func Serve(caminhoConfig string) error {
 	}
 	slog.Info("[BOOTSTRAP-DI] Contêiner Identidade/Catalogo inicializado.")
 
-	// 8. HTTP — sondas e provedor de domínios custom injetados como funções;
-	// o servidor drena requisições em voo antes do fechamento LIFO.
+	// 8. HTTP — sondas, trilha de acesso e provedor de domínios custom
+	// injetados como funções/destinos; o servidor drena requisições em voo
+	// antes do fechamento LIFO.
 	engine, err := routes.Montar(routes.Opcoes{
 		App:            cfg.App,
 		Cors:           cfg.Server.HTTP.Cors,
 		TrustedProxies: cfg.Server.HTTP.TrustedProxy,
 		SondaBanco:     postgres.Ping,
 		DominiosCustom: dominiosCustomParaCors,
+		AcessoLog:      trilhasLog.acesso,
 	})
 	if err != nil {
 		return fmt.Errorf("boot: %w", err)
