@@ -497,3 +497,50 @@ Started: 2026-08-22
   - configs.json é LOCAL/gitignored mas existe na máquina: atualizá-lo
     junto evita boot morto local após apertar exigência de segredo.
 ---
+
+## 2026-08-23 - R7
+- Varredura menor completa (issue #25) — os 8 itens corrigidos:
+  1) `errors.Is` nos adaptadores do bootstrap (usuario.go, 2 pontos);
+  2) race em middleware.Use/ResetarParaTeste: mutex RWMutex cobrindo
+     Use/MustUse/New/Reset — e o once.Do INTEIRO dentro do lock (o -race
+     pegou a primeira tentativa: proteger instance sem proteger `once`
+     ainda é corrida, pois o reset escreve no Once) + teste de disputa novo
+     (24 goroutines × Use/New-falho/Resetar);
+  3) trusted_proxy da config aplicado ao gin: `Opcoes.TrustedProxies` +
+     SetTrustedProxies no Montar (agora devolve erro → boot fatal com config
+     malformada; lista vazia = NENHUM proxy confiável);
+  4) código morto ServirAteSinal removido (+ imports órfãos);
+  5) PII: pacote novo `internal/pkg/pii` com MascaraEmail (inicial do local
+     + domínio; lixo vira "***") aplicado ao login-falho do auth (input não
+     validado!) e criar/remover do user;
+  6) regex slugdns deduplicada: fonte ÚNICA no pkg/validator (folha,
+     alcançável por todos), model/workspace.ParseSlug delega em SlugValido;
+  7) rest_err.DoCatalogo determinístico: candidatos ordenados por
+     (grupo, código); teste prova estabilidade em 50 execuções com empate
+     em 3 catálogos;
+  8) doc ResolvedorWorkspaces alinhada ao comportamento real (inexistente =
+     ErrNaoEncontrado; inativo volta Ativo=false e a CADEIA responde 404).
+- Files changed: cmd/bootstrap/{usuario.go,swagger_cobertura_test.go};
+  internal/middleware/{cadeia.go,cadeia_concorrencia_test.go(NOVO),
+  contratos.go,AGENTS.md?}; internal/pkg/validator/{validator.go,AGENTS.md};
+  internal/identidade/model/workspace/model.go; internal/pkg/rest_err/
+  {rest_err.go,rest_err_test.go}; internal/pkg/pii/(NOVO); cmd/server/
+  http_server.go; cmd/server/routes/{routes.go,routes_test.go};
+  cmd/bootstrap/bootstrap.go; prd.json; agents/06; progress.txt.
+- Docs read: issue #25, agents/04-convencoes-api.md, agents/05-padroes-
+  codigo.md, AGENTS.md de internal/middleware, cmd/bootstrap, cmd/server{,
+  /routes}, pkg/{validator,rest_err}.
+- Checks: build/vet/test verdes (23 pacotes — pii novo); CGO_ENABLED=1
+  go test -race verde em middleware/rest_err/pii/server/routes/
+  model-workspace/bootstrap; arch-go segue no gate do go test ./....
+- **Learnings for future iterations:**
+  - sync.Once + ResetarParaTeste = armadilha dupla: o mutex tem que cobrir o
+    Do INTEIRO (estado interno do Once é variável como outra qualquer sob
+    disputa com quem recria o Once).
+  - Mudança de assinatura de função de montagem (Montar → (engine, error))
+    ripple para TODO teste que chama direto — grep antes de decidir a forma.
+  - RegistrarCatalogo panicando em código duplicado limita testes de empate:
+    cada catálogo do cenário precisa de codes próprios.
+  - pkg é a única casa compartilhada para regra de FORMATO usada por binding
+    E VO (leaf rule decide a direção do dedup, não gosto).
+---
