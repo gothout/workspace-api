@@ -2,9 +2,10 @@
 
 Orquestrações do domínio **identidade** que atravessam **2+ subdomínios**
 (ou agregam registros de todos eles). Hoje: **`catalogo`** (agrega o
-`Catalogo()` de permissões e o mapa de erros para o front-end) e **`auth`**
-(login/refresh/logout — orquestra `user` + resolução da organization pelo
-Host).
+`Catalogo()` de permissões, os eventos de auditoria e o mapa de erros para
+o front-end), **`auth`** (login/refresh/logout — orquestra `user` + resolução
+da organization pelo Host) e **`logs`** (leitura das trilhas de log do
+ClickHouse com recorte plataforma/organization/workspace).
 
 ## Regras
 

@@ -2,7 +2,7 @@
 
 You are an autonomous coding agent building the **workspace-api** template
 (Go monolith, DDD, hierarchy organization → workspace → user, singleton
-pattern). Run inside the project root `/home/gothout/Projetos/Solo/workspace-api`.
+pattern). Run inside the project root `/home/kimi/workspace-api`.
 
 ## Spec de referência (OBRIGATÓRIO ler antes de codar)
 

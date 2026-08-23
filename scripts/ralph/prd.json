@@ -1,6 +1,6 @@
 {
   "project": "workspace-api",
-  "branchName": "ralph/workspace-api",
+  "branchName": "ox-alpha/code",
   "description": "Template de API gerenciadora Go com DDD, hierarchy organization -> workspace -> user",
   "userStories": [
     {
@@ -17,10 +17,16 @@
         "go build/vet/test verdes"
       ],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "issue": 1,
-      "branch": "ralph/fase-0",
-      "docs": ["agents/README.md", "agents/01-arquitetura-ddd.md", "agents/02-stack-e-infra.md", "agents/04-convencoes-api.md", "agents/05-padroes-codigo.md"]
+      "branch": "ox-alpha/fase-0",
+      "docs": [
+        "agents/README.md",
+        "agents/01-arquitetura-ddd.md",
+        "agents/02-stack-e-infra.md",
+        "agents/04-convencoes-api.md",
+        "agents/05-padroes-codigo.md"
+      ]
     },
     {
       "id": "F1",
@@ -35,10 +41,15 @@
         "Seed dos 5 papéis"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "issue": 2,
-      "branch": "ralph/fase-1",
-      "docs": ["agents/03-identidade-tenancy.md", "internal/middleware/AGENTS.md", "internal/infra/jwt/AGENTS.md", "cmd/bootstrap/AGENTS.md"]
+      "branch": "ox-alpha/fase-1",
+      "docs": [
+        "agents/03-identidade-tenancy.md",
+        "internal/middleware/AGENTS.md",
+        "internal/infra/jwt/AGENTS.md",
+        "cmd/bootstrap/AGENTS.md"
+      ]
     },
     {
       "id": "F2",
@@ -52,10 +63,14 @@
         "Rotas /api/domain/identidade/organizations e /.../{uuid}/api-keys"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "issue": 3,
-      "branch": "ralph/fase-2",
-      "docs": ["agents/05-padroes-codigo.md", "internal/identidade/domain/organization/AGENTS.md", "internal/identidade/model/organization/AGENTS.md"]
+      "branch": "ox-alpha/fase-2",
+      "docs": [
+        "agents/05-padroes-codigo.md",
+        "internal/identidade/domain/organization/AGENTS.md",
+        "internal/identidade/model/organization/AGENTS.md"
+      ]
     },
     {
       "id": "F3",
@@ -69,10 +84,14 @@
         "Acesso de suporte auditado"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "issue": 4,
-      "branch": "ralph/fase-3",
-      "docs": ["agents/05-padroes-codigo.md", "internal/identidade/domain/workspace/AGENTS.md", "internal/identidade/model/workspace/AGENTS.md"]
+      "branch": "ox-alpha/fase-3",
+      "docs": [
+        "agents/05-padroes-codigo.md",
+        "internal/identidade/domain/workspace/AGENTS.md",
+        "internal/identidade/model/workspace/AGENTS.md"
+      ]
     },
     {
       "id": "F4",
@@ -86,10 +105,15 @@
         "Login indistinguível (não existe vs senha errada)"
       ],
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "issue": 5,
-      "branch": "ralph/fase-4",
-      "docs": ["agents/05-padroes-codigo.md", "internal/identidade/domain/user/AGENTS.md", "internal/identidade/model/user/AGENTS.md", "internal/identidade/application/auth/AGENTS.md"]
+      "branch": "ox-alpha/fase-4",
+      "docs": [
+        "agents/05-padroes-codigo.md",
+        "internal/identidade/domain/user/AGENTS.md",
+        "internal/identidade/model/user/AGENTS.md",
+        "internal/identidade/application/auth/AGENTS.md"
+      ]
     },
     {
       "id": "F5",
@@ -103,10 +127,14 @@
         "Testes de contrato"
       ],
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "issue": 6,
-      "branch": "ralph/fase-5",
-      "docs": ["agents/04-convencoes-api.md", "internal/identidade/application/catalogo/AGENTS.md", "internal/identidade/application/AGENTS.md"]
+      "branch": "ox-alpha/fase-5",
+      "docs": [
+        "agents/04-convencoes-api.md",
+        "internal/identidade/application/catalogo/AGENTS.md",
+        "internal/identidade/application/AGENTS.md"
+      ]
     },
     {
       "id": "F6",
@@ -120,10 +148,289 @@
         "README de uso do template finalizado"
       ],
       "priority": 7,
-      "passes": false,
+      "passes": true,
       "issue": 7,
-      "branch": "ralph/fase-6",
-      "docs": ["agents/01-arquitetura-ddd.md", "agents/06-plano-execucao.md"]
+      "branch": "ox-alpha/fase-6",
+      "docs": [
+        "agents/01-arquitetura-ddd.md",
+        "agents/06-plano-execucao.md"
+      ]
+    },
+    {
+      "id": "R1",
+      "title": "Escalação de privilégio em CriarApiKey",
+      "description": "CriarApiKey aceita permissões arbitrárias sem conferir o criador. Validar cada permissão contra as efetivas do ctx (middleware.Atende) e proibir *:* salvo quando o criador a possui.",
+      "acceptanceCriteria": [
+        "CriarApiKey rejeita permissão não atendida pelas efetivas do ctx (403/422 conforme convenção)",
+        "*:* só aceito quando o criador possui *:*",
+        "Teste de unidade cobrindo admin_organization tentando *:*",
+        "build/vet/test verdes"
+      ],
+      "priority": 8,
+      "passes": true,
+      "issue": 19,
+      "branch": "ox-alpha/revisao-1",
+      "docs": [
+        "agents/03-identidade-tenancy.md",
+        "agents/05-padroes-codigo.md",
+        "internal/middleware/AGENTS.md",
+        "internal/identidade/domain/organization/AGENTS.md"
+      ]
+    },
+    {
+      "id": "R2",
+      "title": "lock_timeout de migrations em conexão dedicada",
+      "description": "SET lock_timeout no pool compartilhado contamina o pool e pode não valer para a migration. Conexão dedicada para a sessão de migration.",
+      "acceptanceCriteria": [
+        "Sessão de migration usa conexão dedicada (sql.Conn) ou DSN própria",
+        "Nenhuma conexão do pool sai com lock_timeout alterado",
+        "up→down→up real em banco efêmero",
+        "build/vet/test verdes"
+      ],
+      "priority": 9,
+      "passes": true,
+      "issue": 20,
+      "branch": "ox-alpha/revisao-2",
+      "docs": [
+        "agents/02-stack-e-infra.md",
+        "db/migrations/AGENTS.md",
+        "internal/infra/database/migrations/AGENTS.md"
+      ]
+    },
+    {
+      "id": "R3",
+      "title": "Provisionamento inicial (super_admin + workspace)",
+      "description": "Seed cria papéis e org raiz, mas nenhum usuário super_admin nem workspace — sem insert manual o template não sobe ponta a ponta.",
+      "acceptanceCriteria": [
+        "Seed opcional (flag/env) cria super_admin + workspace inicial, idempotente",
+        "Nunca automático no boot",
+        "README documenta o provisionamento",
+        "Teste de integração do seed",
+        "build/vet/test verdes"
+      ],
+      "priority": 10,
+      "passes": true,
+      "issue": 21,
+      "branch": "ox-alpha/revisao-3",
+      "docs": [
+        "agents/02-stack-e-infra.md",
+        "agents/03-identidade-tenancy.md",
+        "cmd/bootstrap/AGENTS.md"
+      ]
+    },
+    {
+      "id": "R4",
+      "title": "Cascata de inativação da organization",
+      "description": "Inativar organization deve revogar sessões dos usuários e API keys dela; Refresh e BuscarApiKeyPorHash checam status da dona.",
+      "acceptanceCriteria": [
+        "Inativar/remover organization revoga refresh tokens dos usuários e API keys",
+        "Refresh falha fechada com organization inativa",
+        "X-Api-Key de organization inativa falha fechada",
+        "Testes de integração cobrindo a cascata",
+        "build/vet/test verdes"
+      ],
+      "priority": 11,
+      "passes": true,
+      "issue": 22,
+      "branch": "ox-alpha/revisao-4",
+      "docs": [
+        "agents/03-identidade-tenancy.md",
+        "internal/identidade/domain/organization/AGENTS.md",
+        "internal/identidade/application/auth/AGENTS.md"
+      ]
+    },
+    {
+      "id": "R5",
+      "title": "Logout idempotente + rotação de refresh",
+      "description": "Logout recusa token já revogado (caminho idempotente inalcançável) e refresh antigo segue válido. Logout idempotente e rotação com revogação do jti anterior.",
+      "acceptanceCriteria": [
+        "Logout com token já revogado não falha (idempotente)",
+        "Refresh revoga o jti anterior e emite novo",
+        "Reuso de refresh revogado falha fechado",
+        "Testes de integração dos dois fluxos",
+        "build/vet/test verdes"
+      ],
+      "priority": 12,
+      "passes": true,
+      "issue": 23,
+      "branch": "ox-alpha/revisao-5",
+      "docs": [
+        "agents/03-identidade-tenancy.md",
+        "internal/identidade/application/auth/AGENTS.md",
+        "internal/infra/jwt/AGENTS.md"
+      ]
+    },
+    {
+      "id": "R6",
+      "title": "Segredo JWT mínimo 32 bytes",
+      "description": "Mínimo de 16 caracteres é fraco para HS256.",
+      "acceptanceCriteria": [
+        "infra/jwt exige 32+ bytes com erro claro",
+        "configs_example.json com segredo de exemplo adequado",
+        "Testes ajustados",
+        "build/vet/test verdes"
+      ],
+      "priority": 13,
+      "passes": true,
+      "issue": 24,
+      "branch": "ox-alpha/revisao-6",
+      "docs": [
+        "agents/02-stack-e-infra.md",
+        "internal/infra/jwt/AGENTS.md"
+      ]
+    },
+    {
+      "id": "R7",
+      "title": "Varredura menor da revisão",
+      "description": "errors.Is nos adaptadores do bootstrap; race em middleware.Use/ResetarParaTeste; trusted_proxy aplicado ao gin; remover código morto (ServirAteSinal); mascarar e-mail em logs de auditoria; dedup regex slugdns; rest_err.DoCatalogo determinístico; doc ResolvedorWorkspaces alinhada.",
+      "acceptanceCriteria": [
+        "Cada item do lote corrigido ou justificado no PR",
+        "go test -race verde",
+        "build/vet/test verdes"
+      ],
+      "priority": 14,
+      "passes": true,
+      "issue": 25,
+      "branch": "ox-alpha/revisao-7",
+      "docs": [
+        "agents/04-convencoes-api.md",
+        "agents/05-padroes-codigo.md",
+        "internal/middleware/AGENTS.md",
+        "cmd/bootstrap/AGENTS.md"
+      ]
+    },
+    {
+      "id": "E1",
+      "title": "Redis — cache, locks, denylist e rate-limit de login",
+      "description": "Infra Redis degradável por interface: cache de resolução de workspace por slug e de permissões efetivas, implementação Redis da denylist do JWT, e rate-limit/lockout de login (pendência da revisão). Ausência do Redis degrada com log [DEGRADADO] e nunca derruba o processo.",
+      "acceptanceCriteria": [
+        "internal/infra/redis: Connect puro + singleton degradável (cliente nulo + log [DEGRADADO]; consumidor trata a ausência)",
+        "Implementação Redis da denylist do JWT (interface já declarada em internal/infra/jwt), ligada no bootstrap",
+        "Cache de slug do workspace via interface CacheResolucao (F3) com TTL e invalidação nas escritas",
+        "Cache de permissões efetivas por (usuario, workspace) com TTL e invalidação em atribuição/remoção de papel",
+        "Rate-limit/lockout de login por e-mail+IP com janela via Redis; degradável (sem Redis = sem lockout, com log) e resposta 429 padronizada",
+        "Prefixos de chave fixos documentados (perm:, workspace:slug:, lock:, idempot:, jwt:deny:)",
+        "docker-compose.yml de dev + seção no configs_example.json",
+        "Testes: degradação sem Redis, cache hit/miss, invalidação, lockout — integração com Redis efêmero se docker disponível",
+        "build/vet/test verdes + -race nos pacotes tocados"
+      ],
+      "priority": 15,
+      "passes": true,
+      "issue": 8,
+      "branch": "ox-alpha/evolucao-redis",
+      "docs": [
+        "agents/02-stack-e-infra.md",
+        "agents/03-identidade-tenancy.md",
+        "internal/infra/AGENTS.md",
+        "internal/infra/jwt/AGENTS.md",
+        "internal/identidade/application/auth/AGENTS.md",
+        "cmd/bootstrap/AGENTS.md"
+      ]
+    },
+    {
+      "id": "E2",
+      "title": "ClickHouse + trilhas de log assíncronas",
+      "description": "Banco de logs: trilhas de auditoria, acesso e erro fora do caminho síncrono, com writer assíncrono em lote e destino stdout degradado.",
+      "acceptanceCriteria": [
+        "internal/infra/clickhouse: Connect puro + singleton degradável; writer assíncrono em lote (flush por tamanho/intervalo; fila cheia descarta e conta; drain no shutdown)",
+        "internal/pkg/log/audit_log e access_log como pacotes-folha com interface Destino ligada no bootstrap",
+        "Log nunca no caminho síncrono do request (enqueue não-bloqueante)",
+        "Middleware global de access log (primeiro da cadeia) com ray_trace do request, substituindo o slog síncrono atual",
+        "Trilha de auditoria das escritas dos subdomínios migrada para o destino assíncrono (sem perder o payload montado à mão)",
+        "DDL das tabelas de log versionada (db/logs/ ou equivalente documentado) + seção no configs_example.json",
+        "stdout como destino degradado quando ClickHouse ausente (log [DEGRADADO])",
+        "Testes: buffer/flush/descarte contado, drain no shutdown, degradação — integração com ClickHouse efêmero se docker disponível",
+        "build/vet/test verdes + -race nos pacotes tocados"
+      ],
+      "priority": 16,
+      "passes": true,
+      "issue": 9,
+      "branch": "ox-alpha/evolucao-clickhouse",
+      "docs": [
+        "agents/02-stack-e-infra.md",
+        "agents/01-arquitetura-ddd.md",
+        "internal/infra/AGENTS.md",
+        "cmd/server/routes/AGENTS.md",
+        "cmd/bootstrap/AGENTS.md"
+      ]
+    },
+    {
+      "id": "E3",
+      "title": "Catálogo de eventos de auditoria mapeado para o front",
+      "description": "Eventos de auditoria hoje são vocabulário fechado só no código. Cada subdomínio declara seus eventos em events.go (ação estável + descrição PT-BR + campos do payload) no padrão do errors.go/permissions.go; auditar() valida a catalogação; bootstrap agrega; endpoint público expõe o mapa completo.",
+      "acceptanceCriteria": [
+        "events.go em cada subdomínio que audita (organization, workspace, user, auth) com ação estável + descrição PT-BR + campos do payload",
+        "auditar() falha em teste/boot quando a ação não está catalogada no events.go do subdomínio",
+        "Teste de cobertura de eventos (eventos_cobertura_test.go): varre os auditar() de todos os subdomínios e reprova (a) ação usada em auditar() sem entrada no events.go do subdomínio; (b) subdomínio que audita sem events.go no lugar certo; (c) entrada no events.go que nenhuma escrita usa — nos dois sentidos, como o teste de cobertura do Swagger",
+        "Bootstrap agrega CatalogoEventos() de todos os subdomínios",
+        "GET /api/system/eventos (mapa completo) nas rotas de sistema, seguindo convenções do doc 04",
+        "Swagger regenerado + teste de cobertura segue verde",
+        "AGENTS.md raiz e doc 04 atualizados com o padrão",
+        "build/vet/test verdes"
+      ],
+      "priority": 17,
+      "passes": true,
+      "issue": 26,
+      "branch": "ox-alpha/evolucao-eventos",
+      "docs": [
+        "agents/04-convencoes-api.md",
+        "agents/05-padroes-codigo.md",
+        "internal/identidade/application/catalogo/AGENTS.md",
+        "cmd/bootstrap/AGENTS.md"
+      ]
+    },
+    {
+      "id": "E4",
+      "title": "errobserve — eventos de erro observados + namespace reservado",
+      "description": "Observador de erros por subdomínio: todo retorno de erro do service passa por obs.Observe (erro intacto), sentinela fora do catálogo vira ErrUnknown, severidades warn/error/critical, sinks plugáveis (slog, ClickHouse da E2, alerta para critical). Namespace reservado 'sistema.*' para eventos de plataforma (boot, migrations, shutdown, degradação) — nunca usado por subdomínios de negócio.",
+      "acceptanceCriteria": [
+        "internal/pkg/errobserve (folha): For(dominio, subdominio, errCodes) no singleton de cada subdomínio; Observe(ctx, err) devolve o erro intacto",
+        "Sentinela fora do catálogo do subdomínio vira ErrUnknown e sobe como critical",
+        "Severidades warn/error/critical definidas por catálogo",
+        "Namespace reservado 'sistema.*' para eventos de plataforma (boot, migrations.up, shutdown, degradacao de dependência) — subdomínio de negócio não pode registrar evento nesse namespace (reprova em teste/boot)",
+        "Eventos de erro entram no catálogo de eventos (E3) e saem em GET /api/system/eventos com o namespace reservado visível",
+        "Sinks plugáveis: slog sempre ativo; ClickHouse (E2) quando ligado; sink de alerta [ALERTA] para critical com janela de agregação",
+        "Enqueue não-bloqueante — erro na telemetria nunca muda a resposta ao cliente",
+        "Testes: sentinela desconhecida, namespace reservado, sinks, degradação — build/vet/test e -race verdes"
+      ],
+      "priority": 18,
+      "passes": true,
+      "issue": 10,
+      "branch": "ox-alpha/evolucao-errobserve",
+      "docs": [
+        "agents/02-stack-e-infra.md",
+        "agents/05-padroes-codigo.md",
+        "internal/pkg/AGENTS.md",
+        "internal/pkg/rest_err/AGENTS.md",
+        "cmd/bootstrap/AGENTS.md"
+      ]
+    },
+    {
+      "id": "E5",
+      "title": "Endpoints de leitura de logs (auditoria, acesso, erros)",
+      "description": "As trilhas são gravadas no ClickHouse (E2) e catalogadas (E3/E4), mas não há API de consulta. Endpoints de leitura por trilha com modelo de escopo: plataforma (super_admin) lê logs de QUALQUER organization; organization lê os próprios (qualquer workspace dela); usuário de workspace lê os do PRÓPRIO workspace. Filtros, paginação, permissão granular, degradável quando ClickHouse ausente.",
+      "acceptanceCriteria": [
+        "Endpoints de leitura por trilha (ex.: GET /api/application/identidade/logs/auditoria, /acesso, /erros)",
+        "Escopo fail-closed em 3 recortes: super_admin lê qualquer organization (filtro opcional por organization_uuid); admin_organization lê só a própria (organization_uuid alheio = 403/404); usuário com vínculo no workspace resolvido lê só o recorte do próprio workspace",
+        "Filtros: workspace, ação, usuário, janela de tempo, ray_trace (e organization_uuid para a plataforma)",
+        "Paginação padrão + ordenação por instante desc",
+        "Permissões granulares novas declaradas rota a rota (ex.: identidade:logs:ler), registradas no permissions.go e no seed dos papéis; super_admin coberto por *:*",
+        "ClickHouse ausente = 503 padronizado (nunca 500 nem lista vazia silenciosa)",
+        "Contrato segue o doc 04 e campos alinhados ao catálogo de eventos (E3)",
+        "Catálogo de erros/permissoes/eventos atualizado (endpoints novos entram nos mappings)",
+        "Testes: os três recortes de escopo, filtros, paginação, degradação, permissão negada — build/vet/test e -race verdes"
+      ],
+      "priority": 19,
+      "passes": true,
+      "issue": 27,
+      "branch": "ox-alpha/evolucao-logs-leitura",
+      "docs": [
+        "agents/04-convencoes-api.md",
+        "agents/05-padroes-codigo.md",
+        "agents/02-stack-e-infra.md",
+        "internal/pkg/log/AGENTS.md",
+        "cmd/bootstrap/AGENTS.md"
+      ]
     }
   ]
 }

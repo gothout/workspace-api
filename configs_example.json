@@ -1,0 +1,77 @@
+{
+  "app": {
+    "name": "workspace-api",
+    "env": "dev",
+    "version": "0.1.0",
+    "base_domain": "localhost"
+  },
+  "server": {
+    "http": {
+      "port": 8080,
+      "read_timeout_sec": 15,
+      "write_timeout_sec": 30,
+      "idle_timeout_sec": 60,
+      "shutdown_timeout_sec": 10,
+      "trusted_proxy": [],
+      "cors": { "allowed_origins": [] }
+    }
+  },
+  "security": {
+    "jwt_secret": "trocar-em-producao-por-um-segredo-de-32-bytes",
+    "jwt_ttl_min": 60,
+    "jwt_refresh_ttl_hours": 168
+  },
+  "databases": {
+    "postgres": {
+      "host": "localhost",
+      "port": 5432,
+      "user": "workspace",
+      "pass": "workspace",
+      "name": "workspace",
+      "ssl_mode": "disable",
+      "pool": {
+        "max_open_conns": 25,
+        "max_idle_conns": 10,
+        "conn_max_lifetime_min": 5,
+        "conn_max_idle_time_min": 2
+      }
+    },
+    "migrations": {
+      "path": "db/migrations",
+      "auto_run": true,
+      "lock_timeout_sec": 5,
+      "statement_timeout_min": 10
+    },
+    "redis": {
+      "enabled": false,
+      "host": "localhost",
+      "port": 6379,
+      "pass": "",
+      "db": 0
+    },
+    "clickhouse": {
+      "enabled": false,
+      "host": "localhost",
+      "port": 9000,
+      "user": "default",
+      "pass": "default",
+      "database": "workspace_logs"
+    }
+  },
+  "cache": {
+    "ttl_resolucao_seg": 30,
+    "ttl_permissoes_seg": 60,
+    "login_lockout": {
+      "max_tentativas": 5,
+      "janela_seg": 300,
+      "bloqueio_seg": 900
+    }
+  },
+  "logs": {
+    "lote_tamanho": 500,
+    "lote_janela_ms": 2000,
+    "fila_tamanho": 10000,
+    "drain_timeout_sec": 5,
+    "alerta_janela_seg": 60
+  }
+}

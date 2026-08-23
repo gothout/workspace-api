@@ -15,7 +15,7 @@ Duas famílias, espelhando as camadas:
 /api/application/identidade/{nome}/...         ← casos de uso entre subdomínios do mesmo domínio (camada application)
 ```
 
-Fora das duas famílias ficam as **rotas de sistema**: `GET /api/status` (sondas, montada no `cmd/server/routes`) e `GET /api/system/errors` (mapa de erros, registrada pela aplicação `catalogo`) — exceção de prefixo, decidida e documentada.
+Fora das duas famílias ficam as **rotas de sistema**: `GET /api/status` (sondas, montada no `cmd/server/routes`), `GET /api/system/errors` (mapa de erros) e `GET /api/system/eventos` (mapa de eventos de auditoria) — as duas últimas registradas pela aplicação `catalogo`; exceção de prefixo, decidida e documentada.
 
 - Diretório do pacote Go = **singular snake_case** (`organization`, `user`); rota = **plural kebab-case** (`organizations`, `users`).
 - A auth é declarada **rota a rota** pelo `Routes()` do controller (doc 03) — nunca escondida no grupo.
@@ -33,7 +33,11 @@ POST   /api/domain/identidade/workspaces/{uuid}/acoes/reativar
 POST   /api/application/identidade/auth/login
 POST   /api/application/identidade/auth/refresh
 GET    /api/application/identidade/catalogo/permissoes/minhas
+GET    /api/application/identidade/logs/auditoria
+GET    /api/application/identidade/logs/acesso
+GET    /api/application/identidade/logs/erros
 GET    /api/system/errors
+GET    /api/system/eventos
 ```
 
 ## Verbos e ações (REST estrito)
@@ -124,6 +128,8 @@ O controller traduz **sentinela → status** num `switch` (template `traduzir()`
 
 Toda operação de **escrita** (POST/PATCH/DELETE e ações de negócio) audita: domínio, subdomínio, ação, função, identidade vinda do ctx (organization/workspace/user/ray_trace), `success`, input/output. O payload é um `map[string]any` **montado à mão**, com identificadores, contagens, datas e vocabulário fechado — **nunca texto livre**. No núcleo do template a trilha sai por log estruturado (slog); o destino assíncrono (ClickHouse) é evolução futura (doc 02).
 
+O vocabulário de ações é **catalogado no `events.go` do subdomínio** (ação estável + descrição PT-BR + campos do payload): o `auditar()` valida a catalogação e **reprova em teste/boot** ação sem entrada — evento novo nunca nasce fora do mapping.
+
 ## CONTRATO — endpoint de permissões
 
 `GET /api/application/identidade/catalogo/permissoes/minhas` (auth: `BearerAuth` ou `ApiKeyAuth`).
@@ -194,3 +200,54 @@ Todo erro do sistema carrega um **code estável** `identidade.{subdominio}.{nome
 ```
 
 O front-end consome como **mapping de tradução/listagem**: o `code` é a chave estável (para tradução e estilização) e a `message` PT-BR do servidor é o default exibido. Sentinela nova sem entrada no catálogo **não fecha o checklist** do subdomínio (doc 05) — é esse catálogo que alimenta a rota.
+
+## CONTRATO — mapa de eventos
+
+Todo evento de auditoria carrega uma **ação estável** (snake_case), declarada no `events.go` do subdomínio com descrição PT-BR e a lista de **campos do payload** além dos de identidade (`dominio`, `subdominio`, `acao`, `success`, `ray_trace` e os uuids do ctx). O `auditar()` valida a catalogação: ação nova sem entrada no `events.go` **reprova em teste/boot** (mesmo espírito da sentinela sem code no `errors.go`).
+
+`GET /api/system/eventos` — rota auxiliar pública do sistema (mesma decisão da rota de erros). Devolve **todos os eventos possíveis**, organizados por domínio/subdomínio:
+
+```json
+{
+  "eventos": [
+    {
+      "dominio": "identidade",
+      "subdominio": "workspace",
+      "eventos": [
+        { "acao": "criar", "descricao": "Workspace criado na organization.", "campos": ["slug"] },
+        { "acao": "remover", "descricao": "Workspace removido; o slug NÃO se libera para outro tenant.", "campos": ["slug"] }
+      ]
+    },
+    {
+      "dominio": "identidade",
+      "subdominio": "auth",
+      "eventos": [
+        { "acao": "login", "descricao": "Tentativa de login: sucesso carrega os identificadores da sessão aberta; falha carrega e-mail mascarado (e campos de lockout quando preso).", "campos": ["email", "user_uuid", "organization_uuid", "limite_excedido", "espera_seg"] }
+      ]
+    }
+  ]
+}
+```
+
+O front-end consome como **mapping de listagem/tradução**: o `acao` é a chave estável, a `descricao` PT-BR é o default exibido e `campos` descreve as chaves extras que cada emissão pode carregar (lista vazia quando o evento só carrega identidade). Fonte dos dados: `CatalogoEventos()` de cada subdomínio, agregado no bootstrap pela aplicação `catalogo`. Cobertura garantida **nos dois sentidos** por teste executável (ação emitida sem entrada reprova; entrada sem emissão também).
+
+Desde a evolução **errobserve**, a mesma rota carrega também o vocabulário de **ERROS observados** e o **namespace reservado da plataforma**:
+
+- Um **evento por código de erro** de cada subdomínio, no grupo dona dele — `acao` = o MESMO código estável do `/api/system/errors` (ex.: `identidade.workspace.slug_em_uso`), `descricao` = mensagem PT-BR do catálogo e `campos: ["severidade"]` (a severidade real vai no payload do evento quando ele dispara). É o mapping "quais erros existem e com que peso são observados" sem hardcode no front.
+- O grupo **`sistema/plataforma`** expõe o namespace RESERVADO (`sistema.boot`, `sistema.migrations.up`, `sistema.degradacao_dependencia`, `sistema.shutdown`) — eventos de plataforma nunca usam dominio de negócio, e negócio não registra em `sistema.*`.
+- A severidade de cada código também sai na CLI: `workspace-api errors` (código, severidade, status, mensagem) — mesmo dado, outra porta.
+
+## CONTRATO — leitura das trilhas de log
+
+`GET /api/application/identidade/logs/{auditoria,acesso,erros}` (auth completa rota a rota, exigência `identidade:logs:ler`). A consulta das trilhas gravadas no ClickHouse segue o envelope padrão de paginação (`{items, page, page_size, total}`, ordem `instante DESC`) e um **modelo de escopo em 3 recortes derivado SEMPRE do ctx** — query param nunca escolhe escopo:
+
+| Recorte | Quem | Alcance |
+|---|---|---|
+| **Plataforma** | possui `*:*` (super_admin) | qualquer organization; filtros opcionais honrados |
+| **Organization** | atende `identidade:logs:ler_organization` | preso à própria organization (todos os workspaces dela) |
+| **Workspace** | demais com `identidade:logs:ler` | preso ao par (organization, workspace) resolvido |
+
+- Filtro apontando fora do recorte responde **404** (`identidade.logs.fora_do_escopo`) — uuid alheio exista ou não recebe a mesma resposta.
+- Filtros: `organization_uuid` (só tem efeito para a plataforma), `workspace_uuid`, `user_uuid`, `acao` (= ação estável na auditoria; = código estável nos erros; ignorado no acesso), `ray_trace`, janela `inicio`/`fim` em RFC3339 UTC; UUID/timestamp malformado = 400.
+- Campos dos itens espelham as trilhas: auditoria (`acao`, `sucesso`, `detalhes`, identificadores), acesso (`metodo`, `path`, `rota`, `status`, `duracao_ms`, tenancy), erros (`codigo`, `mensagem`, `severidade`, `desconhecido` — a causa NUNCA sai via API).
+- **ClickHouse ausente = 503 padronizado** (`identidade.logs.indisponivel`) — nunca 500 nem lista vazia silenciosa.

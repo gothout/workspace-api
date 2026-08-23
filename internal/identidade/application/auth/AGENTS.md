@@ -16,6 +16,12 @@ inválidas.
 
 ## Regras
 
+- **Observação de erros** (evolução errobserve): o `NewService` devolve o
+  service DECORADO (`service_observado.go`) — todo erro que sobe ao chamador
+  vira evento estruturado com o código do `errors.go` e a severidade de
+  `severidadesErros` no `singleton.go` (login bloqueado = error; demais
+  falhas esperadas = warn). O erro sai INTACTO — a indistinguibilidade do
+  login não é tocada. Detalhes no `internal/pkg/errobserve/AGENTS.md`.
 - **Sem `model.go` nem `repository.go`** — aplicação não persiste nada
   próprio. O refresh token persistido (`identidade_user_refresh_token`) é
   tabela do subdomínio `user`, acessada por contrato.
@@ -33,10 +39,25 @@ inválidas.
   a comparação de hash roda também quando o usuário não existe (hash de
   mentira), para não vazar existência por timing.
 - **Logout revoga no Postgres**: marca `revogado_em` na linha do refresh
-  (via contrato `Usuarios`); a denylist Redis da evolução é só cache dessa
-  revogação.
-- Rate-limit e lockout são **evolução futura**; registrar a ausência no log
-  de iterações (`agents/06`).
+  (via contrato `Usuarios`); a denylist Redis (#8) é CACHE dessa revogação —
+  composta no bootstrap, só positivo cacheado, negativos sempre à fonte.
+- **Logout é IDEMPOTENTE (R5)**: não passa pela mesma porta do refresh —
+  confere assinatura/tipo/claims via `ValidarSemRevogacao` e chama o
+  `EncerrarSessao` (idempotente no subdomínio) sem exigir jti ativo, conta
+  autenticável nem dona viva: destruição nunca concede acesso. Repetir o
+  logout do mesmo token é sucesso; token expirado/malformado segue o 401
+  genérico.
+- **Refresh tem ROTAÇÃO (R5)**: renovação revoga o `jti` anterior ANTES de
+  emitir o par novo — reuso de refresh renovado falha fechado; se a emissão
+  falhar depois da revogação, a sessão morre (o dono re-loga): direção
+  segura, nunca dois refresh válidos coexistem.
+- **Rate-limit/lockout de login (evolução #8)**: contrato `LimitadorLogin`
+  (opcional nas Dependências — nil = feature desligada). Par (e-mail, IP)
+  preso responde 429 (`identidade.auth.login_bloqueado`) ANTES do caminho de
+  autenticação; falha de credencial alimenta o contador e login bom limpa o
+  histórico. Falha do PRÓPRIO limitador nunca recusa login — segue sem
+  lockout com log: cache fora do ar não vira indisponibilidade de autenticação.
+  Implementação Redis vive em `internal/infra/redis` + adaptador no bootstrap.
 
 ## Definição de pronto
 

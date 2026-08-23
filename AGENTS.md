@@ -105,8 +105,21 @@ Especificação completa em `agents/02` e `db/migrations/AGENTS.md`.
   `GET /api/system/errors`.
 - Toda permissão granular é registrada no `permissions.go` (`Catalogo()`) e
   exposta no endpoint de permissões do usuário.
-- O front-end consome ambos como mapping — sem hardcode de código de erro nem
-  de regra de acesso.
+- Todo evento de auditoria é catalogado no `events.go` do subdomínio (ação
+  estável + descrição PT-BR + campos do payload), validado pelo `auditar()`
+  e exposto na rota auxiliar `GET /api/system/eventos`.
+- Todo retorno de erro do service é OBSERVADO (evolução errobserve): o
+  observador do subdomínio — severidades no `singleton.go`, códigos vindos
+  do próprio catálogo de erros — vira evento estruturado para os sinks
+  (slog sempre ativo, ClickHouse, alerta agregado) sem nunca mudar a
+  resposta; o vocabulário de erros + o namespace reservado `sistema.*`
+  aparecem em `GET /api/system/eventos` e na CLI `workspace-api errors`.
+- As trilhas gravadas (auditoria, acesso, erros) são consultáveis via
+  aplicação `logs` — `GET /api/application/identidade/logs/{auditoria,
+  acesso,erros}` com recorte plataforma/organization/workspace imposto pelo
+  ctx; ClickHouse ausente = 503 padronizado.
+- O front-end consome os três como mapping — sem hardcode de código de erro,
+  regra de acesso nem nome de evento.
 
 ## Regra de trabalho (loop de execução)
 

@@ -31,7 +31,10 @@ rotas em `/api/domain/identidade/organizations`.
   **SHA-256** dele (`key_hash`). Escopo: a organization inteira ou uma
   lista de workspaces dela, com permissões explícitas. Gestão em
   `/api/domain/identidade/organizations/{uuid}/api-keys` — nunca na raiz do
-  domínio.
+  domínio. **A chave não concede o que o criador não tem** (R1): cada
+  permissão pedida é casada contra as efetivas do ctx com o matcher do
+  middleware (`Atende`) — recusa `ErrPermissaoNaoPossuida` (403) antes da
+  persistência; `*:*` só vale para quem possui `*:*`.
 - **Inativar suspende os workspaces e desativa a resolução do domínio**:
   operação em cascata dentro do service, auditada, e o efeito no middleware
   é imediato na próxima requisição. A cascata vai por **interface declarada

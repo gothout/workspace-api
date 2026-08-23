@@ -11,9 +11,13 @@ Subdomínios do domínio **identidade**: `organization`, `workspace`, `user`.
 - Todo subdomínio segue a anatomia de **8 arquivos + `permissions.go`**
   (templates em `agents/05`): `dto_request.go`, `dto_response.go`,
   `errors.go`, `permissions.go`, `repository.go`, `service.go`,
-  `controller.go`, `singleton.go`. **O modelo (entidades, VOs, `NewX`, inputs,
-  `ListFilter`, status) mora em `internal/identidade/model/{subdominio}` —
-  pacote-folha importável por todas as camadas.**
+  `controller.go`, `singleton.go`. **Quem audita escritas tem também
+  `events.go`** (catálogo de eventos de auditoria — ação estável + descrição
+  PT-BR + campos do payload; o `auditar()` reprova ação não catalogada e o
+  teste de cobertura de eventos reprova nos dois sentidos). **O modelo
+  (entidades, VOs, `NewX`, inputs, `ListFilter`, status) mora em
+  `internal/identidade/model/{subdominio}` — pacote-folha importável por
+  todas as camadas.**
 - **Cada subdomínio hospeda um agregado** (ou poucos, com raiz explícita no
   pacote `model/`): a raiz é a única porta de entrada; referência a outro agregado
   **só por uuid** — nunca join de escrita. Importar o **`model/` de irmão é
@@ -30,6 +34,12 @@ Subdomínios do domínio **identidade**: `organization`, `workspace`, `user`.
 - **Catálogo de erros**: toda sentinela do `errors.go` tem entrada no
   catálogo do subdomínio (code estável + mensagem + status), registrada no
   `rest_err` — é o que alimenta `GET /api/system/errors`.
+- **Observação de erros** (evolução errobserve): o `NewService` devolve o
+  service DECORADO (`service_observado.go`) — todo erro que sobe ao chamador
+  vira evento estruturado com o código do catálogo e a severidade declarada
+  em `severidadesErros` no `singleton.go` (sentinela nova sem severidade
+  reprova no boot). O erro sai INTACTO; sentinela desconhecida vira evento
+  critical. Detalhes no `internal/pkg/errobserve/AGENTS.md`.
 - **`Catalogo()` de permissões**: `permissions.go` declara as constantes e o
   catálogo com metadados (descrição PT-BR, rota, método, grupo de menu) —
   sem ele o subdomínio não aparece no endpoint de permissões e o checklist

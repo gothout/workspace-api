@@ -1,10 +1,11 @@
 #!/bin/bash
 # Ralph Wiggum - Long-running AI agent loop
-# Usage: ./ralph.sh [--tool amp|claude|opencode|kimi|kimi-cli] [max_iterations]
+# Usage: ./ralph.sh [--tool amp|claude|opencode|kimi|kimi-cli] [--model provider/model] [max_iterations]
 
 set -e
 
 TOOL="opencode"
+MODEL="${MODEL:-opencode-go/ox-alpha-free}"
 MAX_ITERATIONS=50
 
 while [[ $# -gt 0 ]]; do
@@ -15,6 +16,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --tool=*)
       TOOL="${1#*=}"
+      shift
+      ;;
+    --model)
+      MODEL="$2"
+      shift 2
+      ;;
+    --model=*)
+      MODEL="${1#*=}"
       shift
       ;;
     *)
@@ -72,7 +81,7 @@ if [ ! -f "$PROGRESS_FILE" ]; then
   echo "---" >> "$PROGRESS_FILE"
 fi
 
-echo "Starting Ralph - Tool: $TOOL - Max iterations: $MAX_ITERATIONS"
+echo "Starting Ralph - Tool: $TOOL - Model: $MODEL - Max iterations: $MAX_ITERATIONS"
 
 for i in $(seq 1 $MAX_ITERATIONS); do
   echo ""
@@ -89,7 +98,7 @@ for i in $(seq 1 $MAX_ITERATIONS); do
     export PATH="$HOME/.kimi-code/bin:$PATH"
     OUTPUT=$(kimi -p "$(cat "$SCRIPT_DIR/AGENT.md")" 2>&1 | tee /dev/stderr) || true
   elif [[ "$TOOL" == "opencode" ]]; then
-    OUTPUT=$(opencode run --auto "$(cat "$SCRIPT_DIR/AGENT.md")" 2>&1 | tee /dev/stderr) || true
+    OUTPUT=$(opencode run --auto -m "$MODEL" "$(cat "$SCRIPT_DIR/AGENT.md")" 2>&1 | tee /dev/stderr) || true
   else
     OUTPUT=$(claude --dangerously-skip-permissions --print < "$SCRIPT_DIR/AGENT.md" 2>&1 | tee /dev/stderr) || true
   fi

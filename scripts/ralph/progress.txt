@@ -2,7 +2,837 @@
 
 ## Codebase Patterns
 
-- (preencher aqui padrões reutilizáveis descobertos durante as iterações)
+- Singleton em todo pacote de infra/subdomínio: função pura `Connect(...)` +
+  `sync.Once` com `InitX/Get/Close`; testes usam a função pura direto, nunca o
+  singleton. Para testar ciclo do singleton, um único teste por pacote.
+- Fail-closed do orgctx via `gorm.DB.AddError`: contexto sem escopo devolve
+  query que FALHA na execução (`ErrEscopoAusente`) — testado com gorm DryRun
+  sem banco real.
+- Testes que dependem de docker/testcontainers: helper `dockerDisponivel(t)`
+  + `t.Skip` — verdes sem ambiente, reais com ele (postgres:16 local).
+- Config/jwt singletons precisam de `ResetarParaTeste()` exportado quando
+  outros pacotes exercem o boot nos próprios testes (`sync.Once` é por
+  processo).
+- CLI cobra imprime via `cmd.OutOrStdout()` (nunca os.Stdout) para saída
+  testável; comandos montados por funções construtoras sem estado global.
+- swag/arch-go instaláveis no Go 1.25: arch-go mudou para
+  `github.com/arch-go/arch-go`; usar `swag@latest` (v1.16.6 fixa x/tools
+  antigo que não compila).
+- Regra arch-go do `cmd` precisa listar `workspace-api/cmd` além de
+  `internal` — bootstrap/server/cli se importam entre si por design.
+- Dublês de contrato que o service consome com ctx escopado precisam EMULAR
+  o fail-closed do orgctx (org divergente = não encontra) — senão o teste
+  valida um comportamento que não existe.
+- `rest_err.RegistrarCatalogo` PANICA com code duplicado: nunca mapeie duas
+  sentinelas para o mesmo `Codigo` no errors.go — cada uma tem code próprio
+  (mesmo status/mensagem podem repetir).
+- Seed pela CLI exige `migrate up` antes (o CLI não migra sozinho);
+  `migrate down N` recebe N POSICIONAL, sem flag.
+- Todo caminho interno do service que grava/consulta por repositório
+  escopado precisa do MESMO ctx escopado — repassar o ctx "cru" para uma
+  chamada interna quebra fail-closed silenciosamente (virou 500 no smoke).
+- Cobertura Swagger executável: bootar os singletons UMA vez por pacote de
+  teste sobre postgres efêmero, montar o engine real e comparar
+  engine.Routes() × docs/swagger.json nos dois sentidos (normalizar `:p` →
+  `{p}`; excluir /api/status, /doc, /doc/*qualquer).
+- Conferência do grafo de dependências como gate: `go list -json ./...` +
+  classificação por camada no teste raiz reprova aresta proibida do doc 01
+  sem depender de ferramenta GUI.
+- `go test -race` precisa de CGO+gcc no ambiente (apt-get install gcc;
+  CGO_ENABLED=1) — invariantes disputadas rodam localmente desde a F6.
+- `middleware.Atende(efetivas, exigida)` exige a PEDIDA com 3 segmentos:
+  a forma global `*:*` como exigida sempre devolve false — validação de
+  posse que usa o matcher precisa de caso especial de pertencimento exato
+  para `*:*` (o mesmo tratamento do curinga global dentro do matcher).
+- `gh api -f` é raw-field e NÃO lê @file (grava o caminho literal); usar
+  `-F body=@arquivo` para corpos longos de PR/issue.
+- SET de GUC de tempo no Postgres: mandar INTEIRO EM MS (`SET lock_timeout
+  = '5000'`) — `time.Duration.String()` do Go ("10m0s") é sintaxe inválida
+  (SQLSTATE 22023); para assert, ler `pg_settings.setting` (sempre ms),
+  nunca o SHOW, que normaliza a unidade de exibição.
+- Sessão dedicada de migration: `FonteConexao.SessaoDedicada()` devolve pool
+  exclusivo de 1 conexão (bootstrap abre via `postgres.AbrirPoolSQL`, fora
+  do pool gorm); driver pgx/v5 do golang-migrate v4.19 já roda tudo em
+  `*sql.Conn` própria e `Migrate.Close()` fecha conn+db — quem cria a
+  instância dá defer de encerrar, senão vaza uma conexão por operação.
 
 Started: 2026-08-22
+---
+
+## 2026-08-22 - F0
+- Implementada fundação completa: pkg/{config,rest_err,pagination,orgctx,validator};
+  infra/{database/postgres,database/migrations,jwt}; cmd/{cli,bootstrap,server+routes};
+  main.go, configs_example.json, docs/ Swagger versionado, arch-go.yml +
+  arquitetura_test.go.
+- Migrations: runner golang-migrate com fonte própria (filtra `-- manual`),
+  advisory lock do driver pgx, CLI up|down|goto|force|status|validate|create;
+  teste up→down→up REAL em postgres:16 efêmero (testcontainers) passando.
+- Smoke end-to-end: serve sobe, aplica migrations, /api/status ok, Swagger 200,
+  404 padronizado, SIGTERM drena requisições.
+- Checks: build/vet/test verdes; arch-go compliance 100 coverage 100.
+- Docs lidos: agents/{README,01,02,04,05}, AGENTS.md de cmd/*, internal/*,
+  internal/pkg/*, internal/infra/*, db/migrations.
+- **Learnings for future iterations:**
+  - http.Server.Shutdown faz Serve() retornar ErrServerClosed IMEDIATAMENTE
+    (drain continua em Shutdown) — teste de drain não pode esperar Servir
+    junto com Parar no mesmo select.
+  - `go test -race` exige CGO+gcc — indisponível aqui; rodar na CI (F2+ tem
+    invariante disputada de slug/e-mail).
+  - `SET lock_timeout` via pool sql.Exec não garante a conexão do migrador;
+    statement_timeout vem do config do driver pgx (por statement).
+  - Issue #1 fecha no merge do PR (Closes #1).
+---
+
+## 2026-08-22 - F1
+- Autenticação/autorização granular completa: jwt (emissão+validação access/refresh,
+  claims sub/org/wks/name/email/typ, jti único no refresh, interface RevogadorDeRefresh);
+  internal/middleware com contratos.go (ResolvedorWorkspaces, ProvedorDominiosCustom,
+  ResolvedorApiKeys, ResolvedorPermissoes) e cadeia SetContextAuthorization →
+  ResolveWorkspace → RequirePermission fail-closed; migrations 0001 (papel +
+  papel_permissao globais sem escopo) e 0002 (atribuicao); seed idempotente dos 5 papéis;
+  adaptadores provisórios em cmd/bootstrap/middleware.go consultando as tabelas direto;
+  CORS com provedor de domínios custom injetado.
+- Files changed: db/migrations/000{1,2}_*.{up,down}.sql; internal/infra/jwt/{token,revogacao}.go;
+  internal/pkg/orgctx (getter Permissoes); internal/middleware/* (5 arquivos + 4 de teste);
+  cmd/bootstrap/{middleware,seed,middleware_test}.go, bootstrap.go, routes.go; go.mod/go.sum.
+- Docs read: agents/{03,04,05,01,02}, AGENTS.md de middleware, infra/jwt, cmd/bootstrap,
+  pkg/orgctx, infra/database (+migrations), db/migrations.
+- **Learnings for future iterations:**
+  - `*:*` tem 2 segmentos — matcher de curingas precisa de caso especial além do
+    casamento por segmento de 3 partes.
+  - sync.Once envenena o singleton após New falho: cada tentativa de boot em teste
+    precisa ResetarParaTeste antes.
+  - Adaptadores do bootstrap seguem "função pura + método fino que resolve GetDB()":
+    testes de integração usam as funções puras com gorm do efêmero, nunca o singleton.
+  - `gh pr edit` falha neste ambiente (deprecação GraphQL Projects classic) — usar
+    `gh api repos/{owner}/{repo}/pulls/N -X PATCH -f body=...`.
+  - Scan de uuid::text no Raw do gorm: pgx devolve uuid como string; scan direto em
+    uuid.UUID quebra ("converting driver.Value type string to a uint8").
+  - Tabela identidade_workspace_workspace não existe até F3: resolvedor provisório de
+    workspace está ligado mas só vira útil na F3 (500 honesto se chamado antes).
+---
+
+## 2026-08-22 - F2
+- Subdomínio organization completo: pacote model (Organization + ApiKey, VO
+  DominioCustom com ParseDominio validando base_domain/ascendente/descendente/
+  public suffix real via golang.org/x/net/publicsuffix, chaves wka_ com SHA-256,
+  listas jsonb próprias); subdomínio domain com os 8 arquivos + permissions.go +
+  contratos.go (SuspendedorWorkspaces); migrations 0003/0004 com índice único
+  TOTAL no dominio (anti-takeover); bootstrap liga singleton ([BOOTSTRAP-DI]),
+  adaptadores de domínios custom + X-Api-Key delegando ao subdomínio na chamada,
+  seed da organization raiz "Plataforma" (uuid determinístico); 11 rotas em
+  /api/domain/identidade/organizations rota a rota.
+- Files changed: db/migrations/000{3,4}_*; internal/identidade/model/organization/*;
+  internal/identidade/domain/organization/*; cmd/bootstrap/{organizacao,middleware,seed,bootstrap}.go;
+  cmd/server/routes/routes.go; docs/* (swag init); go.mod/go.sum (x/net direto).
+- Docs read: agents/{01,02,03,04,05,06}, AGENTS.md de identidade/{model,domain}/organization,
+  cmd/bootstrap, cmd/server/routes, middleware, pkg/{orgctx,rest_err,pagination,validator},
+  infra/database(+migrations,postgres), db/migrations.
+- **Learnings for future iterations:**
+  - Constante de catálogo `Dominio` colide com o VO do negócio no mesmo pacote:
+    tipo virou DominioCustom mantendo ParseDominio e campo .Dominio — padrão para
+    o workspace/user se o termo do negócio repetir.
+  - Projeções com Table() cru NÃO ganham filtro de soft delete do gorm — lembrar
+    `deleted_at IS NULL` explícito (o teste de integração flagrou).
+  - Tabela raiz não tem organization_uuid: projeção `uuid AS organization_uuid`.
+  - Cascata organization→workspace roda ANTES da persistência (fail-closed) e o
+    adaptador provisório devolve 0,nil com log [DEGRADADO] até a F3.
+  - Singleton do subdomínio é por processo: UM único teste por pacote pode bootar
+    New(db) — os demais usam funções puras/repo fake.
+  - pkill -f "<caminho>" mata o próprio shell do tool (o padrão casa a cmdline);
+    usar pkill -x <binário>.
+---
+
+## 2026-08-22 - F3 (finalização da iteração anterior)
+- A iteração anterior commitou `feat: [F3] - Subdomínio workspace` mas morreu
+  antes dos passos 9-12. Esta iteração verificou a implementação contra o
+  checklist da issue #4 e fechou o que faltava:
+  - Swagger estava STALE no commit da fase (rotas de workspace ausentes em
+    docs/) — regenerado com `swag init -g main.go -o docs`.
+  - prd.json F3 → passes: true; linha #4 no log de agents/06; PR #18 atualizado.
+- Verificação: build/vet/test verdes (testcontainers reais: up→down→up da
+  migration 0005, unicidade global do slug, slug removido não se libera,
+  isolamento por organization, cascata de inativação); arch-go compliance 100
+  coverage 100; rotas rota a rota; cache por interface (nil é normal);
+  suporte auditado `[SUPORTE]`; slugs fixos no service.
+- Docs read: agents/06, AGENTS.md de model/workspace, domain/workspace,
+  internal/, identidade/, db/migrations, cmd/bootstrap, cmd/.
+- **Learnings for future iterations:**
+  - SEMPRE rodar `swag init -g main.go -o docs` antes de commitar rota nova —
+    o grep "workspaces" no swagger.json antigo casava só em descrições alheias;
+    conferir por path completo (`grep '"/api/domain/identidade/workspaces"'`).
+  - Se o commit feat já existe mas o bookkeeping falta, revalidar TUDO (build/
+    test/arch-go/swagger) antes de só carimbar passes:true — o commit anterior
+    pode estar incompleto sem que o log diga.
+  - gcc segue ausente: `-race` continua na CI (invariantes disputadas F3/F4).
+---
+
+## 2026-08-22 - F4
+- Subdomínio user completo + aplicação auth: migration 0006 (user +
+  refresh_token); model/user (User com hash `json:"-"`, RefreshToken,
+  Atribuicao, Papel/PapelPermissao globais, VO Email, ValidarSenha 8–72
+  = teto do bcrypt); domain/user com os 8 arquivos + permissions.go +
+  contratos.go (ValidadorWorkspaces) — credencial bcrypt DENTRO do
+  subdomínio (`Credenciais`/`NovasCredenciaisBcrypt()`), login INDISTINGUÍVEL
+  (hash de mentira em sync.Once roda a comparação quando o user não existe),
+  revogação persistida por jti, inativar/remover usuário revoga sessões;
+  application/auth sem model/repository (contratos Usuarios/EmissorToken/
+  ResolvedorOrganization; host não resolvido → organization ALEATÓRIA para o
+  caminho ser idêntico ao de senha errada); bootstrap: resolvedorPermissoes
+  DELEGA ao service do user (provisório F1 removido), DefinirRevogador liga
+  a revogação do JWT, `[BOOTSTRAP-DI]` User+Auth; rotas /api/domain/identidade/users
+  (8, rota a rota) e /api/application/identidade/auth/{login,refresh,logout}
+  (sem cadeia completa — só resolução pelo Host dentro do service).
+- Files changed: db/migrations/0006_*; internal/identidade/model/user/*;
+  internal/identidade/domain/user/*; internal/identidade/application/auth/*;
+  cmd/bootstrap/{usuario.go,middleware.go,middleware_test.go,bootstrap.go};
+  cmd/server/routes/routes.go; docs/* (swag init).
+- Docs read: issue #5 (REST API), agents/{01,03,04,05,06}, AGENTS.md de
+  model/, model/user, domain/, domain/user, application/, application/auth,
+  identidade/, internal/, cmd/{,bootstrap,server{,/routes}}, middleware,
+  infra/{,jwt,database}, db/migrations, pkg/{orgctx,rest_err,pagination}.
+- Checks: build/vet/test verdes; arch-go compliance 100 coverage 100; swag
+  init regenerado (paths conferidos por grep); up→down→up real da 0006
+  (testcontainers E CLI smoke); smoke ponta a ponta com postgres efêmero:
+  boot 4 contêineres, login ok, 3 falhas de login com MESMO code/mensagem/
+  status, refresh/logout com revogação persistida (401 no reuso), cadeia
+  401/403/200, [SUPORTE] auditado em workspace sem atribuição, PATCH inativar,
+  atribuição/remoção de papel por workspace, 409 e-mail duplicado.
+- **Learnings for future iterations:**
+  - Dublê de `Usuarios` precisa emular escopo do orgctx — o fake global fez
+    login "sem organization" passar (teste pegou).
+  - Fake injetado em singleton por VALOR não propaga mutação feita depois
+    no teste (organizacoesFake virou ponteiro).
+  - Dois códigos iguais no mesmo errors.go panicam no init do rest_err.
+  - Service interno que chama repo escopado tem que RECEBER o ctx escopado
+    (abrirSessao recebendo ctx cru virou 500 "refresh fora do formato").
+  - Login resolve ORGANIZATION (não workspace): base_domain nu/api./painel.
+    NÃO resolvem org (console master é caso especial futuro) — custom domain
+    nu resolve para a organization dona (portal raiz do parceiro).
+  - Sem rotação de refresh (renovação mantém o antigo até expirar) e sem
+    rate-limit/lockout — ambos evolução futura documentada.
+---
+
+## 2026-08-22 - F5
+- Aplicação catalogo completa: GET /api/application/identidade/catalogo/
+  permissoes/minhas (árvore dominio→subdominio→ações filtrada pelo conjunto
+  efetivo do usuário, um par rota+método = uma ação, saída ordenada) e
+  GET /api/system/errors (mapa completo do registro global do rest_err,
+  rota pública de sistema). Bootstrap agrega os Catalogo() dos 3 subdomínios
+  na forma única do contratos.go ([BOOTSTRAP-DI] Contêiner
+  Identidade/Catalogo); middleware exporta Atende() — a filtragem usa o
+  MESMO matcher do RequirePermission; seed ganha identidade:catalogo:ler nos
+  4 papéis humanos (ver a própria árvore é pré-requisito de usar qualquer
+  outra); agents/03 atualizado no mesmo commit.
+- Files changed: internal/identidade/application/catalogo/* (7 arquivos);
+  internal/middleware/{autorizacao.go,AGENTS.md}; cmd/bootstrap/{catalogo.go,
+  bootstrap.go,seed.go,middleware_test.go}; cmd/server/routes/routes.go;
+  agents/{03,06}; docs/* (swag init); prd.json; progress.txt.
+- Docs read: issue #6, catalogo+application AGENTS.md, agents/{01,03,04,05},
+  AGENTS.md de middleware, rest_err, orgctx, routes, bootstrap, domain/*
+  (permissions.go dos 3 subdomínios), auth (referência de aplicação).
+- Checks: build/vet/test verdes; arch-go compliance 100 coverage 100; smoke
+  ponta a ponta com postgres efêmero: super_admin recebe árvore inteira,
+  usuario_workspace vê só as 2 ações :ler, /api/system/errors devolve os 4
+  grupos (auth 3 / organization 13 / user 17 / workspace 8), 401 sem token,
+  Swagger serve os dois paths novos.
+- **Learnings for future iterations:**
+  - Permissão de rota self-service precisa estar nos papéis humanos do seed,
+    senão o endpoint só serve super_admin (RequirePermission vazio NEGA —
+    não existe "rota autenticada sem permissão" nesta cadeia).
+  - /api/system/errors tem que ser montada NO ENGINE: registrar no grupo
+    /api/application mudaria o path do contrato (doc 04) — o controller
+    expõe RoutesSistema(engine) além de Routes(grupo).
+  - RegistrarCatalogo com mapa VAZIO criaria grupo vazio no mapa de erros:
+    pacote sem sentinelas próprias NÃO chama o registro (caso do catalogo).
+  - Dois erros diferentes apontando o MESMO código dentro de UM catálogo não
+    panicam (checagem de duplicado olha o registro ANTES de inserir) — o
+    dedupe do MapaErros é quem evita duplicata na resposta.
+  - Tipos homônimos PermissaoMeta/RotaMeta por subdomínio exigem conversão
+    explícita no agregador do bootstrap para a forma única da application.
+  - Edit tool em linha gigante de tabela markdown: oldString curto pode
+    engolir o cabeçalho da linha seguinte — conferir grep depois.
+---
+
+## 2026-08-22 - F6
+- Hardening do template fechado (última story do PRD):
+  - Concorrência: `cmd/bootstrap/concorrencia_test.go` com barreira de
+    disparo + `aquecerPool` (conexões abertas antes da largada); disputa do
+    slug (movida de workspace_test.go) e NOVA disputa de e-mail — ambas 12
+    goroutines, exatamente 1 vencedora, demais recebem a sentinela de
+    conflito; e-mail também provado livre entre organizations (índice parcial).
+  - Cobertura Swagger: `cmd/bootstrap/swagger_cobertura_test.go` boota os 5
+    singletons sobre o postgres efêmero, monta o engine REAL via routes.Montar
+    e compara rotas × docs/swagger.json nos DOIS sentidos (gin `:p` → `{p}`).
+  - Dependency Graph: módulo do Go Architect não compila no toolchain atual
+    (x/tools antigo/tokeninternal) e é GUI sem headless — a conferência virou
+    gate executável equivalente: `grafo_dependencias_test.go` na raiz roda
+    `go list -json ./...`, classifica por camada e reprova as arestas
+    proibidas do doc 01; imprime arestas por par de camadas no log.
+  - README.md reescrito: status real, como subir (configs_example → configs,
+    migrations automáticas no boot), CLI migrate/seed, como criar subdomínio
+    novo passo a passo, como o front consome os catálogos, deploy ops.
+  - AGENTS.md revisados: middleware (nota do resolvedor provisório F1→F4
+    atualizada para o estado atual), bootstrap (arquivos-frente reais).
+- Checks: build/vet/test verdes; **`go test -race ./...` VERDE localmente**
+  (gcc instalado via apt neste ambiente — CGO_ENABLED=1); arch-go 100/100;
+  cobertura Swagger verde nos dois sentidos.
+- Files changed: cmd/bootstrap/{concorrencia,swagger_cobertura}_test.go;
+  cmd/bootstrap/workspace_test.go (teste movido); grafo_dependencias_test.go;
+  README.md; internal/middleware/AGENTS.md; cmd/bootstrap/AGENTS.md;
+  agents/06; prd.json; progress.txt.
+- Docs read: issue #7, agents/01 (validação da arquitetura), agents/06,
+  AGENTS.md raiz, AGENTS.md de cmd/{,bootstrap}, cmd/server/routes,
+  internal/, internal/identidade{,/domain,/domain/workspace,/domain/user},
+  internal/middleware, db/migrations.
+- **Learnings for future iterations:**
+  - `-race` exige CGO+gcc: `apt-get install gcc` resolveu no ambiente; rodar
+    como `CGO_ENABLED=1 go test -race ./...` (o default aqui era CGO_ENABLED=0).
+  - Teste em pacote X não pode importar pacote que importa X (ciclo): o teste
+    de Swagger morou no bootstrap (que já importa routes) por isso.
+  - Singletons dos subdomínios podem ser bootados em teste UMA vez por
+    processo/pacote — o teste de cobertura Swagger é O único que faz isso em
+    cmd/bootstrap; os demais seguem funções puras.
+  - go install de ferramentas com x/tools velho quebra no Go 1.25
+    (tokeninternal: "invalid array length -delta * delta") — swag@latest ok,
+    arch-go (novo path github.com/arch-go/arch-go) ok, go-architect morto.
+  - engine.Routes() devolve wildcards gin (`:uuid`) — normalizar para `{uuid}`
+    antes de comparar com OpenAPI; excluir /api/status, /doc e /doc/*qualquer.
+---
+
+## 2026-08-23 - R1
+- Escalação de privilégio em CriarApiKey fechada: `exigirPermissoesPossuidas`
+  no service do organization casa CADA permissão pedida contra as efetivas do
+  ctx com o matcher do middleware (`Atende`) ANTES da persistência; a forma
+  global `*:*` (2 segmentos, fora da gramática do Atende) é conferida por
+  pertencimento exato — só quem possui `*:*` concede `*:*`. Recusa vira a
+  sentinela nova `ErrPermissaoNaoPossuida` (code
+  `identidade.organization.permissao_nao_possuida`, status 403) com log de
+  segurança (`organization.apikey_permissao_recusada`); formato inválido segue
+  400 no construtor do model (ordem: invariante → autorização → persistência).
+- Files changed: internal/identidade/domain/organization/{service,errors,
+  controller}.go; service_test.go (suíte TestCriarApiKeyNaoEscalaPrivilegio:
+  admin_organization tentando *:*, ação fora do papel, ctx vazio fail-closed,
+  curinga de subdomínio atendido, super_admin concede *:* — e nada recusado
+  chega ao repo); cmd/bootstrap/organizacao_test.go (recusa provada sobre o
+  esquema real + ctxs injetando efetivas); AGENTS.md do subdomínio; docs/*
+  (swag init); prd.json; agents/06; progress.txt.
+- Docs read: issue #19 (via gh api), agents/README.md, agents/03, agents/05,
+  AGENTS.md de internal/middleware, domain/organization, model/organization,
+  identidade/{,domain,model}, pkg/orgctx, cmd/{,bootstrap}.
+- Checks: build/vet/test verdes (integração testcontainers incluída); `-race`
+  verde no pacote tocado; Swagger regenerado e cobertura conferida.
+- **Learnings for future iterations:**
+  - Direção do matcher é sã para conceder: pedida com curinga exige o `*` NO
+    EFETIVO daquele segmento (atendeSegmento(efetivo, exigido)) — então
+    `identidade:user:*` NÃO atende `identidade:*:*`; o único buraco era a
+    forma global de 2 segmentos como exigida.
+  - Testes antigos que chamavam CriarApiKey sem permissões no ctx quebram
+    com o fail-closed novo: ctxs de teste precisam `orgctx.WithPermissoes`
+    (mesma regra dos dublês de contrato escopados).
+  - Validação de posse entra DEPOIS do construtor do model — mantém os codes
+    400 de entrada inválida estáveis e separa invariante de autorização.
+---
+
+## 2026-08-23 - R2
+- Sessão de migration em conexão DEDICADA (issue #20): `FonteConexao` ganhou
+  `SessaoDedicada()` — pool exclusivo de 1 conexão aberto pelo bootstrap via
+  `postgres.AbrirPoolSQL` (database/sql puro, mesma DSN, fora do pool gorm).
+  `novaInstancia` monta o driver pgx/v5 sobre essa sessão e aplica os SETs de
+  `lock_timeout`/`statement_timeout` NESSA conexão (pool de 1 ⇒ mesma física
+  que o driver usa para advisory lock, schema_migrations e todo o DDL); os
+  valores vão em ms puros (`emMilissegundos`) — o formato Go "10m0s" é
+  inválido no Postgres e quebrou no primeiro run. Cada operação
+  (Subir/Descer/IrPara/Forcar) fecha a própria sessão com `defer encerrar`.
+  O pool de negócio nunca recebe SET nem DDL — contaminação eliminada.
+- Files changed: internal/infra/database/migrations/{migrations.go,AGENTS.md,
+  migrations_test.go}; internal/infra/database/postgres/postgres.go;
+  cmd/bootstrap/{bootstrap.go,middleware_test.go}; agents/06; prd.json;
+  progress.txt.
+- Docs read: issue #20, agents/02 (seção Migrations), AGENTS.md de db/migrations,
+  infra/database/migrations, infra/database{,/postgres}, infra/, internal/,
+  cmd/bootstrap; fonte do golang-migrate v4.19.0 (pgx/v5) no module cache.
+- Checks: build/vet/test verdes (22 pacotes, testcontainers reais);
+  `-race` verde nos pacotes tocados; arch-go compliance 100 + coverage 100;
+  up→down→up real revalidado. Testes novos:
+  TestTimeoutsFicamNaConexaoDedicada, TestPoolDeNegocioNaoContaminadoPelaMigracao
+  (duas conexões do pool seguradas juntas antes/depois do Subir — settings
+  idênticos), TestOperacoesFalhamSemSessaoDedicada (fail-closed sem sessão).
+- **Learnings for future iterations:**
+  - O driver pgx/v5 do golang-migrate v4.19 já roda TUDO em `*sql.Conn`
+    dedicada — o bug era só o nosso SET via `sqlDB.Exec` no pool: além de não
+    valer para o DDL, gravava lock_timeout=5s permanente na conexão devolvida.
+  - Interface nova = atualizar TODOS os implementadores (2 fakes de teste +
+    fonteBanco); grep por NomeDatabase encontra todos.
+  - `sql.Conn.QueryRowContext` + `pg_settings` para inspecionar estado de
+    sessão POR conexão física; segurar N conns simultâneas força o pool a
+    abrir N físicas (prova de contaminação cobre todas).
+  - `migrate.Migrate.Close()` fecha source E database drivers; fechar sql.DB
+    duas vezes é inofensivo, mas o dono da sessão deve encerrar UMA vez.
+---
+
+## 2026-08-23 - R3
+- Provisionamento inicial OPCIONAL fechado (issue #21): `workspace-api seed`
+  com `--super-admin-email` + `--super-admin-senha` (+ `--workspace-slug`,
+  padrão "principal") cria o PRIMEIRO super_admin e o workspace inicial na
+  organization raiz — idempotente, NUNCA automático no boot, com fallback de
+  envs `WORKSPACE_API_SEED_*` (senha fora da linha de comando em produção).
+  Zero SQL de negócio novo no cmd: workspace → usuário → atribuição passam
+  PELOS SERVICES dos subdomínios via construtores puros (NewRepository/
+  NewService), então slug reservado/em uso, política de senha, bcrypt e a
+  validação do tripé da atribuição continuam morando nos domínios. Entradas
+  validadas CEDO pelos VOs (falha de formato morre antes do banco). Slug já
+  tomado por OUTRA tenant recusa (nunca toma endereço alheio). Idempotência
+  lookup-first: ResolverPorSlug / BuscarPorEmail / Atribuicoes reconhecem o
+  que existe. Adaptador `validadorWorkspacesSeed` liga o contrato
+  ValidadorWorkspaces do user ao REPOSITÓRIO PURO do irmão (o singleton não
+  existe no caminho CLI) — mesma regra do adaptador de boot.
+- Files changed: cmd/bootstrap/{seed.go,provisionamento_test.go(novo)};
+  cmd/cli/{cli.go,cli_test.go,AGENTS.md}; README.md (seção "Provisionamento
+  inicial"); agents/02 (Seeds); agents/06; prd.json; progress.txt.
+- Docs read: issue #21 (gh issue view), agents/README, agents/{01,02,03,04,05},
+  AGENTS.md de cmd/{,cli,bootstrap}, internal/, identidade/{,model,model/user,
+  domain,domain/user,domain/workspace}, pkg/orgctx, db/migrations (+0005/0006).
+- Checks: build/vet/test verdes (22 pacotes, testcontainers reais);
+  CGO_ENABLED=1 go test -race verde em cmd/bootstrap + cmd/cli; arch-go
+  100/100 (sem pacote novo); integração real prova idempotência (2ª execução
+  sem linhas novas), bcrypt compara senha semeada, login via service autentica,
+  TemVinculo aceita o par, recusas abortam sem criar usuário.
+- **Learnings for future iterations:**
+  - Provisionamento/seeds que precisam de regra de negócio devem compor os
+    services por CONSTRUTOR PURO, nunca pelo singleton: sync.Once é do
+    processo serve e no caminho CLI ele nem sobe — além de testes anteriores
+    do mesmo pacote amarrarem o once a um container morto.
+  - O teste de cobertura Swagger só funciona depois dos outros porque nunca
+    CONSULTA o banco pelas rotas — registrar rotas não toca o DB; qualquer
+    teste novo de singleton deve manter essa separação em mente.
+  - Validação cedo pelos VOs (ParseSlug/ParseEmail/ValidarSenha) permite
+    testes unitários SEM docker (db nil) e dá mensagem de CLI acionável.
+  - `NovoProvisionamento(email, senha, slug)` centraliza "e-mail E senha
+    juntos ou nada" — o CLI recusa antes de ler config (testável sem banco).
+  - Flags cobra + env manual (`os.Getenv`) com helper `primeiroValor`: env só
+    entra quando a flag está vazia e o default do flag cobre o slug.
+---
+
+## 2026-08-23 - R4
+- Cascata de inativação da organization completa: inativar/remover revoga API keys (mesmo agregado, `RevogarApiKeysDaOrganization` escopada) e encerra sessões dos usuários via NOVO contrato `EncerradorSessoesUsuarios` (lado user: `RevogarSessoesDaOrganization` escopada, idempotente); cascata unificada `executarCascata` roda ANTES da persistência (fail-closed: pai nunca fica inativo com acesso vivo) e audita contagens; `BuscarApiKeyPorHash` ganhou JOIN na dona ativa (defesa em profundidade); aplicação auth ganhou contrato `VitalidadeOrganization` — refresh/logout falham fechado com dona inativa/removida e com a peça faltando; bootstrap liga os dois adaptadores novos resolvendo NA CHAMADA.
+- Files changed: internal/identidade/domain/organization/{contratos,repository,service,singleton,service_test}.go; internal/identidade/domain/user/{repository,service,service_test}.go; internal/identidade/application/auth/{contratos,service,singleton,service_test}.go; cmd/bootstrap/{bootstrap,usuario,organizacao_test,swagger_cobertura_test}.go; cmd/bootstrap/cascata_organization_test.go (NOVO).
+- Docs read: agents/03-identidade-tenancy.md, AGENTS.md de domain/organization, application/auth, cmd/bootstrap, cmd.
+- **Learnings for future iterations:**
+  - Ordem da cascata fail-closed: qualquer passo falhando impede a persistência do novo estado — o pior caso é acessos encerrados com pai ainda ativo (direção segura); Reativar NÃO desfaz (acessos voltam só por ação explícita).
+  - Logout bloqueado pela vitalidade NÃO revoga o jti — quem revoga é a cascata no momento da inativação. Dublê do auth que não emula a cascata produz "reativação ressuscita" falso-negativo no teste.
+  - Testes do pacote bootstrap que exercitam cascata/inativação precisam bootar o singleton do user ANTES (`MustUse` panicaria com encerrador resolvendo na chamada) — ponta a ponta e Swagger cobertura atualizados.
+  - Integração R4 num único fio funciona bem: login JWT real → inativação → asserts de banco (SessaoAtiva/RefreshTokenRevogado), recusa do auth e JOIN da apikey.
+---
+
+## 2026-08-23 - R5
+- Logout IDEMPOTENTE + ROTAÇÃO de refresh fechados (issue #23): jwt ganhou
+  `ValidarAssinatura` (assinatura/método/expiração/tipo SEM o revogador —
+  `Validar` refatorado sobre `parseValido` comum, denylist só nele); contrato
+  `EmissorToken` expõe `ValidarSemRevogacao`; logout saiu da porta do refresh
+  (`sessaoDoToken`) para `claimsParaEncerrar`: não exige jti ativo, conta
+  autenticável nem dona viva — destruição nunca concede acesso, então token
+  já revogado (logout repetido, rotação, cascata) confirma a revogação com
+  sucesso; linha AUSENTE segue recusando (anomalia honesta). Refresh com
+  ROTAÇÃO: `EncerrarSessao` do jti anterior ANTES de emitir o par novo —
+  reuso falha fechado; emissão falhando depois da revogação mata a sessão
+  (dono re-loga): direção fail-closed, nunca dois refresh válidos.
+- Files changed: internal/infra/jwt/{token.go,AGENTS.md};
+  internal/identidade/application/auth/{contratos,service,controller}.go +
+  AGENTS.md + service_test.go; internal/identidade/domain/user/AGENTS.md;
+  cmd/bootstrap/{usuario.go,cascata_organization_test.go,
+  auth_rotacao_test.go (NOVO)}; agents/03; docs/* (swag init); prd.json;
+  agents/06; progress.txt.
+- Docs read: issue #23 (gh issue view), agents/03-identidade-tenancy.md,
+  AGENTS.md de application/auth e infra/jwt (ambos atualizados no mesmo
+  commit), AGENTS.md de domain/user, cmd/bootstrap, cmd.
+- Checks: build/vet/test verdes (22 pacotes); `CGO_ENABLED=1 go test -race`
+  verde em auth+jwt+bootstrap COM os testes de integração reais
+  (testcontainers); Swagger regenerado (`swag init`) e diff conferido — só a
+  descrição nova do logout; arch-go segue no gate do `go test ./...`.
+- **Learnings for future iterations:**
+  - Operação de DESTRUIÇÃO (logout) não deve compartilhar a porta de quem
+    CONCEDE acesso (refresh): idempotência exige ler as claims sem a
+    denylist — daí a segunda porta `ValidarAssinatura`, com comentário
+    proibindo uso em caminho que concede acesso.
+  - Rotação na direção segura: revogar o jti antigo ANTES de emitir o novo;
+    o pior caso (falha na emissão) é o dono re-logar — melhor que dois
+    refresh válidos coexistindo.
+  - Dublê de EmissorToken: interface nova = método novo em TODOS os fakes
+    (`emissorFake` no auth, `emissorLocal` no bootstrap) — build pega.
+  - Teste ponta a ponta dos fluxos de sessão num arquivo próprio
+    (`auth_rotacao_test.go`) reaproveitando os dublês locais da cascata
+    (montarAuthReal/jtiDe/logarAna) manteve a cascata intacta.
+  - `RefreshTokenRevogado` do repo do user é o jeito direto de provar
+    revogação NO BANCO nos testes de integração (sem depender do validador).
+---
+
+## 2026-08-23 - R6
+- Segredo JWT mínimo 32 BYTES (issue #24): `comprimentoMinimoSegredo` 16 →
+  32 com erro claro ("mínimo 32 bytes — HS256 exige chave de 256 bits");
+  `configs_example.json` + agents/02 com exemplo novo de 45 bytes (ainda
+  placeholder); guarda do "valor de exemplo em produção" no config.go
+  atualizada para o MESMO literal novo; README documenta o mínimo; testes
+  ajustados (segredos de teste < 32 substituídos) e NOVO teste de fronteira:
+  31 bytes recusa, exatamente 32 passa.
+- Files changed: internal/infra/jwt/{jwt.go,jwt_test.go,AGENTS.md};
+  internal/pkg/config/{config.go,config_test.go};
+  internal/middleware/doubles_test.go;
+  internal/infra/database/postgres/helpers_test.go;
+  configs_example.json (+ configs.json local, gitignored); agents/02;
+  README.md; prd.json; agents/06; progress.txt.
+- Docs read: issue #24 (gh issue view), agents/02-stack-e-infra.md,
+  AGENTS.md de internal/infra/jwt, internal/pkg/config.
+- Checks: build/vet/test verdes (22 pacotes, testcontainers incluída);
+  `CGO_ENABLED=1 go test -race` verde em jwt+config+middleware. Sem rota
+  nova → Swagger intacto; arch-go segue no gate do `go test ./...`.
+- **Learnings for future iterations:**
+  - A guarda `segredoExemplo` em config.go é ACOPLADA ao literal do
+    configs_example.json: mudar o exemplo sem atualizar a guarda desativa a
+    proteção de produção EM SILÊNCIO — grep pelo valor antigo antes de
+    trocar placeholders versionados.
+  - Segredos de teste espalhados por vários pacotes (jwt, middleware,
+    postgres helpers, config): grep global por `jwt.Connect(` e
+    `"jwt_secret"` acha todos os fixtures que precisam crescer junto.
+  - configs.json é LOCAL/gitignored mas existe na máquina: atualizá-lo
+    junto evita boot morto local após apertar exigência de segredo.
+---
+
+## 2026-08-23 - R7
+- Varredura menor completa (issue #25) — os 8 itens corrigidos:
+  1) `errors.Is` nos adaptadores do bootstrap (usuario.go, 2 pontos);
+  2) race em middleware.Use/ResetarParaTeste: mutex RWMutex cobrindo
+     Use/MustUse/New/Reset — e o once.Do INTEIRO dentro do lock (o -race
+     pegou a primeira tentativa: proteger instance sem proteger `once`
+     ainda é corrida, pois o reset escreve no Once) + teste de disputa novo
+     (24 goroutines × Use/New-falho/Resetar);
+  3) trusted_proxy da config aplicado ao gin: `Opcoes.TrustedProxies` +
+     SetTrustedProxies no Montar (agora devolve erro → boot fatal com config
+     malformada; lista vazia = NENHUM proxy confiável);
+  4) código morto ServirAteSinal removido (+ imports órfãos);
+  5) PII: pacote novo `internal/pkg/pii` com MascaraEmail (inicial do local
+     + domínio; lixo vira "***") aplicado ao login-falho do auth (input não
+     validado!) e criar/remover do user;
+  6) regex slugdns deduplicada: fonte ÚNICA no pkg/validator (folha,
+     alcançável por todos), model/workspace.ParseSlug delega em SlugValido;
+  7) rest_err.DoCatalogo determinístico: candidatos ordenados por
+     (grupo, código); teste prova estabilidade em 50 execuções com empate
+     em 3 catálogos;
+  8) doc ResolvedorWorkspaces alinhada ao comportamento real (inexistente =
+     ErrNaoEncontrado; inativo volta Ativo=false e a CADEIA responde 404).
+- Files changed: cmd/bootstrap/{usuario.go,swagger_cobertura_test.go};
+  internal/middleware/{cadeia.go,cadeia_concorrencia_test.go(NOVO),
+  contratos.go,AGENTS.md?}; internal/pkg/validator/{validator.go,AGENTS.md};
+  internal/identidade/model/workspace/model.go; internal/pkg/rest_err/
+  {rest_err.go,rest_err_test.go}; internal/pkg/pii/(NOVO); cmd/server/
+  http_server.go; cmd/server/routes/{routes.go,routes_test.go};
+  cmd/bootstrap/bootstrap.go; prd.json; agents/06; progress.txt.
+- Docs read: issue #25, agents/04-convencoes-api.md, agents/05-padroes-
+  codigo.md, AGENTS.md de internal/middleware, cmd/bootstrap, cmd/server{,
+  /routes}, pkg/{validator,rest_err}.
+- Checks: build/vet/test verdes (23 pacotes — pii novo); CGO_ENABLED=1
+  go test -race verde em middleware/rest_err/pii/server/routes/
+  model-workspace/bootstrap; arch-go segue no gate do go test ./....
+- **Learnings for future iterations:**
+  - sync.Once + ResetarParaTeste = armadilha dupla: o mutex tem que cobrir o
+    Do INTEIRO (estado interno do Once é variável como outra qualquer sob
+    disputa com quem recria o Once).
+  - Mudança de assinatura de função de montagem (Montar → (engine, error))
+    ripple para TODO teste que chama direto — grep antes de decidir a forma.
+  - RegistrarCatalogo panicando em código duplicado limita testes de empate:
+    cada catálogo do cenário precisa de codes próprios.
+  - pkg é a única casa compartilhada para regra de FORMATO usada por binding
+    E VO (leaf rule decide a direção do dedup, não gosto).
+---
+
+## 2026-08-23 - E1
+- Evolução Redis (issue #8) completa: pacote NOVO `internal/infra/redis`
+  degradável por desenho (`Connect` puro NUNCA erra: cliente vivo ou NIL +
+  log `[DEGRADADO]`; singleton com mutex cobrindo o once.Do inteiro);
+  `chaves.go` com prefixos fixos (`perm:`, `workspace:slug:`, `lock:c|b:{sha256(e-mail|IP)}`,
+  `idempot:` reservado, `jwt:deny:`) e builders que normalizam+hasheiam o par
+  do lockout (PII não repousa crua); Denylist que implementa ESTRUTURALMENTE
+  `jwt.RevogadorDeRefresh` SEM importar jwt; LimitadorLogin
+  contador+janela+marcador. Bootstrap compõe tudo em `cache_redis.go`:
+  revogador composto denylist→fonte persistida (SÓ positivo cacheado ⇒
+  logout/rotação valem na hora), cacheResolucaoRedis (contrato CacheResolucao
+  da F3, invalidação ativa nas escritas + cascata seletiva por SCAN),
+  decorador de permissões com cache perm:{org}:{user}:{wks} e invalidação via
+  NOVO contrato ObservadorAtribuicoes do user (OpcaoServico variadic —
+  atribuição=par exato, remoção=grosseira uuid.Nil), limitadorLoginAuth.
+  Auth ganhou LimitadorLogin opcional + ErrLoginBloqueado (429 padronizado,
+  code identidade.auth.login_bloqueado) checado ANTES da autenticação; falha
+  do limitador nunca recusa login. Config: databases.redis + cache (TTLs e
+  login_lockout) com defaults; docker-compose.yml de dev; configs_example +
+  README; agents/{02,03} e 6 AGENTS.md atualizados.
+- Files changed: internal/infra/redis/* (NOVO, 5+AGENTS.md);
+  internal/pkg/config/config.go; internal/identidade/domain/user/{contratos,
+  service,singleton}.go; internal/identidade/application/auth/{contratos,
+  errors,service,controller}.go + service_test.go;
+  cmd/bootstrap/cache_redis.go(NOVO)+test(NOVO)+{bootstrap,middleware}.go;
+  docker-compose.yml(NOVO); configs_example.json; README.md;
+  agents/{02,03,06}; AGENTS.md de infra/jwt/auth/workspace/user/bootstrap/
+  redis; docs/* (swag init); prd.json; progress.txt.
+- Docs read: issue #8 (gh api — gh issue view quebra no GraphQL Projects),
+  agents/README, agents/02, agents/03, AGENTS.md de internal/infra,
+  internal/infra/jwt, application/auth (+application), cmd/bootstrap (+cmd),
+  domain/workspace (+domain/user, identidade), pkg/config (+pkg), rest_err,
+  middleware; agents/05 (template singleton).
+- Checks: build/vet/test verdes (25 pacotes, integração postgres+redis
+  efêmeros reais); CGO_ENABLED=1 go test -race verde em redis/config/auth/
+  user/bootstrap; arch-go segue compliance/coverage 100 pelo gate do go test;
+  Swagger regenerado (só a anotação 429 do login mudou).
+- **Learnings for future iterations:**
+  - Tags mapstructure têm que casar com as CHAVES DO JSON EXEMPLO exatas
+    (`bloqueio_seg`, não BloqueioSec): mismatch não erra — cai no default
+    silencioso e só um teste de comportamento (TTL do marcador vivendo 900s)
+    teria pegado.
+  - Conformidade ESTRUTURAL resolve infra→infra sem import: a interface é do
+    consumidor (jwt.RevogadorDeRefresh), a implementação mora no outro pacote
+    e a ligação é no bootstrap — zero acoplamento entre os dois infa.
+  - Cache de revogação SEM invalidação: só positivo é cacheado (revogação é
+    permanente); negativos sempre alcançam a fonte — elimina a classe inteira
+    de bugs "cache liberou token revogado".
+  - Variadic OpcaoServico no NewService/New adiciona peça opcional ao
+    subdomínio sem ripple de assinatura em seed/testes chamadores.
+  - O worktree foi resetado por um processo externo NO MEIO da iteração
+    (commits de planejamento E3/E4 entraram de outra sessão): trabalho não
+    commitado sobreviveu porque havia cópia em /tmp/opencode — commitar cedo
+    e manter backup fora do worktree é parte do fluxo aqui.
+  - testcontainers-go/modules/redis precisa seguir PINADO na mesma versão do
+    núcleo testcontainers (v0.39): deixar o tidy resolver deu v0.44 e a API
+    de MappedPort mudou (build quebrou).
+---
+
+## 2026-08-23 - E2
+- Evolução ClickHouse (issue #9) completa: `internal/infra/clickhouse` degradável
+  por desenho (Connect puro NUNCA erra → conexão nil + log [DEGRADADO]; singleton
+  com mutex cobrindo o once.Do inteiro) com writer assíncrono EM LOTE — filas
+  limitadas por trilha, flush por tamanho OU janela (`logs.lote_*`), fila cheia
+  DESCARTA E CONTA, falha de gravação perde o lote COM contagem e log, `Fechar()`
+  drena filas + lotes parciais no shutdown. Pacotes-folha NOVOS
+  `internal/pkg/log/{audit_log,access_log}` definem `Evento` + interface
+  `Destino` + `SlogPadrao` (stdout determinístico) — a entrega é ligada no
+  bootstrap: adaptadores finos em `logs.go` resolvem a sobrecarga impossível dos
+  dois `Registrar` (Go não sobrecarrega métodos). Middleware global de access log
+  PRIMEIRO da cadeia substituindo o slog síncrono (ray_trace do ctx caindo ao
+  header X-Request-Id); trilha de auditoria das escritas migrada nos 4 services
+  (organization/workspace ganharam OpcaoServico variadic; user reusou o padrão da
+  E1; auth ganhou Deps.Trilha) SEM perder o payload montado à mão. DDL versionado
+  idempotente em `db/logs/` (aplicação manual documentada); seções novas no
+  configs_example.json + docker-compose de dev; README + agents/02 atualizados.
+- Files changed: internal/pkg/log/{audit_log,access_log}/*(NOVO);
+  internal/infra/clickhouse/*(NOVO); db/logs/*(NOVO); internal/pkg/config/config.go;
+  cmd/server/routes/{routes,routes_test}.go; cmd/bootstrap/{logs(NOVO),
+  bootstrap.go,trilhas_log_test.go(NOVO)}; internal/identidade/domain/
+  {organization/{service,singleton},workspace/{service,singleton},
+  user/{contratos,service}}.go; application/auth/service.go;
+  docker-compose.yml; configs_example.json; README.md; agents/02;
+  AGENTS.md de infra/clickhouse/pkg-log/routes/bootstrap; prd.json;
+  agents/06; progress.txt.
+- Docs read: issue #9 (gh api), agents/README, agents/01, agents/02,
+  AGENTS.md de internal/infra, infra/redis (+testes como referência),
+  cmd/bootstrap, cmd/server{,/routes}, pkg/config, identidade/domain(+AGENTS.md
+  dos 3 subdomínios), application/auth.
+- Checks: build/vet/test verdes (27 pacotes, integração postgres+redis+
+  clickhouse reais); CGO_ENABLED=1 go test -race verde em clickhouse, pkg/log,
+  routes, domínios tocados, auth e bootstrap; arch-go segue compliance/coverage
+  100 pelo gate do go test; smoke ponta a ponta REAL com postgres+clickhouse
+  efêmeros: boot ligado ao CH, login falho/bom e criar organization via HTTP,
+  as DUAS trilhas consultáveis em workspace_logs após SIGTERM (detalhes JSON
+  ordenado, e-mail mascarado preservado, ray_trace correlacionando).
+- **Learnings for future iterations:**
+  - Go NÃO sobrecarrega métodos: quando dois contratos declaram o MESMO nome
+    de método com tipos diferentes (os dois Destino.Registrar), um pacote só
+    pode implementar um deles — adaptador fino por contrato morando no único
+    lugar que conhece os dois lados (bootstrap/logs.go).
+  - Worker que descarrega só por tamanho/janela não entra na gravação antes do
+    lote completar: teste de "fila cheia" precisa LoteTamanho=1 + sinal de
+    "pegouLote" para sincronizar sem esperar o ticker (60s de espera silenciosa
+    na primeira tentativa).
+  - Protocolo nativo do ClickHouse recusa multi-statement E comentário no meio:
+    aplicar DDL via driver = strip de linhas de comentário ANTES do split por
+    ';' (comentários com ';' quebram o split ingênuo).
+  - Ping do Connect valida EXISTÊNCIA do database do Auth — aplicar DDL que cria
+    o database exige uma conexão bootstrap apontando ao database default antes.
+  - Módulo testcontainers clickhouse v0.39 sobe user=default password=default;
+    manter TODOS os módulos pinados na mesma versão do núcleo (lição E1 reconfirmada).
+  - go get de UMA dependência pode arrastar upgrade transversal (testcontainers
+    0.39→0.43): conferir go.mod depois de cada get e repinar.
+---
+
+## 2026-08-23 - E3
+- Catálogo de eventos de auditoria completo (issue #26): `events.go` nos 4
+  emissores (organization/workspace/user + aplicação auth) com EventoMeta
+  nativo (ação estável + descrição PT-BR + Campos do payload) seguindo o
+  mesmo padrão dos errors.go/permissions.go — catálogo cobre TODO o
+  vocabulário auditado do subdomínio, incluindo os eventos slog com chave
+  "acao" (cascata_organization_inativada ×3 e [SUPORTE] suporte_concedido);
+  validarAcaoCatalogada PANICA em ação fora do events.go, chamada na 1ª
+  linha de cada auditar() (reprova em teste/boot); aplicação catalogo ganhou
+  ProvedorEventos + GET /api/system/eventos (rota pública no RoutesSistema,
+  agrupamento/ordenação determinísticos); bootstrap agrega os 4
+  CatalogoEventos() convertendo para a forma única (Dominio/Subdominio
+  preenchidos na conversão, copiarCampos isola fatias);
+  cmd/bootstrap/eventos_cobertura_test.go varre o FONTE por AST nos dois
+  sentidos ((a) ação emitida sem entrada / (c) entrada sem emissão /
+  (b) pacote emissor sem events.go), mutações provaram as 3 direções;
+  Swagger regenerado; agents/04 com a seção CONTRATO — mapa de eventos.
+- Files changed: internal/identidade/domain/{organization,workspace,user}/
+  {events.go,events_test.go}(NOVOS)+service.go(1 linha cada);
+  internal/identidade/application/auth/{events.go,events_test.go}(NOVOS)+
+  service.go; application/catalogo/* (contratos,dto_response,service,
+  singleton,controller,+testes); cmd/bootstrap/{catalogo,bootstrap}.go +
+  swagger_cobertura_test.go + eventos_cobertura_test.go(NOVO); docs/*
+  (swag init); agents/04, agents/06, AGENTS.md de catalogo/bootstrap/
+  domain; prd.json; progress.txt.
+- Docs read: issue #26 (gh api), agents/04-convencoes-api.md,
+  agents/05-padroes-codigo.md, AGENTS.md de application/catalogo,
+  cmd/bootstrap (+cmd), identidade/domain, application, infra/jwt (erros),
+  pkg/log/audit_log, domain/organization (service/errors/permissions).
+- Checks: build/vet/test verdes (28 pacotes, integração real incluída);
+  CGO_ENABLED=1 go test -race verde em catalogo/auth/domínios/bootstrap;
+  cobertura Swagger verde com a rota nova; arch-go segue 100/100 pelo gate
+  do go test (nenhum pacote novo).
+- **Learnings for future iterations:**
+  - Cobertura de eventos por AST (go/parser) é barata e forte: varrer
+    chamadas `auditar(` (literal no arg índice 1) + pares `"acao", "x"`
+    pega TODO o vocabulário sem banco nem docker; testar o teste com
+    mutações (remover catálogo/adicionar fantasma/adicionar emissor) antes
+    de confiar nele.
+  - O catálogo de eventos é do SUBDOMÍNIO inteiro: logs slog que carregam
+    chave "acao" fazem parte do vocabulário auditado — se não entrarem no
+    events.go, o teste (b)/(a) reprova; recusas SEM chave "acao"
+    (apikey_permissao_recusada) ficam fora por decisão documentada.
+  - panic(fmt.Sprintf(...)) sem passar o valor interpolado compila e só
+    falha NO TESTE da mensagem — escrever o teste junto com o pânico pegou
+    o argumento faltante na hora.
+  - Tipos nativos homônimos por pacote (EventoMeta ×4): conversão explícita
+    no agregador do bootstrap, como nos PermissaoMeta — genérico Go ajuda
+    no teste (converterMeta[T]), mas o agregador segue explícito.
+  - Novo campo em Dependencias = atualizar TODOS os bootadores (bootstrap.go
+    + swagger_cobertura_test.go) e todos os NewService de teste — grep pelo
+    construtor acha tudo.
+---
+
+## 2026-08-23 - E4
+- errobserve (issue #10) completa: `internal/pkg/errobserve` NOVO (folha) —
+  `Observe(ctx, err)` devolve o erro INTACTO; casamento por errors.Is com as
+  sentinelas declaradas via `DoCatalogo(errorCatalog, severidades)` (códigos e
+  mensagens vêm do PRÓPRIO catálogo do errors.go — fonte única; o singleton
+  declara só `severidadesErros`: warn=4xx esperado, error=escalação R1/
+  login_bloqueado/hash_ausente, critical=desconhecido); sentinela fora do
+  catálogo vira evento "desconhecido"+critical. Namespace RESERVADO sistema.*
+  exclusivo da plataforma (`ObservadorPlataforma` exige o prefixo; negócio que
+  tentar dominio sistema ou prefixo sistema. PANICA no boot/import);
+  vocabulário fixo `CatalogoSistema()` (boot/migrations.up/shutdown/
+  degradação) visível sem emissão. Sinks: SlogPadrao SEMPRE primeiro
+  (garantia estrutural do DefinirSinks), ClickHouse como TERCEIRA trilha
+  (fila/EnfileirarErros/drain/descarte contado + tabela log_erro no DDL
+  versionado db/logs/0003), Alerta(janela) agrega críticos por código com
+  [ALERTA] uma vez por janela (logs.alerta_janela_seg, default 60s);
+  despachante recupera pânico POR sink com contagem FalhasSink(). Decoradores
+  service_observado.go nos 3 subdomínios + auth montados DENTRO do NewService.
+  Bootstrap: logs.go define os sinks, observador de plataforma emite REALMENTE
+  na falha de migrations (sistema.migrations.up critical) e na degradação
+  redis/clickhouse (sistema.degradacao_dependencia warn); catalogo.go agrega
+  erros+sistema em /api/system/eventos; CLI NOVA `workspace-api errors` (mapa
+  global código/severidade/status/mensagem — sem conexão nem config).
+- Files changed: internal/pkg/errobserve/*(NOVO, 5+AGENTS.md+2 testes);
+  internal/identidade/domain/{organization,workspace,user}/{singleton,
+  service,service_observado(NOVO)}.go; application/auth/{singleton,service,
+  service_observado(NOVO)}.go; internal/infra/clickhouse/{escritor,gravador,
+  escritor_test,integracao_test}.go; db/logs/0003_log_erros.sql(NOVO)+
+  AGENTS.md; cmd/bootstrap/{logs,catalogo,bootstrap,eventos_cobertura_test,
+  swagger_cobertura_test,cache_redis*}.go + errobserve.go(NOVO)+
+  errobserve_cobertura_test.go(NOVO)+mapa_erros.go(NOVO); cmd/cli/{cli,
+  cli_test,AGENTS.md}; internal/pkg/config/config.go; configs_example.json;
+  agents/{02,04,06}; AGENTS.md raiz + domain/auth AGENTS.md; README.md;
+  prd.json; progress.txt. (gofmt alinhou structs de sessões anteriores:
+  catalogo/contratos.go etc.)
+- Docs read: issue #10 (gh api), agents/README, agents/{01,02,04,05},
+  AGENTS.md de internal/pkg, pkg/rest_err, pkg/log(+audit_log),
+  infra/clickhouse(+redis), cmd/{,bootstrap,cli}, identidade/domain(+AGENTS.md
+  dos subdomínios), application/catalogo, application/auth, db/logs.
+- Checks: build/vet/test verdes (29 pacotes, integração postgres+redis+
+  clickhouse reais); CGO_ENABLED=1 go test -race verde em errobserve/
+  clickhouse/config/rest_err/domínios/auth/bootstrap/cli; arch-go segue
+  compliance/coverage 100 pelo gate do go test (pkg→pkg permitido pela regra
+  existente); Swagger regenerado SEM diff (nenhuma rota nova); CLI smoke
+  `go run . errors` confere saída agrupada com severidades.
+- **Learnings for future iterations:**
+  - ResetarParaTeste apaga o registro populado por vars de pacote NA
+    IMPORTAÇÃO: teste que precisa do catálogo global deve trocar SÓ os sinks
+    (DefinirSinks() sem extras restaura o padrão slog-only) e nunca resetar —
+    o registro não se repopula sozinho.
+  - errors.Is NÃO casa erro reconstruído por concatenação de string —
+    wrapping sempre com fmt.Errorf("%w"); o próprio teste de plataforma caiu
+    nesse engano antes do commit.
+  - Contrato de sink inclui segurança para CONCORRÊNCIA: o -race pegou o
+    dublê do teste (append sem mutex) antes de qualquer problema no código
+    real — doubles compartilhados entre goroutines precisam de lock.
+  - Decorador com embedding de interface delega métodos não sobrescritos
+    (SlugsFixos) de graça — envolver o Service DENTRO do NewService dá
+    observação uniforme para singleton/seed/testes sem ripple nos chamadores.
+  - Severidade é declaração do singleton; código/mensagem vêm do errorCatalog:
+    sentinela nova SEM severidade PANICA já no import (fail-fast antes de
+    qualquer boot/teste).
+  - Go não sobrecarrega métodos (3ª vez): Sink.Registrar(errobserve.Evento) é
+    OUTRO contrato — mais um adaptador fino por trilha no bootstrap/logs.go.
+---
+
+## 2026-08-23 - E5
+- Endpoints de leitura de logs completos (issue #27): aplicação NOVA
+  `internal/identidade/application/logs` com GET /api/application/identidade/
+  logs/{auditoria,acesso,erros} rota a rota (RequirePermission identidade:
+  logs:ler) e RECORTE EM 3 NÍVEIS derivado SEMPRE do ctx — posse EXATA de *:*
+  = plataforma (filtros livres), middleware.Atende(identidade:logs:ler_
+  organization) = organization inteira, demais = par (org, ws) resolvido;
+  filtro apontando fora do recorte = ErrForaDoEscopo 404 (não confirma
+  existência alheia); ClickHouse ausente = ErrIndisponivel → 503 padronizado.
+- Consultor de leitura no infra/clickhouse (FiltroTrilha + Consultor,
+  UseConsultor() no singleton compartilhado); trilha de ACESSO ganhou
+  colunas de tenancy via db/logs/0004 (middleware preenche depois da cadeia);
+  INSERTs do gravador com lista explícita de colunas; seed/permissões/
+  agregador de catálogos/Swagger atualizados; integração real postgres+
+  clickhouse prova escrita→flush→leitura pelos 3 recortes, filtros, ordem,
+  paginação e degradação.
+- Files changed: db/logs/{0004_log_acesso_tenancy.sql,AGENTS.md};
+  internal/pkg/log/access_log/access_log.go; cmd/server/routes/routes.go;
+  internal/infra/clickhouse/{consultor.go(NOVO),gravador.go,clickhouse.go,
+  integracao_test.go,AGENTS.md}; internal/identidade/application/logs/*
+  (NOVO, 9 arquivos + AGENTS.md + testes); cmd/bootstrap/{logs,bootstrap,
+  catalogo,seed,swagger_cobertura_test}.go + logs_leitura_test.go(NOVO) +
+  middleware_test.go; cmd/server/routes/routes.go; docs/* (swag init);
+  agents/04; AGENTS.md raiz; internal/identidade/application/AGENTS.md;
+  README.md; prd.json; agents/06; progress.txt.
+- Docs read: issue #27 (gh api), agents/README, agents/{02,04,05},
+  AGENTS.md de internal/pkg/log, cmd/bootstrap, application/catalogo+auth
+  (referências), infra/clickhouse, pkg/{orgctx,pagination,rest_err,
+  errobserve}, middleware, db/logs, routes.
+- Checks: build/vet/test verdes (30 pacotes, integrações reais);
+  CGO_ENABLED=1 go test -race verde em clickhouse/pkg-log/routes/logs/
+  bootstrap; arch-go 100/100 pelo gate; Swagger regenerado e cobertura verde
+  nos dois sentidos.
+- **Learnings for future iterations:**
+  - A trilha de acesso NÃO TINHA colunas de escopo: recorte por tenant era
+    impossível sem DDL novo — "ler logs" esconde uma migração de schema mesmo
+    em banco de telemetria (db/logs é manual/idempotente: ALTER ADD COLUMN IF
+    NOT EXISTS).
+  - count() do ClickHouse volta UInt64 (scan em int64 reprova) e status é
+    Int32 — tipos de scan do driver são ESTRICTOS; converter na mão.
+  - Driver clickhouse-go v2.40.3 falhou de forma bizarra ("have no arg for
+    param ?") com a fatia de args construída INLINE na chamada variadic
+    (append direto no argumento) — construir a fatia numa variável nova
+    (argumentosConsulta) estabilizou; se bind falhar sem motivo aparente,
+    suspeitar do ciclo de vida da fatia, não do SQL.
+  - Recorte em camadas: permissão de ROTA (:ler = workspace próprio) e
+    permissão de AMPLIAÇÃO (:ler_organization) são strings separadas —
+    RequirePermission continua single-string e o service decide o teto pelo
+    conjunto efetivo; posse de *:* segue por pertencimento EXATO (2 segmentos
+    fora da gramática do Atende).
+  - Testes que bootam singletons de aplicações no bootstrap devem usar
+    CONSTRUTORES PUROS (NewService) quando precisam de dependência própria —
+    sync.Once é do processo e o swagger_cobertura_test já bootou com outro
+    dublê.
 ---
