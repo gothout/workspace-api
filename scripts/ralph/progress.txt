@@ -370,3 +370,46 @@ Started: 2026-08-22
   - `migrate.Migrate.Close()` fecha source E database drivers; fechar sql.DB
     duas vezes é inofensivo, mas o dono da sessão deve encerrar UMA vez.
 ---
+
+## 2026-08-23 - R3
+- Provisionamento inicial OPCIONAL fechado (issue #21): `workspace-api seed`
+  com `--super-admin-email` + `--super-admin-senha` (+ `--workspace-slug`,
+  padrão "principal") cria o PRIMEIRO super_admin e o workspace inicial na
+  organization raiz — idempotente, NUNCA automático no boot, com fallback de
+  envs `WORKSPACE_API_SEED_*` (senha fora da linha de comando em produção).
+  Zero SQL de negócio novo no cmd: workspace → usuário → atribuição passam
+  PELOS SERVICES dos subdomínios via construtores puros (NewRepository/
+  NewService), então slug reservado/em uso, política de senha, bcrypt e a
+  validação do tripé da atribuição continuam morando nos domínios. Entradas
+  validadas CEDO pelos VOs (falha de formato morre antes do banco). Slug já
+  tomado por OUTRA tenant recusa (nunca toma endereço alheio). Idempotência
+  lookup-first: ResolverPorSlug / BuscarPorEmail / Atribuicoes reconhecem o
+  que existe. Adaptador `validadorWorkspacesSeed` liga o contrato
+  ValidadorWorkspaces do user ao REPOSITÓRIO PURO do irmão (o singleton não
+  existe no caminho CLI) — mesma regra do adaptador de boot.
+- Files changed: cmd/bootstrap/{seed.go,provisionamento_test.go(novo)};
+  cmd/cli/{cli.go,cli_test.go,AGENTS.md}; README.md (seção "Provisionamento
+  inicial"); agents/02 (Seeds); agents/06; prd.json; progress.txt.
+- Docs read: issue #21 (gh issue view), agents/README, agents/{01,02,03,04,05},
+  AGENTS.md de cmd/{,cli,bootstrap}, internal/, identidade/{,model,model/user,
+  domain,domain/user,domain/workspace}, pkg/orgctx, db/migrations (+0005/0006).
+- Checks: build/vet/test verdes (22 pacotes, testcontainers reais);
+  CGO_ENABLED=1 go test -race verde em cmd/bootstrap + cmd/cli; arch-go
+  100/100 (sem pacote novo); integração real prova idempotência (2ª execução
+  sem linhas novas), bcrypt compara senha semeada, login via service autentica,
+  TemVinculo aceita o par, recusas abortam sem criar usuário.
+- **Learnings for future iterations:**
+  - Provisionamento/seeds que precisam de regra de negócio devem compor os
+    services por CONSTRUTOR PURO, nunca pelo singleton: sync.Once é do
+    processo serve e no caminho CLI ele nem sobe — além de testes anteriores
+    do mesmo pacote amarrarem o once a um container morto.
+  - O teste de cobertura Swagger só funciona depois dos outros porque nunca
+    CONSULTA o banco pelas rotas — registrar rotas não toca o DB; qualquer
+    teste novo de singleton deve manter essa separação em mente.
+  - Validação cedo pelos VOs (ParseSlug/ParseEmail/ValidarSenha) permite
+    testes unitários SEM docker (db nil) e dá mensagem de CLI acionável.
+  - `NovoProvisionamento(email, senha, slug)` centraliza "e-mail E senha
+    juntos ou nada" — o CLI recusa antes de ler config (testável sem banco).
+  - Flags cobra + env manual (`os.Getenv`) com helper `primeiroValor`: env só
+    entra quando a flag está vazia e o default do flag cobre o slug.
+---
