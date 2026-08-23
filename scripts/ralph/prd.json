@@ -230,7 +230,7 @@
         "build/vet/test verdes"
       ],
       "priority": 11,
-      "passes": false,
+      "passes": true,
       "issue": 22,
       "branch": "ox-alpha/revisao-4",
       "docs": [

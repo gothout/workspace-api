@@ -413,3 +413,14 @@ Started: 2026-08-22
   - Flags cobra + env manual (`os.Getenv`) com helper `primeiroValor`: env só
     entra quando a flag está vazia e o default do flag cobre o slug.
 ---
+
+## 2026-08-23 - R4
+- Cascata de inativação da organization completa: inativar/remover revoga API keys (mesmo agregado, `RevogarApiKeysDaOrganization` escopada) e encerra sessões dos usuários via NOVO contrato `EncerradorSessoesUsuarios` (lado user: `RevogarSessoesDaOrganization` escopada, idempotente); cascata unificada `executarCascata` roda ANTES da persistência (fail-closed: pai nunca fica inativo com acesso vivo) e audita contagens; `BuscarApiKeyPorHash` ganhou JOIN na dona ativa (defesa em profundidade); aplicação auth ganhou contrato `VitalidadeOrganization` — refresh/logout falham fechado com dona inativa/removida e com a peça faltando; bootstrap liga os dois adaptadores novos resolvendo NA CHAMADA.
+- Files changed: internal/identidade/domain/organization/{contratos,repository,service,singleton,service_test}.go; internal/identidade/domain/user/{repository,service,service_test}.go; internal/identidade/application/auth/{contratos,service,singleton,service_test}.go; cmd/bootstrap/{bootstrap,usuario,organizacao_test,swagger_cobertura_test}.go; cmd/bootstrap/cascata_organization_test.go (NOVO).
+- Docs read: agents/03-identidade-tenancy.md, AGENTS.md de domain/organization, application/auth, cmd/bootstrap, cmd.
+- **Learnings for future iterations:**
+  - Ordem da cascata fail-closed: qualquer passo falhando impede a persistência do novo estado — o pior caso é acessos encerrados com pai ainda ativo (direção segura); Reativar NÃO desfaz (acessos voltam só por ação explícita).
+  - Logout bloqueado pela vitalidade NÃO revoga o jti — quem revoga é a cascata no momento da inativação. Dublê do auth que não emula a cascata produz "reativação ressuscita" falso-negativo no teste.
+  - Testes do pacote bootstrap que exercitam cascata/inativação precisam bootar o singleton do user ANTES (`MustUse` panicaria com encerrador resolvendo na chamada) — ponta a ponta e Swagger cobertura atualizados.
+  - Integração R4 num único fio funciona bem: login JWT real → inativação → asserts de banco (SessaoAtiva/RefreshTokenRevogado), recusa do auth e JOIN da apikey.
+---
