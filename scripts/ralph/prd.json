@@ -445,7 +445,7 @@
         "build/vet/test verdes"
       ],
       "priority": 20,
-      "passes": false,
+      "passes": true,
       "issue": 28,
       "branch": "ox-alpha/ux-papeis",
       "docs": [

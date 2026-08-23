@@ -836,3 +836,45 @@ Started: 2026-08-22
     sync.Once é do processo e o swagger_cobertura_test já bootou com outro
     dublê.
 ---
+
+## 2026-08-23 - UX1
+- Endpoint de listagem de papéis (issue #28) completo: GET /api/domain/
+  identidade/user/papeis devolve {uuid, nome, descricao} dos 5 papéis globais
+  seed, ordenado por nome. `ListarPapeis` no RepositorioAtribuicoes (consulta
+  GLOBAL — mesma exceção documentada do PapelPorUUID; lista vazia = fatia
+  vazia), `Service.Papeis` delegando (leitura: sem auditoria, sem escopo) com
+  override no service_observado; `PapelResponseDto`; rota registrada FORA da
+  árvore /users/{uuid} com cadeia completa rota a rota e exigência
+  PermAtribuirPapel (quem atribui papel é quem monta o Select); Catalogo()
+  ganhou o par rota+método — seed intacto (curinga identidade:user:* dos
+  admins já concede, provado por teste com middleware.Atende nos 5 papéis);
+  Swagger regenerado; AGENTS.md do subdomínio atualizado.
+- Files changed: internal/identidade/domain/user/{repository,service,
+  service_observado,dto_response,permissions,controller}.go + papeis_test.go
+  (NOVO) + service_test.go (atrFake.ListarPapeis + seedCatalogo);
+  cmd/bootstrap/papeis_leitura_test.go (NOVO); internal/identidade/domain/
+  user/AGENTS.md; docs/* (swag init); prd.json; agents/06; progress.txt.
+- Docs read: issue #28 (gh api), agents/README, agents/04-convencoes-api.md,
+  agents/05-padroes-codigo.md, AGENTS.md de domain/user (+domain, identidade,
+  model/user via system-reminders), cmd/bootstrap, cmd/server/routes, seed.go.
+- Checks: build/vet/test verdes (30 pacotes, integrações testcontainers
+  reais incluídas); CGO_ENABLED=1 go test -race verde em user+bootstrap;
+  arch-go segue compliance/coverage 100 pelo gate do go test; cobertura
+  Swagger verde com o path novo nos dois sentidos.
+- **Learnings for future iterations:**
+  - Path de recurso auxiliar FORA da árvore do CRUD (/user/papeis vs
+    /users/{uuid}) evita colisão de rota gin entre segmento estático e
+    parâmetro — e casa com o contrato escrito na issue/PRD (seguir o texto
+    delas quando especificam path literal).
+  - Reusar permissão existente (atribuir_papel) em vez de criar
+    "listar_papeis": catálogo menor, seed ZERO mudança — mas registrar o par
+    rota+método novo no RotaMeta da permissão para a árvore do front.
+  - Método novo em interface EXISTENTE (RepositorioAtribuicoes) ripple só
+    para os implementadores (impl + atrFake) — build pega; Service ganha
+    override no service_observado mesmo sendo leitura (contrato errobserve:
+    TODO erro observado).
+  - Ordenação por nome no SQL já resolve determinismo do Select; assert
+    alfabético no teste integração garante que não regredir.
+  - uuid.MustParse aceita só hex: sufixos mnemônicos ("pa01") panicam no
+    teste — usar hex válido ("ba01").
+---
