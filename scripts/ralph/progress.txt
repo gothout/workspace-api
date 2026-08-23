@@ -40,6 +40,12 @@
   sem depender de ferramenta GUI.
 - `go test -race` precisa de CGO+gcc no ambiente (apt-get install gcc;
   CGO_ENABLED=1) — invariantes disputadas rodam localmente desde a F6.
+- `middleware.Atende(efetivas, exigida)` exige a PEDIDA com 3 segmentos:
+  a forma global `*:*` como exigida sempre devolve false — validação de
+  posse que usa o matcher precisa de caso especial de pertencimento exato
+  para `*:*` (o mesmo tratamento do curinga global dentro do matcher).
+- `gh api -f` é raw-field e NÃO lê @file (grava o caminho literal); usar
+  `-F body=@arquivo` para corpos longos de PR/issue.
 
 Started: 2026-08-22
 ---
@@ -283,4 +289,38 @@ Started: 2026-08-22
     arch-go (novo path github.com/arch-go/arch-go) ok, go-architect morto.
   - engine.Routes() devolve wildcards gin (`:uuid`) — normalizar para `{uuid}`
     antes de comparar com OpenAPI; excluir /api/status, /doc e /doc/*qualquer.
+---
+
+## 2026-08-23 - R1
+- Escalação de privilégio em CriarApiKey fechada: `exigirPermissoesPossuidas`
+  no service do organization casa CADA permissão pedida contra as efetivas do
+  ctx com o matcher do middleware (`Atende`) ANTES da persistência; a forma
+  global `*:*` (2 segmentos, fora da gramática do Atende) é conferida por
+  pertencimento exato — só quem possui `*:*` concede `*:*`. Recusa vira a
+  sentinela nova `ErrPermissaoNaoPossuida` (code
+  `identidade.organization.permissao_nao_possuida`, status 403) com log de
+  segurança (`organization.apikey_permissao_recusada`); formato inválido segue
+  400 no construtor do model (ordem: invariante → autorização → persistência).
+- Files changed: internal/identidade/domain/organization/{service,errors,
+  controller}.go; service_test.go (suíte TestCriarApiKeyNaoEscalaPrivilegio:
+  admin_organization tentando *:*, ação fora do papel, ctx vazio fail-closed,
+  curinga de subdomínio atendido, super_admin concede *:* — e nada recusado
+  chega ao repo); cmd/bootstrap/organizacao_test.go (recusa provada sobre o
+  esquema real + ctxs injetando efetivas); AGENTS.md do subdomínio; docs/*
+  (swag init); prd.json; agents/06; progress.txt.
+- Docs read: issue #19 (via gh api), agents/README.md, agents/03, agents/05,
+  AGENTS.md de internal/middleware, domain/organization, model/organization,
+  identidade/{,domain,model}, pkg/orgctx, cmd/{,bootstrap}.
+- Checks: build/vet/test verdes (integração testcontainers incluída); `-race`
+  verde no pacote tocado; Swagger regenerado e cobertura conferida.
+- **Learnings for future iterations:**
+  - Direção do matcher é sã para conceder: pedida com curinga exige o `*` NO
+    EFETIVO daquele segmento (atendeSegmento(efetivo, exigido)) — então
+    `identidade:user:*` NÃO atende `identidade:*:*`; o único buraco era a
+    forma global de 2 segmentos como exigida.
+  - Testes antigos que chamavam CriarApiKey sem permissões no ctx quebram
+    com o fail-closed novo: ctxs de teste precisam `orgctx.WithPermissoes`
+    (mesma regra dos dublês de contrato escopados).
+  - Validação de posse entra DEPOIS do construtor do model — mantém os codes
+    400 de entrada inválida estáveis e separa invariante de autorização.
 ---
