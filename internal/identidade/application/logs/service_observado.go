@@ -37,3 +37,8 @@ func (s serviceObservado) Erros(ctx context.Context, filtro clickhouse.FiltroTri
 	resp, err := s.Service.Erros(ctx, filtro, p)
 	return resp, s.observar(ctx, err)
 }
+
+func (s serviceObservado) OpcoesFiltro(ctx context.Context) (OpcoesFiltroResponseDto, error) {
+	resp, err := s.Service.OpcoesFiltro(ctx)
+	return resp, s.observar(ctx, err)
+}

@@ -248,6 +248,10 @@ Desde a evolução **errobserve**, a mesma rota carrega também o vocabulário d
 | **Workspace** | demais com `identidade:logs:ler` | preso ao par (organization, workspace) resolvido |
 
 - Filtro apontando fora do recorte responde **404** (`identidade.logs.fora_do_escopo`) — uuid alheio exista ou não recebe a mesma resposta.
-- Filtros: `organization_uuid` (só tem efeito para a plataforma), `workspace_uuid`, `user_uuid`, `acao` (= ação estável na auditoria; = código estável nos erros; ignorado no acesso), `ray_trace`, janela `inicio`/`fim` em RFC3339 UTC; UUID/timestamp malformado = 400.
-- Campos dos itens espelham as trilhas: auditoria (`acao`, `sucesso`, `detalhes`, identificadores), acesso (`metodo`, `path`, `rota`, `status`, `duracao_ms`, tenancy), erros (`codigo`, `mensagem`, `severidade`, `desconhecido` — a causa NUNCA sai via API).
+- Filtros: `organization_uuid` (só tem efeito para a plataforma), `workspace_uuid`, `user_uuid`, `acao` (= ação estável na auditoria; = código estável nos erros; ignorado no acesso), `ray_trace`, janela `inicio`/`fim` em RFC3339 UTC; UUID/timestamp malformado = 400. **Na trilha de acesso** há ainda `metodo` (verbo HTTP exato) e `status_classe` (classe de status: `2xx`, `3xx`, `4xx`, `5xx`) — UX3.
+- Campos dos itens espelham as trilhas, com enriquecimento de usuário (UX2): auditoria (`acao`, `sucesso`, `detalhes`, identificadores), acesso (`metodo`, `path`, `rota`, `status`, `duracao_ms`, tenancy), erros (`codigo`, `mensagem`, `severidade`, `desconhecido` — a causa NUNCA sai via API). Os três carregam `user_nome`/`user_email` resolvidos em lote pela tabela de usuários; linha sem usuário sai com os campos vazios.
 - **ClickHouse ausente = 503 padronizado** (`identidade.logs.indisponivel`) — nunca 500 nem lista vazia silenciosa.
+
+### CONTRATO — opções de filtro dos logs
+
+`GET /api/application/identidade/logs/opcoes-filtro` (mesma cadeia, `identidade:logs:ler` basta). Devolve `{organizacoes, workspaces, usuarios}`, cada lista com itens `{uuid, nome}` **JÁ recortada pelo escopo do chamador**: plataforma lista tudo; organization, a própria inteira; workspace, os usuários COM ATRIBUIÇÃO no próprio workspace e ele mesmo como workspace. Fonte: repositórios puros dos subdomínios via adaptadores ligados no bootstrap — quem lê logs não precisa dos `:ler` dos outros subdomínios para montar os Selects.

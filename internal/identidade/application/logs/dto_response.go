@@ -74,7 +74,7 @@ func novoAcessoItem(ev access_log.Evento, usuarios map[string]UsuarioLog) Acesso
 	item := AcessoItemDto{
 		Instante: ev.Instante, Metodo: ev.Metodo, Path: ev.Path, Rota: ev.Rota,
 		Status: ev.Status, DuracaoMS: ev.DuracaoMS, IP: ev.IP, UserAgent: ev.UserAgent,
-		RayTrace: ev.RayTrace,
+		RayTrace:         ev.RayTrace,
 		OrganizationUUID: ev.OrganizationUUID, WorkspaceUUID: ev.WorkspaceUUID,
 		UserUUID: ev.UserUUID,
 	}
@@ -148,4 +148,37 @@ func NovoErrosResponseDto(itens []errobserve.Evento, total int64, p pagination.P
 		dtos = append(dtos, novoErroItem(ev, usuarios))
 	}
 	return pagination.NovaResponse(dtos, total, p)
+}
+
+// OpcaoDto — UMA opção de Select do painel de filtros (UX3): uuid para
+// preencher o filtro, nome para exibir.
+type OpcaoDto struct {
+	UUID string `json:"uuid"`
+	Nome string `json:"nome"`
+}
+
+// OpcoesFiltroResponseDto — opções de filtro JÁ recortadas pelo escopo do
+// chamador: plataforma lista tudo; organization, o próprio recorte;
+// workspace, os usuários atribuídos ao próprio workspace. Listas vazias saem
+// como [] (nunca null).
+type OpcoesFiltroResponseDto struct {
+	Organizacoes []OpcaoDto `json:"organizacoes"`
+	Workspaces   []OpcaoDto `json:"workspaces"`
+	Usuarios     []OpcaoDto `json:"usuarios"`
+}
+
+func novasOpcoes(itens []OpcaoFiltro) []OpcaoDto {
+	dtos := make([]OpcaoDto, 0, len(itens))
+	for _, item := range itens {
+		dtos = append(dtos, OpcaoDto{UUID: item.UUID, Nome: item.Nome})
+	}
+	return dtos
+}
+
+func NovoOpcoesFiltroResponseDto(organizacoes, workspaces, usuarios []OpcaoFiltro) OpcoesFiltroResponseDto {
+	return OpcoesFiltroResponseDto{
+		Organizacoes: novasOpcoes(organizacoes),
+		Workspaces:   novasOpcoes(workspaces),
+		Usuarios:     novasOpcoes(usuarios),
+	}
 }

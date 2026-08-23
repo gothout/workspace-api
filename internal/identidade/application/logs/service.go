@@ -21,11 +21,15 @@ type Service interface {
 	Auditoria(ctx context.Context, filtro clickhouse.FiltroTrilha, p pagination.Pagination) (pagination.Response[AuditoriaItemDto], error)
 	Acesso(ctx context.Context, filtro clickhouse.FiltroTrilha, p pagination.Pagination) (pagination.Response[AcessoItemDto], error)
 	Erros(ctx context.Context, filtro clickhouse.FiltroTrilha, p pagination.Pagination) (pagination.Response[ErroItemDto], error)
+	// OpcoesFiltro devolve as opções de Select do painel JÁ recortadas pelo
+	// escopo derivado do ctx (issue #30).
+	OpcoesFiltro(ctx context.Context) (OpcoesFiltroResponseDto, error)
 }
 
 type serviceImpl struct {
 	trilhas  ConsultaTrilhas
 	usuarios ResolvedorUsuarios // opcional (UX2): nil = linhas sem nome/e-mail
+	opcoes   ProvedorOpcoes     // exigido no boot (UX3): Selects do painel de logs
 }
 
 // OpcaoServico adiciona peças opcionais ao service sem mudar a assinatura
@@ -36,6 +40,11 @@ type OpcaoServico func(*serviceImpl)
 // linhas de log (issue #29).
 func ComResolvedorUsuarios(u ResolvedorUsuarios) OpcaoServico {
 	return func(s *serviceImpl) { s.usuarios = u }
+}
+
+// ComProvedorOpcoes liga as opções de filtro recortadas (issue #30).
+func ComProvedorOpcoes(p ProvedorOpcoes) OpcaoServico {
+	return func(s *serviceImpl) { s.opcoes = p }
 }
 
 // NewService devolve o service DECORADO (service_observado.go): todo erro
@@ -173,6 +182,9 @@ func (s *serviceImpl) Auditoria(ctx context.Context, filtro clickhouse.FiltroTri
 		return pagination.Response[AuditoriaItemDto]{}, err
 	}
 	aplicado.Offset, aplicado.Limite = p.Offset(), p.Limit()
+	// Metodo/ClasseStatus são filtros da trilha de ACESSO — zerados aqui,
+	// nunca viram SQL em trilha sem a coluna.
+	aplicado.Metodo, aplicado.ClasseStatus = "", 0
 	itens, total, err := s.trilhas.Auditoria(ctx, aplicado)
 	if err != nil {
 		return pagination.Response[AuditoriaItemDto]{}, err
@@ -202,6 +214,9 @@ func (s *serviceImpl) Erros(ctx context.Context, filtro clickhouse.FiltroTrilha,
 	if err != nil {
 		return pagination.Response[ErroItemDto]{}, err
 	}
+	// Metodo/ClasseStatus são filtros da trilha de ACESSO (colunas que só
+	// existem lá) — zerados aqui, nunca viram SQL em trilha sem a coluna.
+	aplicado.Metodo, aplicado.ClasseStatus = "", 0
 	aplicado.Offset, aplicado.Limite = p.Offset(), p.Limit()
 	itens, total, err := s.trilhas.Erros(ctx, aplicado)
 	if err != nil {
@@ -209,4 +224,44 @@ func (s *serviceImpl) Erros(ctx context.Context, filtro clickhouse.FiltroTrilha,
 	}
 	usuarios := s.usuariosDasLinhas(ctx, coletarUserUUIDs(itens, func(ev errobserve.Evento) string { return ev.UserUUID }))
 	return NovoErrosResponseDto(itens, total, p, usuarios), nil
+}
+
+// OpcoesFiltro devolve as opções de Select do painel de logs JÁ recortadas
+// pelo escopo do chamador (issue #30): plataforma lista tudo; organization,
+// os workspaces/usuários da própria; workspace, os usuários atribuídos ao
+// próprio workspace e o workspace como única opção. Chamador sem escopo
+// derivável = ErrForaDoEscopo (fail-closed, igual às consultas).
+func (s *serviceImpl) OpcoesFiltro(ctx context.Context) (OpcoesFiltroResponseDto, error) {
+	r := recorteDoCtx(ctx)
+	var (
+		pedidaOrg  *uuid.UUID
+		pedidoWs   *uuid.UUID
+		orgParaWs  *uuid.UUID
+	)
+	switch {
+	case r.plataforma:
+		// sem filtro nenhuma dimensão — listas completas
+	case r.organizacao != uuid.Nil && r.workspace == uuid.Nil:
+		o := r.organizacao
+		pedidaOrg, orgParaWs = &o, &o
+	case r.organizacao != uuid.Nil && r.workspace != uuid.Nil:
+		o, w := r.organizacao, r.workspace
+		pedidaOrg, orgParaWs, pedidoWs = &o, &o, &w
+	default:
+		return OpcoesFiltroResponseDto{}, ErrForaDoEscopo
+	}
+
+	organizacoes, err := s.opcoes.Organizacoes(ctx, pedidaOrg)
+	if err != nil {
+		return OpcoesFiltroResponseDto{}, err
+	}
+	workspaces, err := s.opcoes.Workspaces(ctx, orgParaWs)
+	if err != nil {
+		return OpcoesFiltroResponseDto{}, err
+	}
+	usuarios, err := s.opcoes.Usuarios(ctx, pedidaOrg, pedidoWs)
+	if err != nil {
+		return OpcoesFiltroResponseDto{}, err
+	}
+	return NovoOpcoesFiltroResponseDto(organizacoes, workspaces, usuarios), nil
 }

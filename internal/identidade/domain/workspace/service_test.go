@@ -397,3 +397,7 @@ func TestSlugsFixosExpoeListaCompleta(t *testing.T) {
 		assert.ErrorIs(t, err, ErrSlugReservado, "reservado %s nunca é criável", fixo)
 	}
 }
+
+func (r *repoFake) ListarOpcoes(_ context.Context, organizacaoUUID *uuid.UUID) ([]modelworkspace.Workspace, error) {
+	return nil, nil
+}

@@ -202,6 +202,28 @@ definitions:
       workspace_uuid:
         type: string
     type: object
+  logs.OpcaoDto:
+    properties:
+      nome:
+        type: string
+      uuid:
+        type: string
+    type: object
+  logs.OpcoesFiltroResponseDto:
+    properties:
+      organizacoes:
+        items:
+          $ref: '#/definitions/logs.OpcaoDto'
+        type: array
+      usuarios:
+        items:
+          $ref: '#/definitions/logs.OpcaoDto'
+        type: array
+      workspaces:
+        items:
+          $ref: '#/definitions/logs.OpcaoDto'
+        type: array
+    type: object
   organization.ApiKeyCriadaResponseDto:
     properties:
       chave:
@@ -926,6 +948,38 @@ paths:
       - BearerAuth: []
       - ApiKeyAuth: []
       summary: Consulta a trilha de erros observados
+      tags:
+      - Identidade · Logs
+  /api/application/identidade/logs/opcoes-filtro:
+    get:
+      description: 'Referência para o painel montar os Selects de filtro (usuários,
+        organizations e workspaces: uuid+nome), JÁ recortada pelo escopo do chamador
+        — plataforma lista tudo; organization, a própria inteira; workspace, o próprio
+        recorte (usuários atribuídos ao workspace). Identidade:logs:ler basta'
+      parameters:
+      - description: UUID do workspace (fallback quando o host não tem subdomínio)
+        in: header
+        name: X-Workspace-Id
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/logs.OpcoesFiltroResponseDto'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/rest_err.RestErr'
+        "404":
+          description: Chamador sem escopo derivável do ctx
+          schema:
+            $ref: '#/definitions/rest_err.RestErr'
+      security:
+      - BearerAuth: []
+      - ApiKeyAuth: []
+      summary: Lista as opções de filtro dos logs
       tags:
       - Identidade · Logs
   /api/domain/identidade/organizations:

@@ -35,6 +35,12 @@ type Repository interface {
 	Atualizar(ctx context.Context, u *modeluser.User) error
 	Remover(ctx context.Context, id uuid.UUID) error
 
+	// ListarOpcoes devolve uuid+nome para os Selects do painel de logs
+	// (issue #30): workspace preenchido = usuários COM ATRIBUIÇÃO viva nele;
+	// senão organization preenchida = usuários da própria; senão = todos
+	// (caminho da plataforma). Leitura de referência, sem paginação.
+	ListarOpcoes(ctx context.Context, organizacaoUUID, workspaceUUID *uuid.UUID) ([]modeluser.User, error)
+
 	RegistrarRefreshToken(ctx context.Context, t *modeluser.RefreshToken) error
 	BuscarRefreshToken(ctx context.Context, usuarioUUID uuid.UUID, jti string) (*modeluser.RefreshToken, error)
 	RevogarRefreshToken(ctx context.Context, t *modeluser.RefreshToken) error
@@ -401,4 +407,29 @@ WHERE p.nome = ?
 		permissoes = []string{}
 	}
 	return permissoes, nil
+}
+
+// ListarOpcoes devolve uuid+nome dos usuários na granularidade pedida
+// (issue #30): workspace vence sobre organization — atribuição viva no
+// workspace (a tabela de usuário não tem workspace_uuid); organization
+// sozinha escopa pela própria; nenhum ponteiro = todos (caminho da
+// plataforma). Find com Model herda o soft delete da raiz; a subquery de
+// atribuição leva `deleted_at IS NULL` EXPLÍCITO (Table() cru não herda).
+func (r *repositoryImpl) ListarOpcoes(ctx context.Context, organizacaoUUID, workspaceUUID *uuid.UUID) ([]modeluser.User, error) {
+	q := r.db.WithContext(ctx).
+		Model(&modeluser.User{}).
+		Select("uuid", "nome")
+	switch {
+	case workspaceUUID != nil:
+		q = q.Where(`EXISTS (
+			SELECT 1 FROM identidade_user_atribuicao a
+			WHERE a.user_uuid = identidade_user_user.uuid
+			  AND a.workspace_uuid = ?
+			  AND a.deleted_at IS NULL)`, *workspaceUUID)
+	case organizacaoUUID != nil:
+		q = q.Where("organization_uuid = ?", *organizacaoUUID)
+	}
+	var itens []modeluser.User
+	err := q.Order("nome ASC").Find(&itens).Error
+	return itens, err
 }

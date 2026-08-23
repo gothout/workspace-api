@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -85,8 +86,12 @@ func TestSwaggerCobreExatamenteAsRotasRegistradas(t *testing.T) {
 	})
 	require.NoError(t, err)
 	// Aplicação logs (E5): rotas só precisam do Use() não-nil — o consultor
-	// nunca é tocado pelo registro; dublê local basta.
-	_, err = aplicacaologs.New(aplicacaologs.Dependencias{Trilhas: consultorSwaggerFake{}})
+	// nunca é tocado pelo registro; dublês locais bastam (opções de filtro
+	// exigidas pelo boot desde a UX3).
+	_, err = aplicacaologs.New(aplicacaologs.Dependencias{
+		Trilhas: consultorSwaggerFake{},
+		Opcoes:  provedorOpcoesSwaggerFake{},
+	})
 	require.NoError(t, err)
 
 	engine, err := routes.Montar(routes.Opcoes{
@@ -168,4 +173,20 @@ func (consultorSwaggerFake) Acesso(ctx context.Context, filtro clickhouse.Filtro
 
 func (consultorSwaggerFake) Erros(ctx context.Context, filtro clickhouse.FiltroTrilha) ([]errobserve.Evento, int64, error) {
 	return nil, 0, nil
+}
+
+// provedorOpcoesSwaggerFake satisfaz o segundo contrato obrigatório do boot
+// da aplicação logs (UX3) — o teste registra rotas, nunca lista opções.
+type provedorOpcoesSwaggerFake struct{}
+
+func (provedorOpcoesSwaggerFake) Organizacoes(context.Context, *uuid.UUID) ([]aplicacaologs.OpcaoFiltro, error) {
+	return nil, nil
+}
+
+func (provedorOpcoesSwaggerFake) Workspaces(context.Context, *uuid.UUID) ([]aplicacaologs.OpcaoFiltro, error) {
+	return nil, nil
+}
+
+func (provedorOpcoesSwaggerFake) Usuarios(context.Context, *uuid.UUID, *uuid.UUID) ([]aplicacaologs.OpcaoFiltro, error) {
+	return nil, nil
 }

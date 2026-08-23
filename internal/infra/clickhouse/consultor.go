@@ -26,12 +26,18 @@ const timeoutConsulta = 5 * time.Second
 // Acao vale para auditoria (coluna acao) e para erros (o código estável é a
 // "ação" da trilha); na trilha de acesso não existe ação e o campo é
 // ignorado. Detalhes extras não são filtráveis (JSON livre por evento).
+//
+// Metodo e ClasseStatus (UX3) valem SÓ para a trilha de acesso (colunas
+// metodo/status); as demais trilhas não têm essas colunas — a aplicação logs
+// zera os campos antes de consultar auditoria/erros.
 type FiltroTrilha struct {
 	OrganizationUUID string
 	WorkspaceUUID    string
 	UserUUID         string
 	Acao             string
 	RayTrace         string
+	Metodo           string    // ex.: GET (só trilha de acesso)
+	ClasseStatus     int       // 2|3|4|5 → faixa [n00,(n+1)00) (só trilha de acesso)
 	InstanteInicio   time.Time // zero = sem limite inferior
 	InstanteFim      time.Time // zero = sem limite superior
 	Offset           int
@@ -180,14 +186,16 @@ func argumentosConsulta(filtros []any, f FiltroTrilha) []any {
 	return completos
 }
 
-// whereComum monta as cláusulas dos filtros presentes. colunaAcao é "acao"
-// (auditoria), "codigo" (erros) ou "" (acesso — sem filtro de ação).
+// whereComum monta as clássulas dos filtros presentes. colunaAcao é "acao"
+// (auditoria), "codigo" (erros) ou "" (acesso — sem filtro de ação). Metodo e
+// ClasseStatus são aplicados quando presentes — só chegam preenchidos na
+// consulta da trilha de acesso (a aplicação zera nas demais).
 func whereComum(f FiltroTrilha, colunaAcao string) (string, []any) {
 	var condicoes []string
 	var args []any
-	adicionar := func(condicao string, valor any) {
+	adicionar := func(condicao string, valores ...any) {
 		condicoes = append(condicoes, condicao)
-		args = append(args, valor)
+		args = append(args, valores...)
 	}
 	if f.OrganizationUUID != "" {
 		adicionar("organization_uuid = ?", f.OrganizationUUID)
@@ -203,6 +211,12 @@ func whereComum(f FiltroTrilha, colunaAcao string) (string, []any) {
 	}
 	if f.RayTrace != "" {
 		adicionar("ray_trace = ?", f.RayTrace)
+	}
+	if f.Metodo != "" {
+		adicionar("metodo = ?", strings.ToUpper(f.Metodo))
+	}
+	if f.ClasseStatus >= 1 && f.ClasseStatus <= 5 {
+		adicionar("status >= ? AND status < ?", f.ClasseStatus*100, (f.ClasseStatus+1)*100)
 	}
 	if !f.InstanteInicio.IsZero() {
 		adicionar("instante >= ?", f.InstanteInicio.UTC())

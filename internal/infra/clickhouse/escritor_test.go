@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"workspace-api/internal/pkg/config"
@@ -135,7 +136,7 @@ func TestFlushPorTamanho(t *testing.T) {
 	}
 	fake.esperarAte(t, 0, 3)
 	descartesAcesso, descartesAuditoria, descartesErro := escritor.Descartes()
-	require.Zero(t, descartesAcesso + descartesAuditoria + descartesErro)
+	require.Zero(t, descartesAcesso+descartesAuditoria+descartesErro)
 }
 
 // TestFlushPorJanela: trilha abaixo do tamanho do lote sai pela janela de tempo.
@@ -260,4 +261,21 @@ func TestFalhaGravacaoContaSemTravar(t *testing.T) {
 	escritor.EnfileirarAuditoria(eventoAuditoria(99))
 	fake.esperarAte(t, 0, 1)
 	escritor.Fechar()
+}
+
+// TestWhereComumMetodoEClasse (UX3): os filtros novos viram SQL na trilha de
+// acesso — método normalizado e faixa [n00,(n+1)00); classe fora do conjunto
+// 1–5 nunca entra no WHERE.
+func TestWhereComumMetodoEClasse(t *testing.T) {
+	where, args := whereComum(FiltroTrilha{Metodo: "get", ClasseStatus: 5}, "")
+	assert.Contains(t, where, "metodo = ?")
+	assert.Contains(t, where, "status >= ? AND status < ?")
+	require.Len(t, args, 3)
+	assert.Equal(t, "GET", args[0])
+	assert.EqualValues(t, 500, args[1])
+	assert.EqualValues(t, 600, args[2])
+
+	where, args = whereComum(FiltroTrilha{ClasseStatus: 9}, "")
+	assert.NotContains(t, where, "status")
+	assert.Empty(t, args)
 }

@@ -185,11 +185,13 @@ func Serve(caminhoConfig string) error {
 	// Aplicação logs (E5) — leitura das trilhas do ClickHouse com recorte em
 	// 3 níveis; o adaptador resolve o consultor NA CHAMADA, então ClickHouse
 	// degradado não impede o boot (as rotas respondem 503 padronizado). O
-	// enriquecimento user_nome/user_email (UX2) liga o repositório do user
-	// pelo MESMO adaptador de resolução na chamada.
+	// enriquecimento user_nome/user_email (UX2) e as opções de filtro
+	// recortadas (UX3) ligam os repositórios dos subdomínios pelos MESMOS
+	// adaptadores de resolução na chamada.
 	if _, err := aplicacaologs.New(aplicacaologs.Dependencias{
 		Trilhas:  consultorLogs{},
 		Usuarios: novoResolvedorUsuariosLogs(),
+		Opcoes:   novoProvedorOpcoesLogs(),
 	}); err != nil {
 		return fmt.Errorf("boot: %w", err)
 	}

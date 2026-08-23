@@ -11,6 +11,17 @@ CONSULTA delas para o front-end.
 completa rota a rota (`SetContextAuthorization → ResolveWorkspace →
 RequirePermission(identidade:logs:ler)`).
 
+`GET /api/application/identidade/logs/opcoes-filtro` (UX3, issue #30) —
+mesma cadeia; `PermLer` BASTA: devolve `{organizacoes, workspaces, usuarios}`
+(uuid+nome) JÁ recortados pelo escopo do chamador (plataforma tudo;
+organization a própria inteira; workspace os usuários COM ATRIBUIÇÃO nele e
+ele como workspace único). Fonte: contrato `ProvedorOpcoes` ligado no
+bootstrap sobre os repositórios puros dos três subdomínios — quem lê logs
+não precisa dos `:ler` de user/organization/workspace para montar Selects.
+Filtros novos na trilha de ACESSO (UX3): `metodo` (verbo exato) e
+`status_classe` (`2xx`…`5xx`); nas demais trilhas os campos são ZERADOS pelo
+service (as colunas só existem em `log_acesso`).
+
 ## Modelo de escopo em 3 recortes (decisão da issue #27)
 
 Derivado SEMPRE do ctx — o query param nunca escolhe escopo:

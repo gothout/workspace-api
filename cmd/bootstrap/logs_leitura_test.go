@@ -82,8 +82,11 @@ func aplicarDDLEfemero(t *testing.T, ch *ambienteClickhouse) {
 
 // configParaLogsLeitura grava configs.json com o ClickHouse efêmero LIGADO e
 // janela de flush curta — a suíte não espera segundos por telemetria.
+// ResetarParaTeste ANTES do Init: sync.Once é do processo e outro teste pode
+// ter bootado outra config — sem o reset, o Init seguinte é no-op silencioso.
 func configParaLogsLeitura(t *testing.T, ch *ambienteClickhouse) {
 	t.Helper()
+	config.ResetarParaTeste()
 	exemplo := map[string]any{
 		"app":      map[string]any{"name": "workspace-api", "env": "teste", "version": "0.0.0", "base_domain": "plataforma.teste"},
 		"server":   map[string]any{"http": map[string]any{"port": 18080, "read_timeout_sec": 15, "write_timeout_sec": 30, "idle_timeout_sec": 60, "shutdown_timeout_sec": 10, "trusted_proxy": []string{}, "cors": map[string]any{"allowed_origins": []string{}}}},
@@ -284,4 +287,70 @@ func TestSeedCobrePermissoesDeLogs(t *testing.T) {
 		}
 	}
 	require.Equal(t, esperadas, encontradas)
+}
+
+// TestFiltrosMetodoEClasseNaTrilhaDeAcesso (UX3): os filtros novos de query
+// (metodo e status_classe) filtram a trilha de ACESSO no ClickHouse real —
+// faixa [n00,(n+1)00) e método exato, combináveis entre si.
+func TestFiltrosMetodoEClasseNaTrilhaDeAcesso(t *testing.T) {
+	if !dockerDisponivel(t) {
+		t.Skip("docker indisponível — teste de integração pulado")
+	}
+	ch := subirClickhouse(t)
+	aplicarDDLEfemero(t, ch)
+	configParaLogsLeitura(t, ch)
+
+	// O servidor do ClickHouse reinicia uma vez após o primeiro start (mesma
+	// classe do "occurrence 2" do Postgres): o ping pode cair na janela de
+	// reinício e o Connect degradaria. Sonda até a conexão vingar.
+	require.Eventually(t, func() bool {
+		conn := clickhouse.Connect(config.MustUse().Databases.ClickHouse)
+		if conn == nil {
+			return false
+		}
+		_ = conn.Close()
+		return true
+	}, 30*time.Second, 500*time.Millisecond, "clickhouse efêmero deveria aceitar conexão")
+
+	clickhouse.ResetarParaTeste()
+	defer func() {
+		clickhouse.ResetarParaTeste()
+		config.ResetarParaTeste() // não vaza config de container morto para os próximos testes
+		errobserve.DefinirSinks()
+	}()
+
+	trilhas, err := iniciarTrilhas()
+	require.NoError(t, err)
+	require.NotNil(t, trilhas.escritor)
+
+	base := time.Now().UTC().Add(-time.Minute)
+	linha := func(metodo string, status int, ray string) access_log.Evento {
+		return access_log.Evento{
+			Instante: base, Metodo: metodo,
+			Path: "/api/x", Rota: "/api/x", Status: status, DuracaoMS: 5,
+			RayTrace:         ray,
+			OrganizationUUID: orgA.String(), WorkspaceUUID: wsA1Logs.String(),
+		}
+	}
+	trilhas.escritor.EnfileirarAcesso(linha("GET", 200, "ray-ok"))
+	trilhas.escritor.EnfileirarAcesso(linha("POST", 201, "ray-criado"))
+	trilhas.escritor.EnfileirarAcesso(linha("GET", 500, "ray-erro"))
+
+	// Drain determinístico antes de consultar (sem esperar a janela).
+	trilhas.escritor.Fechar()
+
+	consultar := func(filtro clickhouse.FiltroTrilha) int64 {
+		t.Helper()
+		_, total, err := consultorLogs{}.Acesso(context.Background(), filtro)
+		require.NoError(t, err)
+		return total
+	}
+
+	assert.EqualValues(t, 3, consultar(clickhouse.FiltroTrilha{}), "sanidade: as três linhas gravadas")
+	assert.EqualValues(t, 2, consultar(clickhouse.FiltroTrilha{Metodo: "get"}), "método é case-insensitive")
+	assert.EqualValues(t, 1, consultar(clickhouse.FiltroTrilha{Metodo: "POST"}))
+	assert.EqualValues(t, 2, consultar(clickhouse.FiltroTrilha{ClasseStatus: 2}), "classe 2xx pega 200 e 201")
+	assert.EqualValues(t, 1, consultar(clickhouse.FiltroTrilha{ClasseStatus: 5}), "só o 500 na classe 5xx")
+	assert.EqualValues(t, 1, consultar(clickhouse.FiltroTrilha{Metodo: "GET", ClasseStatus: 5}),
+		"filtros combináveis: GET E 5xx")
 }

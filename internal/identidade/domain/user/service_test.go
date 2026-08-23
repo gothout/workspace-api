@@ -666,3 +666,23 @@ func TestTemVinculoDiretoESuporteAuditado(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, vinculo, "super_admin atravessa organizations")
 }
+
+// ListarOpcoes emula a projeção real: workspace vence (via atribuições do
+// dublê de atribuições quando disponível — aqui só org/sem filtro), org
+// escopa, nenhum ponteiro devolve todos.
+func (r *repoFake) ListarOpcoes(_ context.Context, organizacaoUUID, workspaceUUID *uuid.UUID) ([]modeluser.User, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	itens := make([]modeluser.User, 0)
+	for _, u := range r.porUUID {
+		switch {
+		case workspaceUUID != nil:
+			// atribuição não vive neste dublê — sem dado, ninguém casa
+			continue
+		case organizacaoUUID != nil && u.OrganizationUUID != *organizacaoUUID:
+			continue
+		}
+		itens = append(itens, *u)
+	}
+	return itens, nil
+}

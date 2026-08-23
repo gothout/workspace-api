@@ -10,6 +10,8 @@ package logs
 import (
 	"context"
 
+	"github.com/google/uuid"
+
 	"workspace-api/internal/infra/clickhouse"
 	"workspace-api/internal/pkg/errobserve"
 	"workspace-api/internal/pkg/log/access_log"
@@ -24,6 +26,9 @@ type Dependencias struct {
 	// usuário (UX2): nil = campos vazios nas respostas, a consulta segue
 	// funcionando — degradação honesta.
 	Usuarios ResolvedorUsuarios
+	// Opcoes alimenta as opções de filtro recortadas pelo escopo (UX3) —
+	// exigido no boot: endpoint sem opções seria recurso morto.
+	Opcoes ProvedorOpcoes
 }
 
 // ConsultaTrilhas é a face de leitura das trilhas — implementada pelo
@@ -53,4 +58,24 @@ type UsuarioLog struct {
 // anônimo/removido) simplesmente não voltam no mapa — campos vazios na tela.
 type ResolvedorUsuarios interface {
 	Resolver(ctx context.Context, uuids []string) (map[string]UsuarioLog, error)
+}
+
+// OpcaoFiltro é UMA opção de Select do painel de logs (UX3): o uuid para
+// preencher o filtro e o nome para exibir. Nada além disso — a lista serve
+// a quem JÁ pode ler os logs daquele recorte, então uuid+nome bastam.
+type OpcaoFiltro struct {
+	UUID string
+	Nome string
+}
+
+// ProvedorOpcoes responde as listas de referência na granularidade pedida
+// pelo service (issue #30): ponteiro nil = SEM filtro nessa dimensão (caminho
+// da plataforma), ponteiro preenchido = preso ao recorte correspondente. As
+// consultas rodam sobre os repositórios dos subdomínios (organization,
+// workspace, user) via adaptador ligado no bootstrap — aplicação não toca em
+// *gorm.DB.
+type ProvedorOpcoes interface {
+	Organizacoes(ctx context.Context, organizationUUID *uuid.UUID) ([]OpcaoFiltro, error)
+	Workspaces(ctx context.Context, organizationUUID *uuid.UUID) ([]OpcaoFiltro, error)
+	Usuarios(ctx context.Context, organizationUUID, workspaceUUID *uuid.UUID) ([]OpcaoFiltro, error)
 }

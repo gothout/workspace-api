@@ -31,6 +31,7 @@ func rotasDeLeitura() []RotaMeta {
 		{Rota: "/api/application/identidade/logs/auditoria", Metodo: http.MethodGet},
 		{Rota: "/api/application/identidade/logs/acesso", Metodo: http.MethodGet},
 		{Rota: "/api/application/identidade/logs/erros", Metodo: http.MethodGet},
+		{Rota: "/api/application/identidade/logs/opcoes-filtro", Metodo: http.MethodGet},
 	}
 }
 

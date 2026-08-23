@@ -529,6 +529,54 @@
                 }
             }
         },
+        "/api/application/identidade/logs/opcoes-filtro": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Referência para o painel montar os Selects de filtro (usuários, organizations e workspaces: uuid+nome), JÁ recortada pelo escopo do chamador — plataforma lista tudo; organization, a própria inteira; workspace, o próprio recorte (usuários atribuídos ao workspace). Identidade:logs:ler basta",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Identidade · Logs"
+                ],
+                "summary": "Lista as opções de filtro dos logs",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "UUID do workspace (fallback quando o host não tem subdomínio)",
+                        "name": "X-Workspace-Id",
+                        "in": "header"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/logs.OpcoesFiltroResponseDto"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "404": {
+                        "description": "Chamador sem escopo derivável do ctx",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    }
+                }
+            }
+        },
         "/api/domain/identidade/organizations": {
             "get": {
                 "security": [
@@ -2522,6 +2570,40 @@
                 },
                 "workspace_uuid": {
                     "type": "string"
+                }
+            }
+        },
+        "logs.OpcaoDto": {
+            "type": "object",
+            "properties": {
+                "nome": {
+                    "type": "string"
+                },
+                "uuid": {
+                    "type": "string"
+                }
+            }
+        },
+        "logs.OpcoesFiltroResponseDto": {
+            "type": "object",
+            "properties": {
+                "organizacoes": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/logs.OpcaoDto"
+                    }
+                },
+                "usuarios": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/logs.OpcaoDto"
+                    }
+                },
+                "workspaces": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/logs.OpcaoDto"
+                    }
                 }
             }
         },
