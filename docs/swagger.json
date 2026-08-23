@@ -1814,6 +1814,26 @@
                     }
                 }
             }
+        },
+        "/api/system/eventos": {
+            "get": {
+                "description": "Todos os eventos de auditoria possíveis, agrupados por domínio/subdomínio com ação estável, descrição PT-BR e campos do payload — mapping de listagem/tradução do front-end. Rota pública de sistema por decisão",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Sistema · Catálogo"
+                ],
+                "summary": "Mapa completo de eventos de auditoria do sistema",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/catalogo.EventosResponseDto"
+                        }
+                    }
+                }
+            }
         }
     },
     "definitions": {
@@ -1930,6 +1950,51 @@
                     "items": {
                         "$ref": "#/definitions/rest_err.GrupoErros"
                     }
+                }
+            }
+        },
+        "catalogo.EventoDto": {
+            "type": "object",
+            "properties": {
+                "acao": {
+                    "type": "string"
+                },
+                "campos": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "descricao": {
+                    "type": "string"
+                }
+            }
+        },
+        "catalogo.EventosResponseDto": {
+            "type": "object",
+            "properties": {
+                "eventos": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/catalogo.GrupoEventosDto"
+                    }
+                }
+            }
+        },
+        "catalogo.GrupoEventosDto": {
+            "type": "object",
+            "properties": {
+                "dominio": {
+                    "type": "string"
+                },
+                "eventos": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/catalogo.EventoDto"
+                    }
+                },
+                "subdominio": {
+                    "type": "string"
                 }
             }
         },

@@ -21,15 +21,20 @@ type UseCatalogo struct {
 }
 
 // New inicializa o singleton da aplicação montando service → controller.
-// Chamado UMA vez pelo cmd/bootstrap DEPOIS de todos os subdomínios — o
-// catálogo agregado entregue no contrato precisa dos imports deles já feitos.
+// Chamado UMA vez pelo cmd/bootstrap DEPOIS de todos os subdomínios — os
+// catálogos agregados entregues nos contratos precisam dos imports deles
+// já feitos.
 func New(deps Dependencias) (Controller, error) {
 	once.Do(func() {
 		if deps.Permissoes == nil {
 			initErr = errors.New("contrato ausente na montagem da aplicação catalogo (permissões agregadas)")
 			return
 		}
-		serviceInstance = NewService(deps.Permissoes)
+		if deps.Eventos == nil {
+			initErr = errors.New("contrato ausente na montagem da aplicação catalogo (eventos agregados)")
+			return
+		}
+		serviceInstance = NewService(deps.Permissoes, deps.Eventos)
 		controllerInstance = NewController(serviceInstance)
 	})
 	return controllerInstance, initErr

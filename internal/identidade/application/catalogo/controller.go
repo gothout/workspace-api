@@ -17,6 +17,11 @@ const PrefixoRotas = "/identidade/catalogo"
 // qualquer auth.
 const RotaErrosSistema = "/api/system/errors"
 
+// RotaEventosSistema expõe o mapa completo dos eventos de auditoria — mesma
+// natureza pública da rota de erros: o front consome o vocabulário fechado
+// sem hardcode de nome de evento (doc 04).
+const RotaEventosSistema = "/api/system/eventos"
+
 // PermLer libera a consulta da própria árvore. Constante espelhada no seed
 // dos 4 papéis humanos (super_admin passa pelo curinga *:*): ver a própria
 // permissão é pré-requisito de usar qualquer outra — sem ela o endpoint
@@ -26,11 +31,12 @@ const PermLer = "identidade:catalogo:ler"
 type Controller interface {
 	// Routes pendura as rotas em /api/application{PrefixoRotas}.
 	Routes(routes gin.IRouter)
-	// RoutesSistema pendura RotaErrosSistema direto no engine — o grupo
-	// /api/application mudaria o path do contrato (doc 04).
+	// RoutesSistema pendura as rotas públicas de sistema direto no engine —
+	// o grupo /api/application mudaria o path do contrato (doc 04).
 	RoutesSistema(routes gin.IRouter)
 	MinhasPermissoes(c *gin.Context)
 	Erros(c *gin.Context)
+	Eventos(c *gin.Context)
 }
 
 type controllerImpl struct{ service Service }
@@ -47,10 +53,11 @@ func (ctrl *controllerImpl) Routes(routes gin.IRouter) {
 		ctrl.MinhasPermissoes)
 }
 
-// RoutesSistema registra a rota pública de sistema SEM cadeia — decisão
+// RoutesSistema registra as rotas públicas de sistema SEM cadeia — decisão
 // documentada no AGENTS.md do pacote e no doc 04.
 func (ctrl *controllerImpl) RoutesSistema(routes gin.IRouter) {
 	routes.GET(RotaErrosSistema, ctrl.Erros)
+	routes.GET(RotaEventosSistema, ctrl.Eventos)
 }
 
 // Handlers finos: service → c.JSON. Leitura não audita; erro de sistema sai
@@ -79,4 +86,14 @@ func (ctrl *controllerImpl) MinhasPermissoes(c *gin.Context) {
 // @Router       /api/system/errors [get]
 func (ctrl *controllerImpl) Erros(c *gin.Context) {
 	c.JSON(http.StatusOK, ctrl.service.MapaDeErros())
+}
+
+// @Summary      Mapa completo de eventos de auditoria do sistema
+// @Description  Todos os eventos de auditoria possíveis, agrupados por domínio/subdomínio com ação estável, descrição PT-BR e campos do payload — mapping de listagem/tradução do front-end. Rota pública de sistema por decisão
+// @Tags         Sistema · Catálogo
+// @Produce      json
+// @Success      200 {object} EventosResponseDto
+// @Router       /api/system/eventos [get]
+func (ctrl *controllerImpl) Eventos(c *gin.Context) {
+	c.JSON(http.StatusOK, ctrl.service.MapaDeEventos())
 }

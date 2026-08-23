@@ -75,6 +75,35 @@ definitions:
           $ref: '#/definitions/rest_err.GrupoErros'
         type: array
     type: object
+  catalogo.EventoDto:
+    properties:
+      acao:
+        type: string
+      campos:
+        items:
+          type: string
+        type: array
+      descricao:
+        type: string
+    type: object
+  catalogo.EventosResponseDto:
+    properties:
+      eventos:
+        items:
+          $ref: '#/definitions/catalogo.GrupoEventosDto'
+        type: array
+    type: object
+  catalogo.GrupoEventosDto:
+    properties:
+      dominio:
+        type: string
+      eventos:
+        items:
+          $ref: '#/definitions/catalogo.EventoDto'
+        type: array
+      subdominio:
+        type: string
+    type: object
   catalogo.SubdominioAcoesDto:
     properties:
       acoes:
@@ -1607,6 +1636,21 @@ paths:
           schema:
             $ref: '#/definitions/catalogo.ErrosResponseDto'
       summary: Mapa completo de erros do sistema
+      tags:
+      - Sistema · Catálogo
+  /api/system/eventos:
+    get:
+      description: Todos os eventos de auditoria possíveis, agrupados por domínio/subdomínio
+        com ação estável, descrição PT-BR e campos do payload — mapping de listagem/tradução
+        do front-end. Rota pública de sistema por decisão
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/catalogo.EventosResponseDto'
+      summary: Mapa completo de eventos de auditoria do sistema
       tags:
       - Sistema · Catálogo
 swagger: "2.0"

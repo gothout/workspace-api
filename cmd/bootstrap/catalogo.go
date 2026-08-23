@@ -1,15 +1,21 @@
-// Adaptador da aplicação catalogo: AGREGA os Catalogo() dos subdomínios num
-// registro único (doc 03) e entrega pela interface do contratos.go dela.
+// Adaptador da aplicação catalogo: AGREGA os Catalogo() de permissões e os
+// CatalogoEventos() dos subdomínios num registro único (doc 03) e entrega
+// pelas interfaces do contratos.go dela.
 //
-// O bootstrap garante a ORDEM: os imports dos três subdomínios já estão
-// neste pacote (bootstrap.go) antes desta montagem — subdomínio novo entra
-// AQUI, e aparece nas duas rotas sem tocar na aplicação.
+// O bootstrap garante a ORDEM: os imports dos três subdomínios (e da
+// aplicação auth) já estão neste pacote antes desta montagem — subdomínio
+// novo entra AQUI, e aparece nas rotas sem tocar na aplicação.
 package bootstrap
 
 import (
+	organizacaomodel "workspace-api/internal/identidade/model/organization"
+	usermodel "workspace-api/internal/identidade/model/user"
+	workspacemodel "workspace-api/internal/identidade/model/workspace"
+
 	dominioOrganizacao "workspace-api/internal/identidade/domain/organization"
 	dominioUsuario "workspace-api/internal/identidade/domain/user"
 	dominioWorkspace "workspace-api/internal/identidade/domain/workspace"
+	aplicacaoauth "workspace-api/internal/identidade/application/auth"
 	aplicacaocatalogo "workspace-api/internal/identidade/application/catalogo"
 )
 
@@ -54,4 +60,61 @@ func novoAgregadorPermissoes() agregadorPermissoes {
 		})
 	}
 	return agregadorPermissoes{itens: itens}
+}
+
+// agregadorEventos é o ProvedorEventos da aplicação catalogo.
+type agregadorEventos struct{ itens []aplicacaocatalogo.EventoMeta }
+
+func (a agregadorEventos) CatalogoEventos() []aplicacaocatalogo.EventoMeta { return a.itens }
+
+// novoAgregadorEventos converte os catálogos de eventos NATIVOS de cada
+// subdomínio e da aplicação auth (tipos homônimos, um por pacote) para a
+// forma única do contrato — preenchendo dominio/subdominio na conversão.
+// A ordem do agregado é irrelevante: o mapa sai ordenado da aplicação.
+func novoAgregadorEventos() agregadorEventos {
+	itens := make([]aplicacaocatalogo.EventoMeta, 0)
+	for _, meta := range dominioOrganizacao.CatalogoEventos() {
+		itens = append(itens, aplicacaocatalogo.EventoMeta{
+			Dominio:    organizacaomodel.Dominio,
+			Subdominio: organizacaomodel.Subdominio,
+			Acao:       meta.Acao, Descricao: meta.Descricao,
+			Campos: copiarCampos(meta.Campos),
+		})
+	}
+	for _, meta := range dominioWorkspace.CatalogoEventos() {
+		itens = append(itens, aplicacaocatalogo.EventoMeta{
+			Dominio:    workspacemodel.Dominio,
+			Subdominio: workspacemodel.Subdominio,
+			Acao:       meta.Acao, Descricao: meta.Descricao,
+			Campos: copiarCampos(meta.Campos),
+		})
+	}
+	for _, meta := range dominioUsuario.CatalogoEventos() {
+		itens = append(itens, aplicacaocatalogo.EventoMeta{
+			Dominio:    usermodel.Dominio,
+			Subdominio: usermodel.Subdominio,
+			Acao:       meta.Acao, Descricao: meta.Descricao,
+			Campos: copiarCampos(meta.Campos),
+		})
+	}
+	for _, meta := range aplicacaoauth.CatalogoEventos() {
+		itens = append(itens, aplicacaocatalogo.EventoMeta{
+			Dominio:    aplicacaoauth.Dominio,
+			Subdominio: aplicacaoauth.Subdominio,
+			Acao:       meta.Acao, Descricao: meta.Descricao,
+			Campos: copiarCampos(meta.Campos),
+		})
+	}
+	return agregadorEventos{itens: itens}
+}
+
+// copiarCampos isola o agregado das fatias nativas dos subdomínios
+// (mutação num lado nunca vaza para o outro).
+func copiarCampos(campos []string) []string {
+	if campos == nil {
+		return nil
+	}
+	copia := make([]string, len(campos))
+	copy(copia, campos)
+	return copia
 }

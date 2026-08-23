@@ -284,6 +284,7 @@ func entradaParaResolvido(e *EntradaResolucao) *Resolvido {
 // livre. Sem trilha ligada (montagem direta em teste), cai para o slog
 // legado — mesmo payload, caminho síncrono.
 func (s *serviceImpl) auditar(ctx context.Context, acao string, workspaceUUID, organizationUUID uuid.UUID, success bool, extras ...any) {
+	validarAcaoCatalogada(acao) // ação fora do events.go reprova em teste/boot
 	evento := audit_log.Evento{
 		Instante:         time.Now().UTC(),
 		Dominio:          modelworkspace.Dominio,

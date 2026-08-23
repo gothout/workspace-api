@@ -418,6 +418,7 @@ func exigirPermissoesPossuidas(ctx context.Context, pedidas []string) error {
 // livre — e nunca o valor de segredos. Sem trilha ligada (montagem direta em
 // teste), cai para o slog legado — mesmo payload, caminho síncrono.
 func (s *serviceImpl) auditar(ctx context.Context, acao string, organizationUUID uuid.UUID, success bool, extras ...any) {
+	validarAcaoCatalogada(acao) // ação fora do events.go reprova em teste/boot
 	evento := audit_log.Evento{
 		Instante:         time.Now().UTC(),
 		Dominio:          orgmodel.Dominio,

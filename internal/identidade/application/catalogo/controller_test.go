@@ -18,7 +18,10 @@ func engineDoController(t *testing.T) *gin.Engine {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	engine := gin.New()
-	ctrl := NewController(NewService(provedorFalso{itens: catalogoFalso()}))
+	ctrl := NewController(NewService(
+		provedorFalso{itens: catalogoFalso()},
+		provedorEventosFalso{itens: eventosFalsos()},
+	))
 	ctrl.RoutesSistema(engine)
 	grupos := engine.Group("/api/application")
 	ctrl.Routes(grupos)
@@ -37,6 +40,23 @@ func TestRotaErrosPublicaRespondeMapa(t *testing.T) {
 	var corpo map[string]any
 	require.NoError(t, json.Unmarshal(resp.Body.Bytes(), &corpo))
 	assert.Contains(t, corpo, "erros", "contrato do doc 04: {erros: [...]}")
+}
+
+func TestRotaEventosPublicaRespondeMapa(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, RotaEventosSistema, nil)
+	resp := httptest.NewRecorder()
+	engineDoController(t).ServeHTTP(resp, req)
+
+	require.Equal(t, http.StatusOK, resp.Code, "rota de sistema é pública por decisão")
+	var corpo map[string]any
+	require.NoError(t, json.Unmarshal(resp.Body.Bytes(), &corpo))
+	assert.Contains(t, corpo, "eventos", "contrato do doc 04: {eventos: [...]}")
+
+	// Sem cadeia de auth montada a rota continua acessível — pública por
+	// decisão (mesma natureza da rota de erros), nunca fail-closed.
+	var mapa EventosResponseDto
+	require.NoError(t, json.Unmarshal(resp.Body.Bytes(), &mapa))
+	require.NotEmpty(t, mapa.Eventos)
 }
 
 func TestPermissoesMinhasSemBootFecha403(t *testing.T) {
@@ -63,7 +83,10 @@ func TestPermissoesMinhasComIdentidadeNoCtxRespondeArvore(t *testing.T) {
 			orgctx.WithPermissoes(c.Request.Context(), []string{"identidade:user:ler"}))
 		c.Next()
 	}
-	ctrl := NewController(NewService(provedorFalso{itens: catalogoFalso()}))
+	ctrl := NewController(NewService(
+		provedorFalso{itens: catalogoFalso()},
+		provedorEventosFalso{itens: eventosFalsos()},
+	))
 	engine.GET("/api/application"+PrefixoRotas+"/permissoes/minhas", ctxComPermissao, ctrl.MinhasPermissoes)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/application"+PrefixoRotas+"/permissoes/minhas", nil)

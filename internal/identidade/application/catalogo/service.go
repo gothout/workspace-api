@@ -20,12 +20,18 @@ type Service interface {
 	// MapaDeErros devolve TODOS os erros possíveis do sistema, agrupados —
 	// reflexo direto do registro global do rest_err, sem hardcode.
 	MapaDeErros() ErrosResponseDto
+	// MapaDeEventos devolve TODOS os eventos de auditoria do sistema,
+	// agrupados — reflexo direto dos CatalogoEventos() agregados no bootstrap.
+	MapaDeEventos() EventosResponseDto
 }
 
-type serviceImpl struct{ permissoes ProvedorPermissoes }
+type serviceImpl struct {
+	permissoes ProvedorPermissoes
+	eventos    ProvedorEventos
+}
 
-func NewService(permissoes ProvedorPermissoes) Service {
-	return &serviceImpl{permissoes: permissoes}
+func NewService(permissoes ProvedorPermissoes, eventos ProvedorEventos) Service {
+	return &serviceImpl{permissoes: permissoes, eventos: eventos}
 }
 
 // MinhasPermissoes: ctx → permissões efetivas → filtro sobre o catálogo
@@ -36,4 +42,8 @@ func (s *serviceImpl) MinhasPermissoes(ctx context.Context) ArvoreResponseDto {
 
 func (s *serviceImpl) MapaDeErros() ErrosResponseDto {
 	return NovoErrosResponseDto(rest_err.MapaErros())
+}
+
+func (s *serviceImpl) MapaDeEventos() EventosResponseDto {
+	return NovoEventosResponseDto(s.eventos.CatalogoEventos())
 }

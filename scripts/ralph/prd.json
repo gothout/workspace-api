@@ -369,7 +369,7 @@
         "build/vet/test verdes"
       ],
       "priority": 17,
-      "passes": false,
+      "passes": true,
       "issue": 26,
       "branch": "ox-alpha/evolucao-eventos",
       "docs": [

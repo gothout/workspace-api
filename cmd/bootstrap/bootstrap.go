@@ -172,10 +172,12 @@ func Serve(caminhoConfig string) error {
 	}
 	slog.Info("[BOOTSTRAP-DI] Contêiner Identidade/Auth inicializado.")
 
-	// Aplicação catalogo — DEPOIS de todos os subdomínios: o agregador
-	// acima só enxerga os Catalogo() dos pacotes já importados e bootados.
+	// Aplicação catalogo — DEPOIS de todos os subdomínios: os agregadores
+	// acima só enxergam os Catalogo()/CatalogoEventos() dos pacotes já
+	// importados e bootados.
 	if _, err := aplicacaocatalogo.New(aplicacaocatalogo.Dependencias{
 		Permissoes: novoAgregadorPermissoes(),
+		Eventos:    novoAgregadorEventos(),
 	}); err != nil {
 		return fmt.Errorf("boot: %w", err)
 	}

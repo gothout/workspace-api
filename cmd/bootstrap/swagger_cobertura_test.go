@@ -75,6 +75,7 @@ func TestSwaggerCobreExatamenteAsRotasRegistradas(t *testing.T) {
 	require.NoError(t, err)
 	_, err = aplicacaocatalogo.New(aplicacaocatalogo.Dependencias{
 		Permissoes: novoAgregadorPermissoes(),
+		Eventos:    novoAgregadorEventos(),
 	})
 	require.NoError(t, err)
 

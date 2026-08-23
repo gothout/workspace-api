@@ -47,8 +47,26 @@ type provedorFalso struct{ itens []PermissaoMeta }
 
 func (p provedorFalso) Catalogo() []PermissaoMeta { return p.itens }
 
+// eventosFalsos é um CatalogoEventos() de mentira: dois grupos de
+// domínio/subdomínio, um deles com ação FORA de ordem para provar a saída
+// determinística, e campos nil que devem serializar como lista vazia.
+func eventosFalsos() []EventoMeta {
+	return []EventoMeta{
+		{Dominio: "identidade", Subdominio: "workspace", Acao: "editar", Descricao: "Editado.", Campos: []string{"slug", "inativo"}},
+		{Dominio: "identidade", Subdominio: "workspace", Acao: "criar", Descricao: "Criado."},
+		{Dominio: "identidade", Subdominio: "auth", Acao: "login", Descricao: "Login.", Campos: []string{"email"}},
+	}
+}
+
+type provedorEventosFalso struct{ itens []EventoMeta }
+
+func (p provedorEventosFalso) CatalogoEventos() []EventoMeta { return p.itens }
+
 func servicoComCatalogoFalso() Service {
-	return NewService(provedorFalso{itens: catalogoFalso()})
+	return NewService(
+		provedorFalso{itens: catalogoFalso()},
+		provedorEventosFalso{itens: eventosFalsos()},
+	)
 }
 
 func TestMinhasPermissoesFiltraPeloUsuario(t *testing.T) {
@@ -143,7 +161,7 @@ func TestMapaDeErrosRefleteRegistroSemDuplicar(t *testing.T) {
 		errors.New("b2"): {Codigo: "identidade.fake_b.um", Mensagem: "Um.", Status: http.StatusNotFound},
 	})
 
-	mapa := NewService(provedorFalso{}).MapaDeErros()
+	mapa := NewService(provedorFalso{}, provedorEventosFalso{}).MapaDeErros()
 	require.Len(t, mapa.Erros, 2, "um grupo por domínio.subdomínio, sem duplicação")
 
 	primeiro := mapa.Erros[0]
@@ -169,8 +187,44 @@ func TestMapaDeErrosVazioSerializaComoLista(t *testing.T) {
 	rest_err.ResetarRegistroParaTeste()
 	defer rest_err.ResetarRegistroParaTeste()
 
-	mapa := NewService(provedorFalso{}).MapaDeErros()
+	mapa := NewService(provedorFalso{}, provedorEventosFalso{}).MapaDeErros()
 	corpo, err := json.Marshal(mapa)
 	require.NoError(t, err)
 	assert.JSONEq(t, `{"erros":[]}`, string(corpo), "registro vazio = lista vazia, nunca null")
+}
+
+func TestMapaDeEventosAgrupaEOrdena(t *testing.T) {
+	mapa := servicoComCatalogoFalso().MapaDeEventos()
+
+	// Grupos ordenados por (dominio, subdominio): auth antes de workspace.
+	require.Len(t, mapa.Eventos, 2)
+	assert.Equal(t, "auth", mapa.Eventos[0].Subdominio)
+	assert.Equal(t, "workspace", mapa.Eventos[1].Subdominio)
+
+	// Eventos do grupo ordenados por ação; campos nil serializa como lista.
+	workspace := mapa.Eventos[1]
+	require.Len(t, workspace.Eventos, 2)
+	assert.Equal(t, "criar", workspace.Eventos[0].Acao, "saída em ordem determinística")
+	assert.Equal(t, "editar", workspace.Eventos[1].Acao)
+	assert.Empty(t, workspace.Eventos[0].Campos, "evento sem campos = lista vazia, nunca null")
+
+	auth := mapa.Eventos[0]
+	require.Len(t, auth.Eventos, 1)
+	assert.Equal(t, []string{"email"}, auth.Eventos[0].Campos)
+
+	// Contrato do doc 04 no corpo.
+	corpo, err := json.Marshal(mapa)
+	require.NoError(t, err)
+	for _, chave := range []string{
+		`"eventos"`, `"dominio"`, `"subdominio"`, `"acao"`, `"descricao"`, `"campos"`,
+	} {
+		assert.Contains(t, string(corpo), chave, "contrato do doc 04 exige %s no corpo", chave)
+	}
+}
+
+func TestMapaDeEventosVazioSerializaComoLista(t *testing.T) {
+	vazio := NovoEventosResponseDto(nil)
+	corpo, err := json.Marshal(vazio)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"eventos":[]}`, string(corpo), "catálogo vazio = lista vazia, nunca null")
 }

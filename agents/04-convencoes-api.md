@@ -15,7 +15,7 @@ Duas famílias, espelhando as camadas:
 /api/application/identidade/{nome}/...         ← casos de uso entre subdomínios do mesmo domínio (camada application)
 ```
 
-Fora das duas famílias ficam as **rotas de sistema**: `GET /api/status` (sondas, montada no `cmd/server/routes`) e `GET /api/system/errors` (mapa de erros, registrada pela aplicação `catalogo`) — exceção de prefixo, decidida e documentada.
+Fora das duas famílias ficam as **rotas de sistema**: `GET /api/status` (sondas, montada no `cmd/server/routes`), `GET /api/system/errors` (mapa de erros) e `GET /api/system/eventos` (mapa de eventos de auditoria) — as duas últimas registradas pela aplicação `catalogo`; exceção de prefixo, decidida e documentada.
 
 - Diretório do pacote Go = **singular snake_case** (`organization`, `user`); rota = **plural kebab-case** (`organizations`, `users`).
 - A auth é declarada **rota a rota** pelo `Routes()` do controller (doc 03) — nunca escondida no grupo.
@@ -34,6 +34,7 @@ POST   /api/application/identidade/auth/login
 POST   /api/application/identidade/auth/refresh
 GET    /api/application/identidade/catalogo/permissoes/minhas
 GET    /api/system/errors
+GET    /api/system/eventos
 ```
 
 ## Verbos e ações (REST estrito)
@@ -124,6 +125,8 @@ O controller traduz **sentinela → status** num `switch` (template `traduzir()`
 
 Toda operação de **escrita** (POST/PATCH/DELETE e ações de negócio) audita: domínio, subdomínio, ação, função, identidade vinda do ctx (organization/workspace/user/ray_trace), `success`, input/output. O payload é um `map[string]any` **montado à mão**, com identificadores, contagens, datas e vocabulário fechado — **nunca texto livre**. No núcleo do template a trilha sai por log estruturado (slog); o destino assíncrono (ClickHouse) é evolução futura (doc 02).
 
+O vocabulário de ações é **catalogado no `events.go` do subdomínio** (ação estável + descrição PT-BR + campos do payload): o `auditar()` valida a catalogação e **reprova em teste/boot** ação sem entrada — evento novo nunca nasce fora do mapping.
+
 ## CONTRATO — endpoint de permissões
 
 `GET /api/application/identidade/catalogo/permissoes/minhas` (auth: `BearerAuth` ou `ApiKeyAuth`).
@@ -194,3 +197,33 @@ Todo erro do sistema carrega um **code estável** `identidade.{subdominio}.{nome
 ```
 
 O front-end consome como **mapping de tradução/listagem**: o `code` é a chave estável (para tradução e estilização) e a `message` PT-BR do servidor é o default exibido. Sentinela nova sem entrada no catálogo **não fecha o checklist** do subdomínio (doc 05) — é esse catálogo que alimenta a rota.
+
+## CONTRATO — mapa de eventos
+
+Todo evento de auditoria carrega uma **ação estável** (snake_case), declarada no `events.go` do subdomínio com descrição PT-BR e a lista de **campos do payload** além dos de identidade (`dominio`, `subdominio`, `acao`, `success`, `ray_trace` e os uuids do ctx). O `auditar()` valida a catalogação: ação nova sem entrada no `events.go` **reprova em teste/boot** (mesmo espírito da sentinela sem code no `errors.go`).
+
+`GET /api/system/eventos` — rota auxiliar pública do sistema (mesma decisão da rota de erros). Devolve **todos os eventos possíveis**, organizados por domínio/subdomínio:
+
+```json
+{
+  "eventos": [
+    {
+      "dominio": "identidade",
+      "subdominio": "workspace",
+      "eventos": [
+        { "acao": "criar", "descricao": "Workspace criado na organization.", "campos": ["slug"] },
+        { "acao": "remover", "descricao": "Workspace removido; o slug NÃO se libera para outro tenant.", "campos": ["slug"] }
+      ]
+    },
+    {
+      "dominio": "identidade",
+      "subdominio": "auth",
+      "eventos": [
+        { "acao": "login", "descricao": "Tentativa de login: sucesso carrega os identificadores da sessão aberta; falha carrega e-mail mascarado (e campos de lockout quando preso).", "campos": ["email", "user_uuid", "organization_uuid", "limite_excedido", "espera_seg"] }
+      ]
+    }
+  ]
+}
+```
+
+O front-end consome como **mapping de listagem/tradução**: o `acao` é a chave estável, a `descricao` PT-BR é o default exibido e `campos` descreve as chaves extras que cada emissão pode carregar (lista vazia quando o evento só carrega identidade). Fonte dos dados: `CatalogoEventos()` de cada subdomínio, agregado no bootstrap pela aplicação `catalogo`. Cobertura garantida **nos dois sentidos** por teste executável (ação emitida sem entrada reprova; entrada sem emissão também).

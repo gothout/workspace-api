@@ -127,3 +127,76 @@ func NovoErrosResponseDto(grupos []rest_err.GrupoErros) ErrosResponseDto {
 	}
 	return ErrosResponseDto{Erros: grupos}
 }
+
+// --- CONTRATO — GET /api/system/eventos --------------------------------------
+//
+// Mapa COMPLETO dos eventos de auditoria do sistema (doc 04): o agregado dos
+// CatalogoEventos() de todos os subdomínios, entregue pelo bootstrap — nada
+// é hardcoded aqui.
+
+// EventosResponseDto agrupa os eventos por domínio/subdomínio.
+type EventosResponseDto struct {
+	Eventos []GrupoEventosDto `json:"eventos"`
+}
+
+// GrupoEventosDto reúne os eventos de um par dominio/subdominio.
+type GrupoEventosDto struct {
+	Dominio    string      `json:"dominio"`
+	Subdominio string      `json:"subdominio"`
+	Eventos    []EventoDto `json:"eventos"`
+}
+
+// EventoDto é UM evento de auditoria catalogado.
+type EventoDto struct {
+	Acao      string   `json:"acao"`
+	Descricao string   `json:"descricao"`
+	Campos    []string `json:"campos"`
+}
+
+// NovoEventosResponseDto monta o mapa a partir do catálogo AGREGADO, com
+// saída determinística: grupos por (dominio, subdominio) e eventos por ação,
+// tudo ordenado.
+func NovoEventosResponseDto(catalogo []EventoMeta) EventosResponseDto {
+	porGrupo := map[string]map[string][]EventoMeta{}
+	for _, meta := range catalogo {
+		if porGrupo[meta.Dominio] == nil {
+			porGrupo[meta.Dominio] = map[string][]EventoMeta{}
+		}
+		porGrupo[meta.Dominio][meta.Subdominio] = append(porGrupo[meta.Dominio][meta.Subdominio], meta)
+	}
+	dominios := make([]string, 0, len(porGrupo))
+	for dominio := range porGrupo {
+		dominios = append(dominios, dominio)
+	}
+	sort.Strings(dominios)
+	grupos := make([]GrupoEventosDto, 0)
+	for _, dominio := range dominios {
+		subdominios := make([]string, 0, len(porGrupo[dominio]))
+		for subdominio := range porGrupo[dominio] {
+			subdominios = append(subdominios, subdominio)
+		}
+		sort.Strings(subdominios)
+		for _, subdominio := range subdominios {
+			nativos := porGrupo[dominio][subdominio]
+			eventos := make([]EventoDto, 0, len(nativos))
+			for _, meta := range nativos {
+				campos := meta.Campos
+				if campos == nil {
+					campos = []string{}
+				}
+				eventos = append(eventos, EventoDto{
+					Acao:      meta.Acao,
+					Descricao: meta.Descricao,
+					Campos:    campos,
+				})
+			}
+			sort.Slice(eventos, func(i, j int) bool { return eventos[i].Acao < eventos[j].Acao })
+			grupos = append(grupos, GrupoEventosDto{
+				Dominio:    dominio,
+				Subdominio: subdominio,
+				Eventos:    eventos,
+			})
+		}
+	}
+	return EventosResponseDto{Eventos: grupos}
+}

@@ -41,7 +41,8 @@ encerramento limpo. Detalhes do desenho em `agents/01` e `agents/05`.
   dependência não declarada.
 - Toda interface entre pacotes (`contratos.go` de middleware e das
   applications, revogação composta do JWT, caches Redis, limitador de login,
-  destinos das trilhas de log) é ligada **aqui** — um arquivo por frente
+  destinos das trilhas de log, agregadores dos catálogos de permissões e
+  eventos da aplicação `catalogo`) é ligada **aqui** — um arquivo por frente
   (`middleware.go`, `organizacao.go`, `workspace.go`, `usuario.go`,
   `catalogo.go`, `seed.go`, `cache_redis.go`, `logs.go`).
 - Fechamento **LIFO**: o que subiu por último desce primeiro (servidor →
