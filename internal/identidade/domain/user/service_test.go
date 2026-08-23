@@ -192,6 +192,26 @@ func (r *repoFake) RevogarTokensAtivosDoUsuario(_ context.Context, usuarioUUID u
 	return total, nil
 }
 
+// RevogarTokensAtivosDaOrganization emula o fail-closed do escopo: ctx sem
+// organization falha; organization divergente não encontra nenhuma linha.
+func (r *repoFake) RevogarTokensAtivosDaOrganization(ctx context.Context) (int64, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	org := orgctx.OrganizationUUID(ctx)
+	if org == uuid.Nil {
+		return 0, orgctx.ErrEscopoAusente
+	}
+	var total int64
+	for _, t := range r.tokens {
+		if t.OrganizationUUID == org && t.RevogadoEm == nil {
+			momento := time.Now().UTC()
+			t.RevogadoEm = &momento
+			total++
+		}
+	}
+	return total, nil
+}
+
 func (r *repoFake) RefreshTokenRevogado(jti string) (bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -505,6 +525,41 @@ func TestSessoesPersistidasERevogacaoIdempotente(t *testing.T) {
 	// Logout idempotente: já revogado é sucesso; linha ausente é recusa.
 	assert.NoError(t, svc.EncerrarSessao(ctx, ana.UUID, "jti-1"))
 	assert.ErrorIs(t, svc.EncerrarSessao(ctx, ana.UUID, "inexistente"), ErrRefreshTokenInvalido)
+}
+
+// R4 (issue #22): lado user da cascata da organization — TODAS as sessões
+// abertas da organization escopada no ctx morrem; ctx sem escopo falha
+// fechado e organization divergente não encerra sessão alheia.
+func TestRevogarSessoesDaOrganizationEscopada(t *testing.T) {
+	svc, _, _, _ := montarServico(t, validadorFake{})
+	orgA, orgB := uuid.New(), uuid.New()
+	ctxA, ctxB := ctxDaOrganizacao(orgA), ctxDaOrganizacao(orgB)
+	ana := criarUser(t, svc, ctxA, "ana@exemplo.com")
+	bruno := criarUser(t, svc, ctxB, "bruno@exemplo.com")
+	expira := time.Now().UTC().Add(time.Hour)
+	require.NoError(t, svc.RegistrarSessao(ctxA, ana.UUID, "jti-a-1", expira))
+	require.NoError(t, svc.RegistrarSessao(ctxB, bruno.UUID, "jti-b-1", expira))
+
+	// Ctx SEM escopo: fail-closed.
+	_, err := svc.RevogarSessoesDaOrganization(context.Background())
+	assert.ErrorIs(t, err, orgctx.ErrEscopoAusente)
+
+	// A cascata da org A encerra SÓ as sessões da org A.
+	total, err := svc.RevogarSessoesDaOrganization(ctxA)
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, total)
+
+	ativa, err := svc.SessaoAtiva(ctxA, ana.UUID, "jti-a-1")
+	require.NoError(t, err)
+	assert.False(t, ativa)
+	ativa, err = svc.SessaoAtiva(ctxB, bruno.UUID, "jti-b-1")
+	require.NoError(t, err)
+	assert.True(t, ativa, "sessão de outra organization sobrevive")
+
+	// Idempotente: rodar de novo devolve 0 sem erro.
+	total, err = svc.RevogarSessoesDaOrganization(ctxA)
+	require.NoError(t, err)
+	assert.EqualValues(t, 0, total)
 }
 
 func TestAtribuirPapelValidaOTripeAntesDeGravar(t *testing.T) {

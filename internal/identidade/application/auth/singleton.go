@@ -21,12 +21,12 @@ type UseAuth struct {
 }
 
 // New inicializa o singleton da aplicação montando service → controller.
-// Chamado UMA vez pelo cmd/bootstrap com os três contratos ligados; faltar
+// Chamado UMA vez pelo cmd/bootstrap com os quatro contratos ligados; faltar
 // qualquer um é erro de boot (aplicação de autenticação não sobra pela metade).
 func New(deps Dependencias) (Controller, error) {
 	once.Do(func() {
-		if deps.Usuarios == nil || deps.Emissor == nil || deps.Organizacoes == nil {
-			initErr = errors.New("contratos ausentes na montagem da aplicação auth (usuarios/emissor/organizações)")
+		if deps.Usuarios == nil || deps.Emissor == nil || deps.Organizacoes == nil || deps.Vitalidade == nil {
+			initErr = errors.New("contratos ausentes na montagem da aplicação auth (usuarios/emissor/organizações/vitalidade)")
 			return
 		}
 		serviceInstance = NewService(deps)

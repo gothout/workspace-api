@@ -38,6 +38,7 @@ type Repository interface {
 	BuscarRefreshToken(ctx context.Context, usuarioUUID uuid.UUID, jti string) (*modeluser.RefreshToken, error)
 	RevogarRefreshToken(ctx context.Context, t *modeluser.RefreshToken) error
 	RevogarTokensAtivosDoUsuario(ctx context.Context, usuarioUUID uuid.UUID) (int64, error)
+	RevogarTokensAtivosDaOrganization(ctx context.Context) (int64, error)
 	RefreshTokenRevogado(jti string) (bool, error)
 }
 
@@ -159,6 +160,18 @@ func (r *repositoryImpl) RevogarRefreshToken(ctx context.Context, t *modeluser.R
 func (r *repositoryImpl) RevogarTokensAtivosDoUsuario(ctx context.Context, usuarioUUID uuid.UUID) (int64, error) {
 	res := orgctx.ScopeOrganization(r.db.WithContext(ctx), ctx).Model(&modeluser.RefreshToken{}).
 		Where("user_uuid = ? AND revogado_em IS NULL", usuarioUUID).
+		Update("revogado_em", agoraUTC())
+	return res.RowsAffected, res.Error
+}
+
+// RevogarTokensAtivosDaOrganization encerra TODAS as sessões abertas dos
+// usuários da organization ESCOPADA NO CTX — lado user da cascata de
+// inativação/remoção da dona do contrato (R4; contrato
+// EncerradorSessoesUsuarios ligado no cmd/bootstrap). Idempotente: sem token
+// ativo devolve 0 sem erro.
+func (r *repositoryImpl) RevogarTokensAtivosDaOrganization(ctx context.Context) (int64, error) {
+	res := orgctx.ScopeOrganization(r.db.WithContext(ctx), ctx).Model(&modeluser.RefreshToken{}).
+		Where("revogado_em IS NULL").
 		Update("revogado_em", agoraUTC())
 	return res.RowsAffected, res.Error
 }

@@ -37,6 +37,7 @@ type Dependencias struct {
 	Usuarios     Usuarios
 	Emissor      EmissorToken
 	Organizacoes ResolvedorOrganization
+	Vitalidade   VitalidadeOrganization
 }
 
 type serviceImpl struct {
@@ -159,6 +160,17 @@ func (s *serviceImpl) sessaoDoToken(ctx context.Context, refreshToken string) (*
 	if err != nil || !u.Autenticavel() {
 		// Conta inativa/removida encerra a sessão — estado da conta não é
 		// revelado além da recusa genérica.
+		return nil, ctx, "", ErrSessaoInvalida
+	}
+	if s.deps.Vitalidade == nil {
+		// Peça faltando é boot quebrado: fail-closed (mesma regra da cadeia
+		// de middleware) — nunca sessão aberta sem saber se a dona vive.
+		return nil, ctx, "", ErrSessaoInvalida
+	}
+	viva, err := s.deps.Vitalidade.Ativa(ctxOrg, organizationUUID)
+	if err != nil || !viva {
+		// R4: organization inativa/removida encerra a sessão INDEPENDENTE do
+		// jti estar ativo — mesma recusa genérica, estado da dona não vaza.
 		return nil, ctx, "", ErrSessaoInvalida
 	}
 	return u, ctxOrg, claims.JTI, nil

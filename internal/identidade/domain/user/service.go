@@ -55,6 +55,12 @@ type Service interface {
 	SessaoAtiva(ctx context.Context, usuarioUUID uuid.UUID, jti string) (bool, error)
 	EncerrarSessao(ctx context.Context, usuarioUUID uuid.UUID, jti string) error
 
+	// RevogarSessoesDaOrganization é o lado user da cascata da organization
+	// (contrato EncerradorSessoesUsuarios dela, ligado no bootstrap): encerra
+	// TODAS as sessões abertas dos usuários da organization ESCOPADA NO CTX —
+	// sessão não sobrevive à dona do contrato (R4). Idempotente.
+	RevogarSessoesDaOrganization(ctx context.Context) (int64, error)
+
 	// Contrato ResolvedorPermissoes do middleware: vínculo direto OU suporte
 	// auditado (super_admin em qualquer organization; admin_organization na
 	// própria) e união das permissões efetivas. Organization vem do ctx — o
@@ -248,6 +254,25 @@ func (s *serviceImpl) EncerrarSessao(ctx context.Context, usuarioUUID uuid.UUID,
 	}
 	s.auditar(ctx, "encerrar_sessao", usuarioUUID, true, "jti", jti)
 	return nil
+}
+
+// RevogarSessoesDaOrganization roda o lado user da cascata PELO ESCOPO DO
+// CTX: quem dispara (service da organization) só age sobre a própria
+// organization — conferida por lá antes da cascata — e a query é fail-closed
+// por ela. Idempotente: sem sessão ativa devolve 0 sem erro.
+func (s *serviceImpl) RevogarSessoesDaOrganization(ctx context.Context) (int64, error) {
+	sessoes, err := s.repo.RevogarTokensAtivosDaOrganization(ctx)
+	if err != nil {
+		return 0, err
+	}
+	if sessoes > 0 {
+		slog.InfoContext(ctx, "user.cascata_sessoes_encerradas",
+			"dominio", modeluser.Dominio, "subdominio", modeluser.Subdominio,
+			"acao", "cascata_organization_inativada",
+			"organization_uuid", orgctx.OrganizationUUID(ctx).String(),
+			"quantidade", sessoes)
+	}
+	return sessoes, nil
 }
 
 // --- Autorização (contrato ResolvedorPermissoes) --------------------------------------

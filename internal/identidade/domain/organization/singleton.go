@@ -29,9 +29,11 @@ type UseOrganization struct {
 }
 
 // New inicializa o singleton do subdomínio montando repo → service →
-// controller. Chamado UMA vez pelo cmd/bootstrap; o suspensore (contrato de
-// cascata com o workspace, F3) e a leitura do base_domain entram aqui.
-func New(db *gorm.DB, suspensore SuspendedorWorkspaces) (Controller, error) {
+// controller. Chamado UMA vez pelo cmd/bootstrap; os dois lados da cascata
+// (suspensor de workspaces desde a F3 e encerrador de sessões dos usuários
+// desde a R4 — contratos ligados no bootstrap) e a leitura do base_domain
+// entram aqui.
+func New(db *gorm.DB, suspensore SuspendedorWorkspaces, encerradorSessoes EncerradorSessoesUsuarios) (Controller, error) {
 	once.Do(func() {
 		if db == nil {
 			initErr = errors.New("conexão com o banco não pode ser nula")
@@ -41,9 +43,13 @@ func New(db *gorm.DB, suspensore SuspendedorWorkspaces) (Controller, error) {
 			initErr = errors.New("suspensor de workspaces ausente na montagem do organization")
 			return
 		}
+		if encerradorSessoes == nil {
+			initErr = errors.New("encerrador de sessões ausente na montagem do organization")
+			return
+		}
 		repositoryInstance = NewRepository(db)
 		chavesInstance = NewRepositorioApiKeys(db)
-		serviceInstance = NewService(repositoryInstance, chavesInstance, suspensore, lerBaseDomain)
+		serviceInstance = NewService(repositoryInstance, chavesInstance, suspensore, encerradorSessoes, lerBaseDomain)
 		controllerInstance = NewController(serviceInstance)
 	})
 	return controllerInstance, initErr

@@ -60,3 +60,13 @@ type EmissorToken interface {
 type ResolvedorOrganization interface {
 	Resolver(ctx context.Context, host string) (organizationUUID uuid.UUID, resolvido bool, err error)
 }
+
+// VitalidadeOrganization pergunta se a organization DONA da sessão segue
+// viva (R4): refresh/logout falham FECHADO com dona inativa/removida, mesmo
+// que a linha do jti ainda esteja ativa — defesa em profundidade além da
+// revogação em cascata disparada pela própria dona.
+type VitalidadeOrganization interface {
+	// Ativa responde se a organization existe e está ativa. Removida/inativa
+	// = false SEM erro; falha de infraestrutura sobe para o chamador decidir.
+	Ativa(ctx context.Context, organizationUUID uuid.UUID) (bool, error)
+}

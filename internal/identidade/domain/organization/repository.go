@@ -41,6 +41,11 @@ type RepositorioApiKeys interface {
 	BuscarApiKeyPorUUID(ctx context.Context, organizationUUID, chaveUUID uuid.UUID) (*orgmodel.ApiKey, error)
 	BuscarApiKeyPorHash(ctx context.Context, hash string) (*orgmodel.ApiKey, error)
 	RemoverApiKey(ctx context.Context, organizationUUID, chaveUUID uuid.UUID) error
+	// RevogarApiKeysDaOrganization encerra TODAS as chaves ativas da
+	// organization (remoção lógica em cascata) e devolve quantas foram
+	// revogadas — lado da própria raiz na inativação/remoção (R4).
+	// Idempotente: sem chave ativa devolve 0 sem erro.
+	RevogarApiKeysDaOrganization(ctx context.Context, organizationUUID uuid.UUID) (int64, error)
 }
 
 // LinhaDominioAtivo é a projeção mínima dos domínios custom ativos — o que o
@@ -168,11 +173,17 @@ func (r *repositorioApiKeysImpl) BuscarApiKeyPorUUID(ctx context.Context, organi
 }
 
 // BuscarApiKeyPorHash é a EXCEÇÃO global documentada acima (resolvedor do
-// middleware): filtra hash + vitalidade, nunca exposto em rota de administração.
+// middleware): filtra hash + vitalidade DA CHAVE E DA DONA — R4: chave de
+// organization inativa/removida falha fechada no JOIN, defesa em
+// profundidade além da revogação em cascata. Nunca exposto em rota de
+// administração.
 func (r *repositorioApiKeysImpl) BuscarApiKeyPorHash(ctx context.Context, hash string) (*orgmodel.ApiKey, error) {
 	var k orgmodel.ApiKey
 	err := r.db.WithContext(ctx).
-		Where("key_hash = ? AND status = 'ativo'", hash).
+		Model(&orgmodel.ApiKey{}).
+		Joins("JOIN identidade_organization_organization dona ON dona.uuid = identidade_organization_apikey.organization_uuid").
+		Where("identidade_organization_apikey.key_hash = ? AND identidade_organization_apikey.status = ?", hash, orgmodel.StatusAtivo).
+		Where("dona.status = ? AND dona.deleted_at IS NULL", orgmodel.StatusAtivo).
 		First(&k).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, ErrApiKeyNaoEncontrada
@@ -181,6 +192,16 @@ func (r *repositorioApiKeysImpl) BuscarApiKeyPorHash(ctx context.Context, hash s
 		return nil, err
 	}
 	return &k, nil
+}
+
+// RevogarApiKeysDaOrganization executa o lado da RAIZ na cascata de
+// inativação/remoção (R4): remoção lógica de todas as chaves da organization
+// escopada no ctx — BuscarApiKeyPorHash para de vê-las na hora.
+func (r *repositorioApiKeysImpl) RevogarApiKeysDaOrganization(ctx context.Context, organizationUUID uuid.UUID) (int64, error) {
+	res := orgctx.ScopeOrganization(r.db.WithContext(ctx), ctx).
+		Where("organization_uuid = ?", organizationUUID).
+		Delete(&orgmodel.ApiKey{})
+	return res.RowsAffected, res.Error
 }
 
 func (r *repositorioApiKeysImpl) RemoverApiKey(ctx context.Context, organizationUUID, chaveUUID uuid.UUID) error {

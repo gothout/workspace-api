@@ -60,7 +60,7 @@ func TestSwaggerCobreExatamenteAsRotasRegistradas(t *testing.T) {
 
 	// Boot na MESMA ordem e com os MESMOS adaptadores do Serve(): o engine
 	// abaixo registra exatamente as rotas do processo real.
-	_, err := dominioOrganizacao.New(amb.db, suspendedorWorkspaces{})
+	_, err := dominioOrganizacao.New(amb.db, suspendedorWorkspaces{}, encerradorSessoesUsuario{})
 	require.NoError(t, err)
 	_, err = dominioWorkspace.New(amb.db, nil)
 	require.NoError(t, err)
@@ -70,6 +70,7 @@ func TestSwaggerCobreExatamenteAsRotasRegistradas(t *testing.T) {
 		Usuarios:     usuariosAuth{},
 		Emissor:      emissorToken{},
 		Organizacoes: resolvedorOrganizacao{},
+		Vitalidade:   vitalidadeOrganizacao{},
 	})
 	require.NoError(t, err)
 	_, err = aplicacaocatalogo.New(aplicacaocatalogo.Dependencias{

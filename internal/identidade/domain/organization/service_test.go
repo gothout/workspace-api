@@ -27,13 +27,15 @@ func (r *repoFake) Criar(ctx context.Context, o *orgmodel.Organization) error {
 	if r.erroAoSalvar != nil {
 		return r.erroAoSalvar
 	}
-	r.porUUID[o.UUID] = o
+	copia := *o // guarda CÓPIA: mutação em memória depois não vira persistência
+	r.porUUID[o.UUID] = &copia
 	return nil
 }
 
 func (r *repoFake) BuscarPorUUID(ctx context.Context, id uuid.UUID) (*orgmodel.Organization, error) {
 	if o, ok := r.porUUID[id]; ok {
-		return o, nil
+		copia := *o // entidade carregada é CÓPIA: só Atualizar persiste mutação
+		return &copia, nil
 	}
 	return nil, ErrNotFound
 }
@@ -50,7 +52,8 @@ func (r *repoFake) Atualizar(ctx context.Context, o *orgmodel.Organization) erro
 	if r.erroAoSalvar != nil {
 		return r.erroAoSalvar
 	}
-	r.porUUID[o.UUID] = o
+	copia := *o // guarda CÓPIA: só Atualizar persiste o novo estado
+	r.porUUID[o.UUID] = &copia
 	return nil
 }
 
@@ -71,6 +74,11 @@ func (r *repoFake) ListarDominiosAtivos(ctx context.Context) ([]LinhaDominioAtiv
 
 type chavesFake struct {
 	porOrg map[uuid.UUID][]*orgmodel.ApiKey
+	// Registro da cascata (R4): quantas chaves foram revogadas em cascata,
+	// sobre qual organization e qual erro forçado.
+	revogadasEmCascata int64
+	alvoUltimaCascata  uuid.UUID
+	erroNaCascata      error
 }
 
 func novasChavesFake() *chavesFake { return &chavesFake{porOrg: map[uuid.UUID][]*orgmodel.ApiKey{}} }
@@ -123,6 +131,16 @@ func (c *chavesFake) RemoverApiKey(ctx context.Context, organizationUUID, chaveU
 	return nil
 }
 
+func (c *chavesFake) RevogarApiKeysDaOrganization(_ context.Context, organizationUUID uuid.UUID) (int64, error) {
+	if c.erroNaCascata != nil {
+		return 0, c.erroNaCascata
+	}
+	c.revogadasEmCascata += int64(len(c.porOrg[organizationUUID]))
+	c.alvoUltimaCascata = organizationUUID
+	c.porOrg[organizationUUID] = nil
+	return c.revogadasEmCascata, nil
+}
+
 type suspensorFake struct {
 	chamadas int
 	ultimo   uuid.UUID
@@ -138,17 +156,36 @@ func (s *suspensorFake) SuspenderPorOrganization(ctx context.Context, organizati
 	return s.chamadas, nil
 }
 
+// encerradorFake é o dublê do contrato com o subdomínio user (R4): registra a
+// organization ALVO PELO CTX — exatamente como o repositório real escopa.
+type encerradorFake struct {
+	chamadas     int
+	ultimoCtxOrg uuid.UUID
+	revogados    int64
+	erro         error
+}
+
+func (e *encerradorFake) RevogarTokensDaOrganization(ctx context.Context) (int64, error) {
+	e.chamadas++
+	e.ultimoCtxOrg = orgctx.OrganizationUUID(ctx)
+	if e.erro != nil {
+		return 0, e.erro
+	}
+	return e.revogados, nil
+}
+
 // --- Suíte -------------------------------------------------------------------
 
 const baseDomainTeste = "plataforma.exemplo"
 
-func montarServico(t *testing.T) (Service, *repoFake, *chavesFake, *suspensorFake) {
+func montarServico(t *testing.T) (Service, *repoFake, *chavesFake, *suspensorFake, *encerradorFake) {
 	t.Helper()
 	repo := novoRepoFake()
 	chaves := novasChavesFake()
 	suspensore := &suspensorFake{}
-	svc := NewService(repo, chaves, suspensore, func() (string, error) { return baseDomainTeste, nil })
-	return svc, repo, chaves, suspensore
+	sessoes := &encerradorFake{}
+	svc := NewService(repo, chaves, suspensore, sessoes, func() (string, error) { return baseDomainTeste, nil })
+	return svc, repo, chaves, suspensore, sessoes
 }
 
 func ctxDaOrganizacao(id uuid.UUID) context.Context {
@@ -156,7 +193,7 @@ func ctxDaOrganizacao(id uuid.UUID) context.Context {
 }
 
 func TestCreateValidaInvariantsPeloConstrutor(t *testing.T) {
-	svc, repo, _, _ := montarServico(t)
+	svc, repo, _, _, _ := montarServico(t)
 
 	o, err := svc.Create(context.Background(), orgmodel.CreateInput{Nome: "Acme"})
 	require.NoError(t, err)
@@ -172,7 +209,7 @@ func TestCreateValidaInvariantsPeloConstrutor(t *testing.T) {
 }
 
 func TestLeituraNaoVazaOrganizacaoAlheia(t *testing.T) {
-	svc, _, _, _ := montarServico(t)
+	svc, _, _, _, _ := montarServico(t)
 	alvo, err := svc.Create(context.Background(), orgmodel.CreateInput{Nome: "Alvo"})
 	require.NoError(t, err)
 
@@ -194,7 +231,7 @@ func TestLeituraNaoVazaOrganizacaoAlheia(t *testing.T) {
 }
 
 func TestUpdateInativaComCascataERecusaRepeticao(t *testing.T) {
-	svc, _, _, suspensore := montarServico(t)
+	svc, _, _, suspensore, _ := montarServico(t)
 	o, err := svc.Create(context.Background(), orgmodel.CreateInput{Nome: "Acme"})
 	require.NoError(t, err)
 	ctx := ctxDaOrganizacao(o.UUID)
@@ -210,9 +247,10 @@ func TestUpdateInativaComCascataERecusaRepeticao(t *testing.T) {
 	assert.ErrorIs(t, err, orgmodel.ErrJaInativo)
 	assert.Equal(t, 1, suspensore.chamadas, "invariante violada nem chega à cascata")
 
-	// Cascata falhando impede a persistência — pai nunca fica inativo com filho vivo.
+	// Cascata falhando impede a persistência — pai nunca fica inativo com
+	// filho vivo.
 	suspensorQuebrado := &suspensorFake{erro: assert.AnError}
-	svcQuebrado := NewService(novoRepoFake(), novasChavesFake(), suspensorQuebrado,
+	svcQuebrado := NewService(novoRepoFake(), novasChavesFake(), suspensorQuebrado, &encerradorFake{},
 		func() (string, error) { return baseDomainTeste, nil })
 	outro, err := svcQuebrado.Create(context.Background(), orgmodel.CreateInput{Nome: "Fragil"})
 	require.NoError(t, err)
@@ -221,8 +259,99 @@ func TestUpdateInativaComCascataERecusaRepeticao(t *testing.T) {
 	assert.ErrorIs(t, err, assert.AnError)
 }
 
+// R4 (issue #22): inativar a organization encerra TODOS os acessos dela —
+// chaves de API (mesmo agregado) e sessões dos usuários (contrato com o
+// subdomínio user) — e o alvo da cascata é A organization do ctx.
+func TestInativacaoRevogaChavesESessoesNaCascata(t *testing.T) {
+	svc, _, chaves, suspensore, sessoes := montarServico(t)
+	o, err := svc.Create(context.Background(), orgmodel.CreateInput{Nome: "Acme"})
+	require.NoError(t, err)
+
+	ctxAdmin := orgctx.WithPermissoes(ctxDaOrganizacao(o.UUID), []string{"*:*"})
+	for i := range 2 {
+		_, _, err = svc.CriarApiKey(ctxAdmin, o.UUID, ApiKeyEntrada{
+			Nome:               "chave " + string(rune('a'+i)),
+			EscopoOrganization: true,
+			Permissoes:         []string{"identidade:workspace:ler"},
+		})
+		require.NoError(t, err)
+	}
+	sessoes.revogados = 3 // dublê devolve "3 sessões encerradas"
+
+	inativo := orgmodel.StatusInativo
+	_, err = svc.Update(ctxDaOrganizacao(o.UUID), o.UUID, orgmodel.UpdateInput{Status: &inativo})
+	require.NoError(t, err)
+	assert.Equal(t, 1, suspensore.chamadas)
+	assert.Equal(t, int64(2), chaves.revogadasEmCascata, "todas as chaves ativas saem do ar")
+	assert.Empty(t, chaves.porOrg[o.UUID])
+	assert.Equal(t, 1, sessoes.chamadas, "sessões encerradas UMA vez")
+	assert.Equal(t, o.UUID, sessoes.ultimoCtxOrg, "alvo da cascata é a organization do ctx")
+
+	// Inativar de novo é recusado ANTES da cascata — nada roda duas vezes.
+	_, err = svc.Update(ctxDaOrganizacao(o.UUID), o.UUID, orgmodel.UpdateInput{Status: &inativo})
+	assert.ErrorIs(t, err, orgmodel.ErrJaInativo)
+	assert.Equal(t, 1, sessoes.chamadas)
+	assert.EqualValues(t, 2, chaves.revogadasEmCascata)
+}
+
+func TestDeleteTambemExecutaACascataDeAcessos(t *testing.T) {
+	svc, repo, chaves, suspensore, sessoes := montarServico(t)
+	o, err := svc.Create(context.Background(), orgmodel.CreateInput{Nome: "Acme"})
+	require.NoError(t, err)
+	ctxAdmin := orgctx.WithPermissoes(ctxDaOrganizacao(o.UUID), []string{"*:*"})
+	_, _, err = svc.CriarApiKey(ctxAdmin, o.UUID, ApiKeyEntrada{
+		Nome:               "integração",
+		EscopoOrganization: true,
+		Permissoes:         []string{"identidade:workspace:ler"},
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, svc.Delete(ctxDaOrganizacao(o.UUID), o.UUID))
+	assert.Equal(t, 1, suspensore.chamadas)
+	assert.Equal(t, 1, sessoes.chamadas)
+	assert.EqualValues(t, 1, chaves.revogadasEmCascata)
+	assert.NotContains(t, repo.porUUID, o.UUID)
+
+	assert.ErrorIs(t, svc.Delete(ctxDaOrganizacao(uuid.New()), uuid.New()), ErrNotFound)
+}
+
+// R4 fail-closed: qualquer passo da cascata falhando impede a persistência do
+// novo estado — a organization continua ATIVA no repositório (o pior caso é
+// acessos encerrados com pai vivo, direção segura).
+func TestCascataFalhaImpedePersistirInativacao(t *testing.T) {
+	casos := []struct {
+		nome      string
+		quebra    func(*repoFake, *chavesFake, *encerradorFake)
+	}{
+		{
+			nome:   "encerrador de sessões falhou",
+			quebra: func(_ *repoFake, _ *chavesFake, e *encerradorFake) { e.erro = assert.AnError },
+		},
+		{
+			nome:   "revogação de chaves falhou",
+			quebra: func(_ *repoFake, c *chavesFake, _ *encerradorFake) { c.erroNaCascata = assert.AnError },
+		},
+	}
+	for _, caso := range casos {
+		t.Run(caso.nome, func(t *testing.T) {
+			repo, chaves, sessoes := novoRepoFake(), novasChavesFake(), &encerradorFake{}
+			caso.quebra(repo, chaves, sessoes)
+			svc := NewService(repo, chaves, &suspensorFake{}, sessoes,
+				func() (string, error) { return baseDomainTeste, nil })
+			o, err := svc.Create(context.Background(), orgmodel.CreateInput{Nome: "Fragil"})
+			require.NoError(t, err)
+
+			inativo := orgmodel.StatusInativo
+			_, err = svc.Update(ctxDaOrganizacao(o.UUID), o.UUID, orgmodel.UpdateInput{Status: &inativo})
+			assert.ErrorIs(t, err, assert.AnError)
+			assert.Equal(t, orgmodel.StatusAtivo, repo.porUUID[o.UUID].Status,
+				"organization NÃO é persistida inativa com a cascata quebrada")
+		})
+	}
+}
+
 func TestReativarETransicaoUnica(t *testing.T) {
-	svc, _, _, _ := montarServico(t)
+	svc, _, _, _, _ := montarServico(t)
 	o, err := svc.Create(context.Background(), orgmodel.CreateInput{Nome: "Acme"})
 	require.NoError(t, err)
 	ctx := ctxDaOrganizacao(o.UUID)
@@ -240,7 +369,7 @@ func TestReativarETransicaoUnica(t *testing.T) {
 }
 
 func TestDeleteExecutaCascataAntesDaRemocao(t *testing.T) {
-	svc, repo, _, suspensore := montarServico(t)
+	svc, repo, _, suspensore, _ := montarServico(t)
 	o, err := svc.Create(context.Background(), orgmodel.CreateInput{Nome: "Acme"})
 	require.NoError(t, err)
 
@@ -252,7 +381,7 @@ func TestDeleteExecutaCascataAntesDaRemocao(t *testing.T) {
 }
 
 func TestDefinirEDepoisRemoverDominioCustom(t *testing.T) {
-	svc, repo, _, _ := montarServico(t)
+	svc, repo, _, _, _ := montarServico(t)
 	o, err := svc.Create(context.Background(), orgmodel.CreateInput{Nome: "Acme"})
 	require.NoError(t, err)
 	ctx := ctxDaOrganizacao(o.UUID)
@@ -295,7 +424,7 @@ func TestDefinirEDepoisRemoverDominioCustom(t *testing.T) {
 }
 
 func TestCicloCompletoDaApiKey(t *testing.T) {
-	svc, _, chaves, _ := montarServico(t)
+	svc, _, chaves, _, _ := montarServico(t)
 	o, err := svc.Create(context.Background(), orgmodel.CreateInput{Nome: "Acme"})
 	require.NoError(t, err)
 	// O criador só consegue conceder permissões que POSSUI (R1): o ctx da
@@ -354,7 +483,7 @@ func TestCicloCompletoDaApiKey(t *testing.T) {
 // matcher do RequirePermission (middleware.Atende); *:* só vale para quem
 // possui *:*.
 func TestCriarApiKeyNaoEscalaPrivilegio(t *testing.T) {
-	svc, _, chaves, _ := montarServico(t)
+	svc, _, chaves, _, _ := montarServico(t)
 	o, err := svc.Create(context.Background(), orgmodel.CreateInput{Nome: "Acme"})
 	require.NoError(t, err)
 

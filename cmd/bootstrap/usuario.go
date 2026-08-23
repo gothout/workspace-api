@@ -9,6 +9,7 @@ package bootstrap
 
 import (
 	"context"
+	"errors"
 	"net"
 	"strings"
 	"time"
@@ -16,8 +17,10 @@ import (
 	"github.com/google/uuid"
 
 	aplicacaoauth "workspace-api/internal/identidade/application/auth"
+	dominioOrganizacao "workspace-api/internal/identidade/domain/organization"
 	dominioUsuario "workspace-api/internal/identidade/domain/user"
 	dominioWorkspace "workspace-api/internal/identidade/domain/workspace"
+	orgmodel "workspace-api/internal/identidade/model/organization"
 	modeluser "workspace-api/internal/identidade/model/user"
 	"workspace-api/internal/infra/database/postgres"
 	"workspace-api/internal/infra/jwt"
@@ -127,6 +130,42 @@ func (usuariosAuth) RefreshTokenAtivo(ctx context.Context, usuarioUUID uuid.UUID
 func (usuariosAuth) EncerrarSessao(ctx context.Context, usuarioUUID uuid.UUID, jti string) error {
 	return dominioUsuario.MustUse().Service.EncerrarSessao(ctx, usuarioUUID, jti)
 }
+
+// --- Contrato VitalidadeOrganization (R4: sessão não sobrevive à dona) ---------
+
+// vitalidadeOrganizacao fecha o fail-closed do refresh/logout: pergunta ao
+// subdomínio organization se a dona do contrato segue viva — resolve o
+// singleton NA CHAMADA. Removida/inativa = false sem erro (não vaza
+// existência); falha de infra sobe para a aplicação decidir.
+type vitalidadeOrganizacao struct{}
+
+func (vitalidadeOrganizacao) Ativa(ctx context.Context, organizationUUID uuid.UUID) (bool, error) {
+	ctxEscopo := orgctx.WithOrganization(ctx, organizationUUID)
+	o, err := dominioOrganizacao.MustUse().Service.Read(ctxEscopo, organizationUUID)
+	if err != nil {
+		if errors.Is(err, dominioOrganizacao.ErrNotFound) {
+			return false, nil // removida = morta — mesma recusa de inativa
+		}
+		return false, err
+	}
+	return o.Status == orgmodel.StatusAtivo, nil
+}
+
+var _ aplicacaoauth.VitalidadeOrganization = vitalidadeOrganizacao{}
+
+// --- Contrato EncerradorSessoesUsuarios (cascata organization → user) ----------
+
+// encerradorSessoesUsuario executa o lado user da cascata da organization
+// (R4): resolve o singleton do user NA CHAMADA. A organization alvo é A DO
+// CTX (o service da organization já conferiu o pertencimento) e a query é
+// fail-closed por ele. Idempotente.
+type encerradorSessoesUsuario struct{}
+
+func (encerradorSessoesUsuario) RevogarTokensDaOrganization(ctx context.Context) (int64, error) {
+	return dominioUsuario.MustUse().Service.RevogarSessoesDaOrganization(ctx)
+}
+
+var _ dominioOrganizacao.EncerradorSessoesUsuarios = encerradorSessoesUsuario{}
 
 // emissorToken resolve o singleton do JWT NA CHAMADA — o adaptador nunca
 // guarda o manager congelado.

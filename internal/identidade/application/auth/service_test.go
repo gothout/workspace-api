@@ -100,6 +100,20 @@ func (u *usuariosFake) EncerrarSessao(_ context.Context, _ uuid.UUID, jti string
 	return nil
 }
 
+// revogarTudo emula a cascata da organization (R4): o EncerradorSessoesUsuarios
+// revoga TODOS os tokens ativos da dona no momento da inativação — fora do
+// caminho do auth, exatamente como no mundo real.
+func (u *usuariosFake) revogarTudo() {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	for _, t := range u.tokens {
+		if t.RevogadoEm == nil {
+			momento := time.Now().UTC()
+			t.RevogadoEm = &momento
+		}
+	}
+}
+
 var (
 	errCredenciaisFake    = assert.AnError // qualquer erro vira ErrCredenciaisInvalidas no service
 	errSessaoInvalidaFake = assert.AnError
@@ -152,20 +166,54 @@ func (o *organizacoesFake) Resolver(context.Context, string) (uuid.UUID, bool, e
 	return o.org, o.resolvido, o.falha
 }
 
+// vitalidadeFake é o dublê do contrato R4: a dona da sessão vive ou não.
+type vitalidadeFake struct {
+	mu    sync.Mutex
+	ativa map[uuid.UUID]bool
+	falha error
+}
+
+func novaVitalidadeFake() *vitalidadeFake {
+	return &vitalidadeFake{ativa: map[uuid.UUID]bool{}}
+}
+
+func (v *vitalidadeFake) Ativa(_ context.Context, organizationUUID uuid.UUID) (bool, error) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if v.falha != nil {
+		return false, v.falha
+	}
+	viva, registrada := v.ativa[organizationUUID]
+	return viva || !registrada, nil // não registrada = org viva (comportamento padrão)
+}
+
+func (v *vitalidadeFake) inativar(org uuid.UUID) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.ativa[org] = false
+}
+
 // --- Suíte -------------------------------------------------------------------
 
-func montarApp(t *testing.T) (Service, *usuariosFake, *emissorFake, *organizacoesFake) {
+func montarApp(t *testing.T) (Service, *usuariosFake, *emissorFake, *organizacoesFake, *vitalidadeFake) {
 	t.Helper()
 	usuarios := novoUsuariosFake()
 	emissor := novoEmissorFake()
 	orgs := &organizacoesFake{org: uuid.New(), resolvido: true}
-	return NewService(Dependencias{Usuarios: usuarios, Emissor: emissor, Organizacoes: orgs}), usuarios, emissor, orgs
+	vitalidade := novaVitalidadeFake()
+	svc := NewService(Dependencias{
+		Usuarios:   usuarios,
+		Emissor:    emissor,
+		Organizacoes: orgs,
+		Vitalidade: vitalidade,
+	})
+	return svc, usuarios, emissor, orgs, vitalidade
 }
 
 const hostDeTeste = "filial-sul.exemplo.com"
 
 func TestLoginBomEmiteOParEPersisteOJti(t *testing.T) {
-	svc, usuarios, _, orgs := montarApp(t)
+	svc, usuarios, _, orgs, _ := montarApp(t)
 	ana := usuarios.semear(orgs.org, "ana@exemplo.com")
 
 	sessao, err := svc.Login(context.Background(), hostDeTeste, LoginEntrada{Email: "ana@exemplo.com", Senha: "senha-segura-123"})
@@ -181,7 +229,7 @@ func TestLoginBomEmiteOParEPersisteOJti(t *testing.T) {
 // O coração do contrato: as três falhas são indistinguíveis — mesmo corpo
 // (sentinela) e o MESMO caminho de comparação de hash.
 func TestFalhasDeLoginSaoIndistingriveis(t *testing.T) {
-	svc, usuarios, _, orgs := montarApp(t)
+	svc, usuarios, _, orgs, _ := montarApp(t)
 	usuarios.semear(orgs.org, "ana@exemplo.com")
 
 	// 1. senha errada; 2. usuário inexistente; 3. host sem organization.
@@ -204,7 +252,7 @@ func TestFalhasDeLoginSaoIndistingriveis(t *testing.T) {
 }
 
 func TestRefreshTrocaOParEExigeLinhaAtiva(t *testing.T) {
-	svc, usuarios, emissor, orgs := montarApp(t)
+	svc, usuarios, emissor, orgs, _ := montarApp(t)
 	ana := usuarios.semear(orgs.org, "ana@exemplo.com")
 
 	primeira, err := svc.Login(context.Background(), hostDeTeste, LoginEntrada{Email: "ana@exemplo.com", Senha: "senha-segura-123"})
@@ -237,7 +285,7 @@ func TestRefreshTrocaOParEExigeLinhaAtiva(t *testing.T) {
 }
 
 func TestLogoutRevogaPersistindoNoPostgres(t *testing.T) {
-	svc, usuarios, _, orgs := montarApp(t)
+	svc, usuarios, _, orgs, _ := montarApp(t)
 	usuarios.semear(orgs.org, "ana@exemplo.com")
 
 	sessao, err := svc.Login(context.Background(), hostDeTeste, LoginEntrada{Email: "ana@exemplo.com", Senha: "senha-segura-123"})
@@ -256,7 +304,7 @@ func TestLogoutRevogaPersistindoNoPostgres(t *testing.T) {
 }
 
 func TestContaInativaEncerraASessaoSemVazarEstado(t *testing.T) {
-	svc, usuarios, _, orgs := montarApp(t)
+	svc, usuarios, _, orgs, _ := montarApp(t)
 	ana := usuarios.semear(orgs.org, "ana@exemplo.com")
 
 	sessao, err := svc.Login(context.Background(), hostDeTeste, LoginEntrada{Email: "ana@exemplo.com", Senha: "senha-segura-123"})
@@ -270,4 +318,63 @@ func TestContaInativaEncerraASessaoSemVazarEstado(t *testing.T) {
 
 	_, err = svc.Refresh(context.Background(), sessao.RefreshToken)
 	assert.ErrorIs(t, err, ErrSessaoInvalida, "mesma recusa genérica — estado da conta não se revela")
+}
+
+// R4 (issue #22): a sessão não sobrevive à organization inativa — refresh e
+// logout falham FECHADO mesmo com jti ativo e conta ativa; a recusa é a
+// genérica (estado da dona não vaza).
+func TestSessaoNaoSobreviveAOrganizationInativa(t *testing.T) {
+	svc, usuarios, _, orgs, vitalidade := montarApp(t)
+	usuarios.semear(orgs.org, "ana@exemplo.com")
+
+	sessao, err := svc.Login(context.Background(), hostDeTeste, LoginEntrada{Email: "ana@exemplo.com", Senha: "senha-segura-123"})
+	require.NoError(t, err)
+
+	vitalidade.inativar(orgs.org)
+	_, err = svc.Refresh(context.Background(), sessao.RefreshToken)
+	assert.ErrorIs(t, err, ErrSessaoInvalida, "refresh com dona inativa falha fechado")
+	assert.ErrorIs(t, svc.Logout(context.Background(), sessao.RefreshToken), ErrSessaoInvalida,
+		"logout pela mesma porta: dona morta não abre sessão")
+
+	// No mundo real a cascata (EncerradorSessoesUsuarios) revogou as linhas
+	// NO MOMENTO da inativação — o logout bloqueado pela vitalidade não é quem
+	// revoga. Emulada aqui no dublê.
+	usuarios.revogarTudo()
+
+	// Reativação da dona NÃO ressuscita o jti: revogação da cascata é
+	// permanente; a vitalidade segue como defesa em profundidade.
+	vitalidade.ativa[orgs.org] = true
+	_, err = svc.Refresh(context.Background(), sessao.RefreshToken)
+	assert.ErrorIs(t, err, ErrSessaoInvalida)
+}
+
+// Falha de infraestrutura na vitalidade também recusa a sessão — nunca
+// renova com a saúde da dona desconhecida.
+func TestFalhaNaVitalidadeRecusaASessao(t *testing.T) {
+	svc, usuarios, _, orgs, vitalidade := montarApp(t)
+	usuarios.semear(orgs.org, "ana@exemplo.com")
+	sessao, err := svc.Login(context.Background(), hostDeTeste, LoginEntrada{Email: "ana@exemplo.com", Senha: "senha-segura-123"})
+	require.NoError(t, err)
+
+	vitalidade.falha = assert.AnError
+	_, err = svc.Refresh(context.Background(), sessao.RefreshToken)
+	assert.ErrorIs(t, err, ErrSessaoInvalida)
+}
+
+// Dependência ausente na montagem = fail-closed (mesma regra da cadeia de
+// middleware) — sem saber se a dona vive, ninguém renova sessão.
+func TestSemContratoDeVitalidadeNinguemRenovaSessao(t *testing.T) {
+	usuarios := novoUsuariosFake()
+	orgs := &organizacoesFake{org: uuid.New(), resolvido: true}
+	svc := NewService(Dependencias{
+		Usuarios:     usuarios,
+		Emissor:      novoEmissorFake(),
+		Organizacoes: orgs,
+	})
+	usuarios.semear(orgs.org, "ana@exemplo.com")
+	sessao, err := svc.Login(context.Background(), hostDeTeste, LoginEntrada{Email: "ana@exemplo.com", Senha: "senha-segura-123"})
+	require.NoError(t, err)
+
+	_, err = svc.Refresh(context.Background(), sessao.RefreshToken)
+	assert.ErrorIs(t, err, ErrSessaoInvalida)
 }

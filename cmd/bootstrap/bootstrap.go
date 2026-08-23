@@ -102,13 +102,14 @@ func Serve(caminhoConfig string) error {
 	// 7. Domínios — subdomínios de internal/identidade/domain na ordem de
 	// dependência (organization → workspace → user); cada adaptador do
 	// middleware acima resolve estes singletons NA CHAMADA. A cascata
-	// organization→workspace entra pelo contrato (contratos.go da
-	// organization) com o adaptador de workspace.go resolvendo NA CHAMADA.
+	// organization→{workspace,user} entra pelos contratos (contratos.go da
+	// organization) com os adaptadores de workspace.go e usuario.go
+	// resolvendo NA CHAMADA.
 	db, err := postgres.GetDB()
 	if err != nil {
 		return fmt.Errorf("boot: %w", err)
 	}
-	_, err = dominioOrganizacao.New(db, suspendedorWorkspaces{})
+	_, err = dominioOrganizacao.New(db, suspendedorWorkspaces{}, encerradorSessoesUsuario{})
 	if err != nil {
 		return fmt.Errorf("boot: %w", err)
 	}
@@ -129,12 +130,14 @@ func Serve(caminhoConfig string) error {
 	slog.Info("[BOOTSTRAP-DI] Contêiner Identidade/User inicializado.")
 
 	// Aplicações — orquestrações que cruzam os subdomínios acima. O auth
-	// recebe os três contratos ligados por adaptadores que resolvem os
-	// singletons NA CHAMADA (usuario.go).
+	// recebe os contratos ligados por adaptadores que resolvem os singletons
+	// NA CHAMADA (usuario.go) — inclusive a vitalidade da organization dona
+	// da sessão (R4: refresh falha fechado com dona inativa/removida).
 	if _, err := aplicacaoauth.New(aplicacaoauth.Dependencias{
 		Usuarios:     usuariosAuth{},
 		Emissor:      emissorToken{},
 		Organizacoes: resolvedorOrganizacao{},
+		Vitalidade:   vitalidadeOrganizacao{},
 	}); err != nil {
 		return fmt.Errorf("boot: %w", err)
 	}

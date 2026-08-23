@@ -63,11 +63,12 @@ type serviceImpl struct {
 	repo       Repository
 	chaves     RepositorioApiKeys
 	suspensore SuspendedorWorkspaces
+	sessoes    EncerradorSessoesUsuarios
 	baseDomain LeitorBaseDomain
 }
 
-func NewService(repo Repository, chaves RepositorioApiKeys, suspensore SuspendedorWorkspaces, baseDomain LeitorBaseDomain) Service {
-	return &serviceImpl{repo: repo, chaves: chaves, suspensore: suspensore, baseDomain: baseDomain}
+func NewService(repo Repository, chaves RepositorioApiKeys, suspensore SuspendedorWorkspaces, sessoes EncerradorSessoesUsuarios, baseDomain LeitorBaseDomain) Service {
+	return &serviceImpl{repo: repo, chaves: chaves, suspensore: suspensore, sessoes: sessoes, baseDomain: baseDomain}
 }
 
 // Criar: input cru → entidade VÁLIDA pelo construtor → persistência → auditoria.
@@ -118,16 +119,25 @@ func (s *serviceImpl) Update(ctx context.Context, id uuid.UUID, in orgmodel.Upda
 		}
 		inativou = true
 	}
-	// Cascata ANTES da persistência (fail-closed): se os workspaces não podem
-	// ser suspensos, a organization continua ativa — nunca pai inativo com
-	// filho vivo.
+	var sessoesEncerradas, chavesRevogadas int64
 	if inativou {
-		if err := s.suspenderFilhos(ctx, o.UUID); err != nil {
+		// Cascata ANTES da persistência (fail-closed): se os acessos não podem
+		// ser encerrados, a organization continua ativa — nunca pai inativo
+		// com filho vivo ou credencial sobrevivendo à dona.
+		sessoesEncerradas, chavesRevogadas, err = s.executarCascata(ctx, o.UUID)
+		if err != nil {
 			return nil, err
 		}
 	}
 	if err := s.repo.Atualizar(ctx, o); err != nil {
 		return nil, err
+	}
+	if inativou {
+		s.auditar(ctx, "editar", o.UUID, true,
+			"status", string(orgmodel.StatusInativo),
+			"sessoes_encerradas", sessoesEncerradas,
+			"apikeys_revogadas", chavesRevogadas)
+		return o, nil
 	}
 	s.auditar(ctx, "editar", o.UUID, true)
 	return o, nil
@@ -150,20 +160,23 @@ func (s *serviceImpl) Reativar(ctx context.Context, id uuid.UUID) (*orgmodel.Org
 	return o, nil
 }
 
-// Remover é remoção LÓGICA com cascata: suspende os filhos antes de apagar a
-// raiz. O domínio custom REMOVIDO não se libera (índice único total — evita
-// takeover), e o provedor de resolução para de listá-lo imediatamente.
+// Remover é remoção LÓGICA com cascata COMPLETA: suspende os filhos, revoga
+// as chaves de API e encerra as sessões antes de apagar a raiz. O domínio
+// custom REMOVIDO não se libera (índice único total — evita takeover), e o
+// provedor de resolução para de listá-lo imediatamente.
 func (s *serviceImpl) Delete(ctx context.Context, id uuid.UUID) error {
 	if _, err := s.Read(ctx, id); err != nil {
 		return err
 	}
-	if err := s.suspenderFilhos(ctx, id); err != nil {
+	sessoes, chaves, err := s.executarCascata(ctx, id)
+	if err != nil {
 		return err
 	}
 	if err := s.repo.Remover(ctx, id); err != nil {
 		return err
 	}
-	s.auditar(ctx, "remover", id, true)
+	s.auditar(ctx, "remover", id, true,
+		"sessoes_encerradas", sessoes, "apikeys_revogadas", chaves)
 	return nil
 }
 
@@ -278,10 +291,48 @@ func (s *serviceImpl) RevogarApiKey(ctx context.Context, organizationUUID, chave
 
 // --- Internos -----------------------------------------------------------------
 
-// suspenderFilhos roda a cascata PELO CONTRATO (contratos.go) — nunca chamada
-// direta ao subdomínio irmão. O adaptador do bootstrap resolve o singleton na
-// chamada; enquanto o workspace não existe (antes da F3), ele devolve 0 sem
-// erro — não há filho vivo para suspender.
+// executarCascata roda TODA a cascata de inativação/remoção (R4), na ordem:
+// 1) workspaces suspensos PELO CONTRATO (contratos.go) — nunca chamada direta
+// ao irmão; 2) chaves de API revogadas (registro-filho do MESMO agregado);
+// 3) sessões dos usuários encerradas PELO CONTRATO. Tudo ANTES da
+// persistência do novo estado da raiz: se qualquer passo falha, ela continua
+// viva — o pior caso é acessos encerrados com pai ainda ativo (direção
+// segura). Reativar NÃO desfaz: workspaces, chaves e sessões voltam só por
+// ação explícita sobre cada um.
+func (s *serviceImpl) executarCascata(ctx context.Context, organizationUUID uuid.UUID) (sessoesEncerradas, chavesRevogadas int64, err error) {
+	if err := s.suspenderFilhos(ctx, organizationUUID); err != nil {
+		return 0, 0, err
+	}
+	chavesRevogadas, err = s.chaves.RevogarApiKeysDaOrganization(ctx, organizationUUID)
+	if err != nil {
+		slog.ErrorContext(ctx, "organization.cascata_apikeys_falhou",
+			"dominio", orgmodel.Dominio, "subdominio", orgmodel.Subdominio,
+			"organization_uuid", organizationUUID.String(),
+			"ray_trace", orgctx.RayTrace(ctx), "causa", err.Error())
+		return 0, 0, err
+	}
+	sessoesEncerradas, err = s.sessoes.RevogarTokensDaOrganization(ctx)
+	if err != nil {
+		slog.ErrorContext(ctx, "organization.cascata_sessoes_falhou",
+			"dominio", orgmodel.Dominio, "subdominio", orgmodel.Subdominio,
+			"organization_uuid", organizationUUID.String(),
+			"ray_trace", orgctx.RayTrace(ctx), "causa", err.Error())
+		return sessoesEncerradas, chavesRevogadas, err
+	}
+	if chavesRevogadas > 0 || sessoesEncerradas > 0 {
+		slog.InfoContext(ctx, "organization.cascata_acessos_encerrados",
+			"dominio", orgmodel.Dominio, "subdominio", orgmodel.Subdominio,
+			"acao", "cascata_organization_inativada",
+			"organization_uuid", organizationUUID.String(),
+			"apikeys_revogadas", chavesRevogadas,
+			"sessoes_encerradas", sessoesEncerradas)
+	}
+	return sessoesEncerradas, chavesRevogadas, nil
+}
+
+// suspenderFilhos é o passo workspace da cascata — o adaptador do bootstrap
+// resolve o singleton na chamada; enquanto o workspace não existe (antes da
+// F3), ele devolve 0 sem erro — não há filho vivo para suspender.
 func (s *serviceImpl) suspenderFilhos(ctx context.Context, organizationUUID uuid.UUID) error {
 	suspensos, err := s.suspensore.SuspenderPorOrganization(ctx, organizationUUID)
 	if err != nil {

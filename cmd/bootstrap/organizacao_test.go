@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	dominioOrganizacao "workspace-api/internal/identidade/domain/organization"
+	dominioUsuario "workspace-api/internal/identidade/domain/user"
 	dominioWorkspace "workspace-api/internal/identidade/domain/workspace"
 	orgmodel "workspace-api/internal/identidade/model/organization"
 	modelworkspace "workspace-api/internal/identidade/model/workspace"
@@ -86,7 +87,11 @@ func TestSubdominioOrganizationPontaAPonta(t *testing.T) {
 
 	_, err := dominioWorkspace.New(amb.db, nil)
 	require.NoError(t, err)
-	ctrl, err := dominioOrganizacao.New(amb.db, suspendedorWorkspaces{})
+	// O user sobe ANTES da organization exercitar a cascata (R4): o
+	// encerrador de sessões resolve o singleton dele NA CHAMADA.
+	_, err = dominioUsuario.New(amb.db, validadorWorkspaces{})
+	require.NoError(t, err)
+	ctrl, err := dominioOrganizacao.New(amb.db, suspendedorWorkspaces{}, encerradorSessoesUsuario{})
 	require.NoError(t, err)
 	require.NotNil(t, ctrl)
 
