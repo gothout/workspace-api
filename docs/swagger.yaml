@@ -113,6 +113,83 @@ definitions:
       subdominio:
         type: string
     type: object
+  logs.AcessoItemDto:
+    properties:
+      duracao_ms:
+        type: integer
+      instante:
+        type: string
+      ip:
+        type: string
+      metodo:
+        type: string
+      organization_uuid:
+        type: string
+      path:
+        type: string
+      ray_trace:
+        type: string
+      rota:
+        type: string
+      status:
+        type: integer
+      user_agent:
+        type: string
+      user_uuid:
+        type: string
+      workspace_uuid:
+        type: string
+    type: object
+  logs.AuditoriaItemDto:
+    properties:
+      acao:
+        type: string
+      detalhes:
+        additionalProperties:
+          type: string
+        type: object
+      dominio:
+        type: string
+      instante:
+        type: string
+      organization_uuid:
+        type: string
+      ray_trace:
+        type: string
+      subdominio:
+        type: string
+      sucesso:
+        type: boolean
+      user_uuid:
+        type: string
+      workspace_uuid:
+        type: string
+    type: object
+  logs.ErroItemDto:
+    properties:
+      codigo:
+        type: string
+      desconhecido:
+        type: boolean
+      dominio:
+        type: string
+      instante:
+        type: string
+      mensagem:
+        type: string
+      organization_uuid:
+        type: string
+      ray_trace:
+        type: string
+      severidade:
+        type: string
+      subdominio:
+        type: string
+      user_uuid:
+        type: string
+      workspace_uuid:
+        type: string
+    type: object
   organization.ApiKeyCriadaResponseDto:
     properties:
       chave:
@@ -235,6 +312,45 @@ definitions:
         - ativo
         - inativo
         type: string
+    type: object
+  pagination.Response-logs_AcessoItemDto:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/logs.AcessoItemDto'
+        type: array
+      page:
+        type: integer
+      page_size:
+        type: integer
+      total:
+        type: integer
+    type: object
+  pagination.Response-logs_AuditoriaItemDto:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/logs.AuditoriaItemDto'
+        type: array
+      page:
+        type: integer
+      page_size:
+        type: integer
+      total:
+        type: integer
+    type: object
+  pagination.Response-logs_ErroItemDto:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/logs.ErroItemDto'
+        type: array
+      page:
+        type: integer
+      page_size:
+        type: integer
+      total:
+        type: integer
     type: object
   pagination.Response-organization_ApiKeyResponseDto:
     properties:
@@ -568,6 +684,229 @@ paths:
       summary: Lista as permissões do usuário autenticado
       tags:
       - Identidade · Catálogo
+  /api/application/identidade/logs/acesso:
+    get:
+      description: Lista paginada das requisições registradas no recorte do chamador
+        (mesmas regras da trilha de auditoria). Filtros fora do recorte respondem
+        404; ClickHouse ausente responde 503 padronizado
+      parameters:
+      - description: UUID do workspace (fallback quando o host não tem subdomínio)
+        in: header
+        name: X-Workspace-Id
+        type: string
+      - description: Página (default 1)
+        in: query
+        name: page
+        type: integer
+      - description: Itens por página (teto 100)
+        in: query
+        name: pageSize
+        type: integer
+      - description: UUID da organization (só tem efeito para super_admin)
+        in: query
+        name: organization_uuid
+        type: string
+      - description: UUID do workspace
+        in: query
+        name: workspace_uuid
+        type: string
+      - description: UUID do usuário autenticado na requisição original
+        in: query
+        name: user_uuid
+        type: string
+      - description: Correlação por requisição
+        in: query
+        name: ray_trace
+        type: string
+      - description: Instante inicial (RFC3339 UTC)
+        in: query
+        name: inicio
+        type: string
+      - description: Instante final (RFC3339 UTC)
+        in: query
+        name: fim
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/pagination.Response-logs_AcessoItemDto'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/rest_err.RestErr'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/rest_err.RestErr'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/rest_err.RestErr'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/rest_err.RestErr'
+      security:
+      - BearerAuth: []
+      - ApiKeyAuth: []
+      summary: Consulta a trilha de acesso HTTP
+      tags:
+      - Identidade · Logs
+  /api/application/identidade/logs/auditoria:
+    get:
+      description: 'Lista paginada das escritas auditadas no recorte do chamador:
+        super_admin lê qualquer organization, quem tem identidade:logs:ler_organization
+        lê a própria organization inteira e os demais lêem só o workspace resolvido.
+        Filtros fora do recorte respondem 404; ClickHouse ausente responde 503 padronizado'
+      parameters:
+      - description: UUID do workspace (fallback quando o host não tem subdomínio)
+        in: header
+        name: X-Workspace-Id
+        type: string
+      - description: Página (default 1)
+        in: query
+        name: page
+        type: integer
+      - description: Itens por página (teto 100)
+        in: query
+        name: pageSize
+        type: integer
+      - description: UUID da organization (só tem efeito para super_admin)
+        in: query
+        name: organization_uuid
+        type: string
+      - description: UUID do workspace
+        in: query
+        name: workspace_uuid
+        type: string
+      - description: UUID do usuário autor
+        in: query
+        name: user_uuid
+        type: string
+      - description: Ação estável do catálogo de eventos
+        in: query
+        name: acao
+        type: string
+      - description: Correlação por requisição
+        in: query
+        name: ray_trace
+        type: string
+      - description: Instante inicial (RFC3339 UTC)
+        in: query
+        name: inicio
+        type: string
+      - description: Instante final (RFC3339 UTC)
+        in: query
+        name: fim
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/pagination.Response-logs_AuditoriaItemDto'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/rest_err.RestErr'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/rest_err.RestErr'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/rest_err.RestErr'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/rest_err.RestErr'
+      security:
+      - BearerAuth: []
+      - ApiKeyAuth: []
+      summary: Consulta a trilha de auditoria
+      tags:
+      - Identidade · Logs
+  /api/application/identidade/logs/erros:
+    get:
+      description: Lista paginada dos erros devolvidos pelos services (código estável
+        + severidade), no recorte do chamador. Filtro acao casa com o código estável
+        do catálogo. Filtros fora do recorte respondem 404; ClickHouse ausente responde
+        503 padronizado
+      parameters:
+      - description: UUID do workspace (fallback quando o host não tem subdomínio)
+        in: header
+        name: X-Workspace-Id
+        type: string
+      - description: Página (default 1)
+        in: query
+        name: page
+        type: integer
+      - description: Itens por página (teto 100)
+        in: query
+        name: pageSize
+        type: integer
+      - description: UUID da organization (só tem efeito para super_admin)
+        in: query
+        name: organization_uuid
+        type: string
+      - description: UUID do workspace
+        in: query
+        name: workspace_uuid
+        type: string
+      - description: UUID do usuário em cujo contexto o erro ocorreu
+        in: query
+        name: user_uuid
+        type: string
+      - description: 'Código estável do erro (ex.: identidade.workspace.slug_em_uso)'
+        in: query
+        name: acao
+        type: string
+      - description: Correlação por requisição
+        in: query
+        name: ray_trace
+        type: string
+      - description: Instante inicial (RFC3339 UTC)
+        in: query
+        name: inicio
+        type: string
+      - description: Instante final (RFC3339 UTC)
+        in: query
+        name: fim
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/pagination.Response-logs_ErroItemDto'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/rest_err.RestErr'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/rest_err.RestErr'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/rest_err.RestErr'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/rest_err.RestErr'
+      security:
+      - BearerAuth: []
+      - ApiKeyAuth: []
+      summary: Consulta a trilha de erros observados
+      tags:
+      - Identidade · Logs
   /api/domain/identidade/organizations:
     get:
       description: Listagem paginada GLOBAL das organizations (restrita a super_admin/suporte

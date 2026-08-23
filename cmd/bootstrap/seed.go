@@ -9,6 +9,11 @@
 // QUATRO papéis humanos: ver a própria árvore de permissões é pré-requisito
 // de usar qualquer outra — super_admin passa pelo curinga *:*.
 //
+// Leitura de logs (E5): admin_organization lê a organization inteira
+// (identidade:logs:ler + :ler_organization); admin_workspace e
+// somente_leitura leem o recorte do próprio workspace (identidade:logs:ler);
+// usuario_workspace não vê trilhas — auditoria é função de administração.
+//
 // O PROVISIONAMENTO opcional (--super-admin-email/--super-admin-senha) cria o
 // primeiro super_admin e o workspace inicial na organization raiz — o par que
 // falta para o template subir ponta a ponta sem insert manual. Toda regra de
@@ -101,12 +106,14 @@ var papeisSeed = []papelSeed{
 	},
 	{
 		nome:      papelAdminOrganization,
-		descricao: "Dono do contrato: administra workspaces, usuários e as chaves de API da organization; suporte em qualquer workspace da própria.",
+		descricao: "Dono do contrato: administra workspaces, usuários e as chaves de API da organization; suporte em qualquer workspace da própria; lê os logs da organization inteira.",
 		permissoes: []string{
 			"identidade:workspace:*",
 			"identidade:user:*",
 			"identidade:organization:gerenciar_apikeys",
 			"identidade:catalogo:ler",
+			"identidade:logs:ler",
+			"identidade:logs:ler_organization",
 		},
 	},
 	{
@@ -116,6 +123,7 @@ var papeisSeed = []papelSeed{
 			"identidade:workspace:editar",
 			"identidade:user:*",
 			"identidade:catalogo:ler",
+			"identidade:logs:ler",
 		},
 	},
 	{
@@ -134,6 +142,7 @@ var papeisSeed = []papelSeed{
 			"identidade:workspace:ler",
 			"identidade:user:ler",
 			"identidade:catalogo:ler",
+			"identidade:logs:ler",
 		},
 	},
 }

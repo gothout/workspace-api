@@ -114,6 +114,10 @@ Especificação completa em `agents/02` e `db/migrations/AGENTS.md`.
   (slog sempre ativo, ClickHouse, alerta agregado) sem nunca mudar a
   resposta; o vocabulário de erros + o namespace reservado `sistema.*`
   aparecem em `GET /api/system/eventos` e na CLI `workspace-api errors`.
+- As trilhas gravadas (auditoria, acesso, erros) são consultáveis via
+  aplicação `logs` — `GET /api/application/identidade/logs/{auditoria,
+  acesso,erros}` com recorte plataforma/organization/workspace imposto pelo
+  ctx; ClickHouse ausente = 503 padronizado.
 - O front-end consome os três como mapping — sem hardcode de código de erro,
   regra de acesso nem nome de evento.
 

@@ -232,7 +232,8 @@ func TestResolvedorPermissoesViaServiceDoUserSobreEsquemaReal(t *testing.T) {
 	permissoes, err = svc.PermissoesEfetivas(ctxOrg, dono, wsA2)
 	require.NoError(t, err)
 	assert.ElementsMatch(t, []string{"identidade:workspace:*", "identidade:user:*",
-		"identidade:organization:gerenciar_apikeys", "identidade:catalogo:ler"}, permissoes)
+		"identidade:organization:gerenciar_apikeys", "identidade:catalogo:ler",
+		"identidade:logs:ler", "identidade:logs:ler_organization"}, permissoes)
 
 	// Sem vínculo e sem suporte: negativa limpa (forasteiro nem existe aqui).
 	forasteiro := uuid.MustParse("cccccccc-0000-4000-8000-00000000cc03")

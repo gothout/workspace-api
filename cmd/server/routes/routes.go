@@ -15,12 +15,14 @@ import (
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
 
 	aplicacaoauth "workspace-api/internal/identidade/application/auth"
 	aplicacaocatalogo "workspace-api/internal/identidade/application/catalogo"
+	aplicacaologs "workspace-api/internal/identidade/application/logs"
 	organizacao "workspace-api/internal/identidade/domain/organization"
 	usuario "workspace-api/internal/identidade/domain/user"
 	workspace "workspace-api/internal/identidade/domain/workspace"
@@ -137,6 +139,9 @@ func registrarConhecidos(engine *gin.Engine, dominio, aplicacao *gin.RouterGroup
 	registrarRotas("identidade.auth", aplicacao, func() (Controlador, error) {
 		return aplicacaoauth.Use()
 	})
+	registrarRotas("identidade.logs", aplicacao, func() (Controlador, error) {
+		return aplicacaologs.Use()
+	})
 	// A aplicação catalogo pendura rotas nas DUAS casas: o grupo
 	// /api/application e a rota de sistema /api/system/errors direto no
 	// engine — exceção de prefixo decidida no doc 01/04. Sem boot, nenhuma
@@ -175,8 +180,23 @@ func middlewareAccessLog(destino access_log.Destino) gin.HandlerFunc {
 			IP:        c.ClientIP(),
 			UserAgent: c.Request.UserAgent(),
 			RayTrace:  ray,
+			// Tenancy (E5): lida DEPOIS da cadeia — o ctx aqui já carrega o
+			// que SetContextAuthorization/ResolveWorkspace injetaram. Vazio
+			// fora da cadeia (404, /doc) é honesto e não vaza nada.
+			OrganizationUUID: uuidTenancy(orgctx.OrganizationUUID(c.Request.Context())),
+			WorkspaceUUID:    uuidTenancy(orgctx.WorkspaceUUID(c.Request.Context())),
+			UserUUID:         uuidTenancy(orgctx.UserUUID(c.Request.Context())),
 		})
 	}
+}
+
+// uuidTenancy converte o uuid do ctx para a coluna da trilha: uuid.Nil vira
+// string vazia (sem tenancy na requisição), o resto vai como texto.
+func uuidTenancy(id uuid.UUID) string {
+	if id == uuid.Nil {
+		return ""
+	}
+	return id.String()
 }
 
 // politicaCors aceita origens do domínio-base da plataforma (inclusive

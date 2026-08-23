@@ -22,6 +22,7 @@ import (
 
 	aplicacaoauth "workspace-api/internal/identidade/application/auth"
 	aplicacaocatalogo "workspace-api/internal/identidade/application/catalogo"
+	aplicacaologs "workspace-api/internal/identidade/application/logs"
 
 	"workspace-api/cmd/server"
 	"workspace-api/cmd/server/routes"
@@ -180,6 +181,16 @@ func Serve(caminhoConfig string) error {
 		return fmt.Errorf("boot: %w", err)
 	}
 	slog.Info("[BOOTSTRAP-DI] Contêiner Identidade/Auth inicializado.")
+
+	// Aplicação logs (E5) — leitura das trilhas do ClickHouse com recorte em
+	// 3 níveis; o adaptador resolve o consultor NA CHAMADA, então ClickHouse
+	// degradado não impede o boot (as rotas respondem 503 padronizado).
+	if _, err := aplicacaologs.New(aplicacaologs.Dependencias{
+		Trilhas: consultorLogs{},
+	}); err != nil {
+		return fmt.Errorf("boot: %w", err)
+	}
+	slog.Info("[BOOTSTRAP-DI] Contêiner Identidade/Logs inicializado.")
 
 	// Aplicação catalogo — DEPOIS de todos os subdomínios: os agregadores
 	// acima só enxergam os Catalogo()/CatalogoEventos() dos pacotes já

@@ -33,6 +33,9 @@ POST   /api/domain/identidade/workspaces/{uuid}/acoes/reativar
 POST   /api/application/identidade/auth/login
 POST   /api/application/identidade/auth/refresh
 GET    /api/application/identidade/catalogo/permissoes/minhas
+GET    /api/application/identidade/logs/auditoria
+GET    /api/application/identidade/logs/acesso
+GET    /api/application/identidade/logs/erros
 GET    /api/system/errors
 GET    /api/system/eventos
 ```
@@ -233,3 +236,18 @@ Desde a evolução **errobserve**, a mesma rota carrega também o vocabulário d
 - Um **evento por código de erro** de cada subdomínio, no grupo dona dele — `acao` = o MESMO código estável do `/api/system/errors` (ex.: `identidade.workspace.slug_em_uso`), `descricao` = mensagem PT-BR do catálogo e `campos: ["severidade"]` (a severidade real vai no payload do evento quando ele dispara). É o mapping "quais erros existem e com que peso são observados" sem hardcode no front.
 - O grupo **`sistema/plataforma`** expõe o namespace RESERVADO (`sistema.boot`, `sistema.migrations.up`, `sistema.degradacao_dependencia`, `sistema.shutdown`) — eventos de plataforma nunca usam dominio de negócio, e negócio não registra em `sistema.*`.
 - A severidade de cada código também sai na CLI: `workspace-api errors` (código, severidade, status, mensagem) — mesmo dado, outra porta.
+
+## CONTRATO — leitura das trilhas de log
+
+`GET /api/application/identidade/logs/{auditoria,acesso,erros}` (auth completa rota a rota, exigência `identidade:logs:ler`). A consulta das trilhas gravadas no ClickHouse segue o envelope padrão de paginação (`{items, page, page_size, total}`, ordem `instante DESC`) e um **modelo de escopo em 3 recortes derivado SEMPRE do ctx** — query param nunca escolhe escopo:
+
+| Recorte | Quem | Alcance |
+|---|---|---|
+| **Plataforma** | possui `*:*` (super_admin) | qualquer organization; filtros opcionais honrados |
+| **Organization** | atende `identidade:logs:ler_organization` | preso à própria organization (todos os workspaces dela) |
+| **Workspace** | demais com `identidade:logs:ler` | preso ao par (organization, workspace) resolvido |
+
+- Filtro apontando fora do recorte responde **404** (`identidade.logs.fora_do_escopo`) — uuid alheio exista ou não recebe a mesma resposta.
+- Filtros: `organization_uuid` (só tem efeito para a plataforma), `workspace_uuid`, `user_uuid`, `acao` (= ação estável na auditoria; = código estável nos erros; ignorado no acesso), `ray_trace`, janela `inicio`/`fim` em RFC3339 UTC; UUID/timestamp malformado = 400.
+- Campos dos itens espelham as trilhas: auditoria (`acao`, `sucesso`, `detalhes`, identificadores), acesso (`metodo`, `path`, `rota`, `status`, `duracao_ms`, tenancy), erros (`codigo`, `mensagem`, `severidade`, `desconhecido` — a causa NUNCA sai via API).
+- **ClickHouse ausente = 503 padronizado** (`identidade.logs.indisponivel`) — nunca 500 nem lista vazia silenciosa.

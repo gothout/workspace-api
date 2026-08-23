@@ -252,6 +252,13 @@ GET /api/application/identidade/catalogo/permissoes/minhas
 
 # O QUE PODE dar errado: mapa completo code estável + mensagem PT-BR + status
 GET /api/system/errors
+
+# HISTÓRICO do que aconteceu: trilhas de auditoria, acesso e erros, com
+# escopo automático (super_admin = tudo; admin_organization = a org inteira;
+# demais = o próprio workspace) — ClickHouse ausente responde 503 padronizado
+GET /api/application/identidade/logs/auditoria
+GET /api/application/identidade/logs/acesso
+GET /api/application/identidade/logs/erros
 ```
 
 - Permissão nova aparece na árvore quando entra no `Catalogo()` do

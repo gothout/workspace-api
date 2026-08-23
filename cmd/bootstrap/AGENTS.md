@@ -35,7 +35,11 @@ encerramento limpo. Detalhes do desenho em `agents/01` e `agents/05`.
    explícita, uma linha de log `[BOOTSTRAP-DI]` por subdomínio. O workspace
    recebe o cache de resolução Redis; o user, o observador de invalidação
    de permissões (ambos de `cache_redis.go`, no-op sem Redis); os três e o
-   auth recebem a trilha de auditoria (#9).
+   auth recebem a trilha de auditoria (#9). As aplicações auth (contratos
+   resolvidos na chamada), logs (E5 — leitura das trilhas; o adaptador
+   `consultorLogs` em `logs.go` resolve o consultor do ClickHouse NA
+   CHAMADA e devolve 503 padronizado quando degradado) e catalogo
+   (agregadores dos catálogos) fecham a montagem.
 10. Engine HTTP (`cmd/server/routes` + `cmd/server`) e subida do servidor.
 
 ## Regras

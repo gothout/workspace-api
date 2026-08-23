@@ -14,6 +14,7 @@ import (
 
 	aplicacaoauth "workspace-api/internal/identidade/application/auth"
 	aplicacaocatalogo "workspace-api/internal/identidade/application/catalogo"
+	aplicacaologs "workspace-api/internal/identidade/application/logs"
 	dominioOrganizacao "workspace-api/internal/identidade/domain/organization"
 	dominioUsuario "workspace-api/internal/identidade/domain/user"
 	dominioWorkspace "workspace-api/internal/identidade/domain/workspace"
@@ -54,6 +55,18 @@ func novoAgregadorPermissoes() agregadorPermissoes {
 		})
 	}
 	for _, meta := range dominioUsuario.Catalogo() {
+		rotas := make([]aplicacaocatalogo.RotaMeta, 0, len(meta.Rotas))
+		for _, rota := range meta.Rotas {
+			rotas = append(rotas, aplicacaocatalogo.RotaMeta{Rota: rota.Rota, Metodo: rota.Metodo})
+		}
+		itens = append(itens, aplicacaocatalogo.PermissaoMeta{
+			Permissao: meta.Permissao, Descricao: meta.Descricao,
+			Rotas: rotas, GrupoMenu: meta.GrupoMenu,
+		})
+	}
+	// Aplicação logs (E5): permissões próprias (recorte workspace ×
+	// organization), mesma forma dos subdomínios.
+	for _, meta := range aplicacaologs.Catalogo() {
 		rotas := make([]aplicacaocatalogo.RotaMeta, 0, len(meta.Rotas))
 		for _, rota := range meta.Rotas {
 			rotas = append(rotas, aplicacaocatalogo.RotaMeta{Rota: rota.Rota, Metodo: rota.Metodo})

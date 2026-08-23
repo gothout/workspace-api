@@ -18,6 +18,8 @@ import (
 	"workspace-api/internal/pkg/errobserve"
 	"workspace-api/internal/pkg/log/access_log"
 	"workspace-api/internal/pkg/log/audit_log"
+
+	aplicacaologs "workspace-api/internal/identidade/application/logs"
 )
 
 // trilhas carrega os destinos prontos para consumo pelo middleware de acesso
@@ -91,3 +93,51 @@ type destinoErros struct{ escritor *clickhouse.Escritor }
 func (d destinoErros) Registrar(ev errobserve.Evento) {
 	d.escritor.EnfileirarErros(ev)
 }
+
+// --- Leitura das trilhas (E5) ----------------------------------------------
+
+// consultorLogs liga o contrato ConsultaTrilhas da aplicação logs ao
+// consultor do ClickHouse, resolvendo o singleton NA CHAMADA (mesma
+// disciplina dos demais adaptadores): degradado/ausente devolve
+// aplicacaologs.ErrIndisponivel — que vira o 503 padronizado, nunca lista
+// vazia silenciosa.
+type consultorLogs struct{}
+
+func (consultorLogs) Auditoria(ctx context.Context, f clickhouse.FiltroTrilha) ([]audit_log.Evento, int64, error) {
+	c, err := consultadorAtivo()
+	if err != nil {
+		return nil, 0, err
+	}
+	return c.Auditoria(ctx, f)
+}
+
+func (consultorLogs) Acesso(ctx context.Context, f clickhouse.FiltroTrilha) ([]access_log.Evento, int64, error) {
+	c, err := consultadorAtivo()
+	if err != nil {
+		return nil, 0, err
+	}
+	return c.Acesso(ctx, f)
+}
+
+func (consultorLogs) Erros(ctx context.Context, f clickhouse.FiltroTrilha) ([]errobserve.Evento, int64, error) {
+	c, err := consultadorAtivo()
+	if err != nil {
+		return nil, 0, err
+	}
+	return c.Erros(ctx, f)
+}
+
+// consultadorAtivo resolve o consultor do processo: não inicializado OU
+// degradado = ErrIndisponivel (wrapping com %w — errors.Is tem que casar).
+func consultadorAtivo() (*clickhouse.Consultor, error) {
+	consultor, err := clickhouse.UseConsultor()
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", aplicacaologs.ErrIndisponivel, err)
+	}
+	if consultor == nil {
+		return nil, aplicacaologs.ErrIndisponivel
+	}
+	return consultor, nil
+}
+
+var _ aplicacaologs.ConsultaTrilhas = consultorLogs{}

@@ -1,6 +1,7 @@
 package bootstrap
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"strings"
@@ -12,10 +13,15 @@ import (
 	"workspace-api/cmd/server/routes"
 	aplicacaoauth "workspace-api/internal/identidade/application/auth"
 	aplicacaocatalogo "workspace-api/internal/identidade/application/catalogo"
+	aplicacaologs "workspace-api/internal/identidade/application/logs"
 	dominioOrganizacao "workspace-api/internal/identidade/domain/organization"
 	dominioUsuario "workspace-api/internal/identidade/domain/user"
 	dominioWorkspace "workspace-api/internal/identidade/domain/workspace"
+	"workspace-api/internal/infra/clickhouse"
 	"workspace-api/internal/pkg/config"
+	"workspace-api/internal/pkg/errobserve"
+	"workspace-api/internal/pkg/log/access_log"
+	"workspace-api/internal/pkg/log/audit_log"
 )
 
 // --- Cobertura Swagger (fase F6) --------------------------------------------
@@ -77,6 +83,10 @@ func TestSwaggerCobreExatamenteAsRotasRegistradas(t *testing.T) {
 		Permissoes: novoAgregadorPermissoes(),
 		Eventos:    novoAgregadorEventos(),
 	})
+	require.NoError(t, err)
+	// Aplicação logs (E5): rotas só precisam do Use() não-nil — o consultor
+	// nunca é tocado pelo registro; dublê local basta.
+	_, err = aplicacaologs.New(aplicacaologs.Dependencias{Trilhas: consultorSwaggerFake{}})
 	require.NoError(t, err)
 
 	engine, err := routes.Montar(routes.Opcoes{
@@ -142,4 +152,20 @@ func TestSwaggerCobreExatamenteAsRotasRegistradas(t *testing.T) {
 
 func metodoECaminho(metodo, caminho string) string {
 	return metodo + " " + caminho
+}
+
+// consultorSwaggerFake satisfaz o contrato da aplicação logs sem tocar as
+// trilhas — o teste de cobertura registra rotas, não consulta logs.
+type consultorSwaggerFake struct{}
+
+func (consultorSwaggerFake) Auditoria(ctx context.Context, filtro clickhouse.FiltroTrilha) ([]audit_log.Evento, int64, error) {
+	return nil, 0, nil
+}
+
+func (consultorSwaggerFake) Acesso(ctx context.Context, filtro clickhouse.FiltroTrilha) ([]access_log.Evento, int64, error) {
+	return nil, 0, nil
+}
+
+func (consultorSwaggerFake) Erros(ctx context.Context, filtro clickhouse.FiltroTrilha) ([]errobserve.Evento, int64, error) {
+	return nil, 0, nil
 }

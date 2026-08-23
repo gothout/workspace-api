@@ -421,7 +421,7 @@
         "Testes: os três recortes de escopo, filtros, paginação, degradação, permissão negada — build/vet/test e -race verdes"
       ],
       "priority": 19,
-      "passes": false,
+      "passes": true,
       "issue": 27,
       "branch": "ox-alpha/evolucao-logs-leitura",
       "docs": [

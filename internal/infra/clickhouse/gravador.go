@@ -36,7 +36,10 @@ func (g *gravadorClickhouse) InserirAcessos(ctx context.Context, lote []access_l
 	if len(lote) == 0 {
 		return nil
 	}
-	batch, err := g.conn.PrepareBatch(ctx, "INSERT INTO "+tabelaAcesso)
+	// Lista explícita de colunas: a trilha ganhou tenancy no E5 via ALTER
+	// TABLE (db/logs/0004) — depender da ordem física ficaria frágil.
+	batch, err := g.conn.PrepareBatch(ctx,
+		"INSERT INTO "+tabelaAcesso+" (instante, metodo, path, rota, status, duracao_ms, ip, user_agent, ray_trace, organization_uuid, workspace_uuid, user_uuid)")
 	if err != nil {
 		return err
 	}
@@ -44,6 +47,7 @@ func (g *gravadorClickhouse) InserirAcessos(ctx context.Context, lote []access_l
 		if err := batch.Append(
 			ev.Instante, ev.Metodo, ev.Path, ev.Rota,
 			int32(ev.Status), ev.DuracaoMS, ev.IP, ev.UserAgent, ev.RayTrace,
+			ev.OrganizationUUID, ev.WorkspaceUUID, ev.UserUUID,
 		); err != nil {
 			return err
 		}
@@ -55,7 +59,8 @@ func (g *gravadorClickhouse) InserirAuditorias(ctx context.Context, lote []audit
 	if len(lote) == 0 {
 		return nil
 	}
-	batch, err := g.conn.PrepareBatch(ctx, "INSERT INTO "+tabelaAuditoria)
+	batch, err := g.conn.PrepareBatch(ctx,
+		"INSERT INTO "+tabelaAuditoria+" (instante, dominio, subdominio, acao, sucesso, organization_uuid, workspace_uuid, user_uuid, ray_trace, detalhes)")
 	if err != nil {
 		return err
 	}
@@ -76,7 +81,8 @@ func (g *gravadorClickhouse) InserirErros(ctx context.Context, lote []errobserve
 	if len(lote) == 0 {
 		return nil
 	}
-	batch, err := g.conn.PrepareBatch(ctx, "INSERT INTO "+tabelaErro)
+	batch, err := g.conn.PrepareBatch(ctx,
+		"INSERT INTO "+tabelaErro+" (instante, dominio, subdominio, codigo, mensagem, severidade, desconhecido, organization_uuid, workspace_uuid, user_uuid, ray_trace, causa)")
 	if err != nil {
 		return err
 	}

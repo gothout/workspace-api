@@ -17,17 +17,22 @@ import (
 
 // Evento é uma linha da trilha de acesso. Rota é o PADRÃO casado pelo gin
 // (/api/domain/identidade/organizations/{uuid}) — agrupável no ClickHouse;
-// Path é o caminho cru da requisição.
+// Path é o caminho cru da requisição. Os identificadores de tenancy (E5)
+// são preenchidos pelo middleware DEPOIS da cadeia rodar — vazios quando a
+// requisição não passou por ela (404, /doc) ou não resolveu workspace.
 type Evento struct {
-	Instante  time.Time
-	Metodo    string
-	Path      string
-	Rota      string
-	Status    int
-	DuracaoMS int64
-	IP        string
-	UserAgent string
-	RayTrace  string
+	Instante         time.Time
+	Metodo           string
+	Path             string
+	Rota             string
+	Status           int
+	DuracaoMS        int64
+	IP               string
+	UserAgent        string
+	RayTrace         string
+	OrganizationUUID string
+	WorkspaceUUID    string
+	UserUUID         string
 }
 
 // Destino é quem consome a trilha (ClickHouse, stdout de teste). Implementação
@@ -47,10 +52,20 @@ func (slogDestino) Registrar(ev Evento) {
 	if ev.Instante.IsZero() {
 		ev.Instante = time.Now().UTC()
 	}
-	slog.Info("acesso",
+	args := []any{
 		"instante", ev.Instante.Format(time.RFC3339Nano),
 		"metodo", ev.Metodo, "path", ev.Path, "rota", ev.Rota,
 		"status", ev.Status, "duracao_ms", ev.DuracaoMS,
 		"ip", ev.IP, "user_agent", ev.UserAgent,
-		"ray_trace", ev.RayTrace)
+		"ray_trace", ev.RayTrace}
+	if ev.OrganizationUUID != "" {
+		args = append(args, "organization_uuid", ev.OrganizationUUID)
+	}
+	if ev.WorkspaceUUID != "" {
+		args = append(args, "workspace_uuid", ev.WorkspaceUUID)
+	}
+	if ev.UserUUID != "" {
+		args = append(args, "user_uuid", ev.UserUUID)
+	}
+	slog.Info("acesso", args...)
 }

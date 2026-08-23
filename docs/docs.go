@@ -204,6 +204,342 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/application/identidade/logs/acesso": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Lista paginada das requisições registradas no recorte do chamador (mesmas regras da trilha de auditoria). Filtros fora do recorte respondem 404; ClickHouse ausente responde 503 padronizado",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Identidade · Logs"
+                ],
+                "summary": "Consulta a trilha de acesso HTTP",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "UUID do workspace (fallback quando o host não tem subdomínio)",
+                        "name": "X-Workspace-Id",
+                        "in": "header"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Página (default 1)",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Itens por página (teto 100)",
+                        "name": "pageSize",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "UUID da organization (só tem efeito para super_admin)",
+                        "name": "organization_uuid",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "UUID do workspace",
+                        "name": "workspace_uuid",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "UUID do usuário autenticado na requisição original",
+                        "name": "user_uuid",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Correlação por requisição",
+                        "name": "ray_trace",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Instante inicial (RFC3339 UTC)",
+                        "name": "inicio",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Instante final (RFC3339 UTC)",
+                        "name": "fim",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/pagination.Response-logs_AcessoItemDto"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/application/identidade/logs/auditoria": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Lista paginada das escritas auditadas no recorte do chamador: super_admin lê qualquer organization, quem tem identidade:logs:ler_organization lê a própria organization inteira e os demais lêem só o workspace resolvido. Filtros fora do recorte respondem 404; ClickHouse ausente responde 503 padronizado",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Identidade · Logs"
+                ],
+                "summary": "Consulta a trilha de auditoria",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "UUID do workspace (fallback quando o host não tem subdomínio)",
+                        "name": "X-Workspace-Id",
+                        "in": "header"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Página (default 1)",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Itens por página (teto 100)",
+                        "name": "pageSize",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "UUID da organization (só tem efeito para super_admin)",
+                        "name": "organization_uuid",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "UUID do workspace",
+                        "name": "workspace_uuid",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "UUID do usuário autor",
+                        "name": "user_uuid",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Ação estável do catálogo de eventos",
+                        "name": "acao",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Correlação por requisição",
+                        "name": "ray_trace",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Instante inicial (RFC3339 UTC)",
+                        "name": "inicio",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Instante final (RFC3339 UTC)",
+                        "name": "fim",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/pagination.Response-logs_AuditoriaItemDto"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/application/identidade/logs/erros": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Lista paginada dos erros devolvidos pelos services (código estável + severidade), no recorte do chamador. Filtro acao casa com o código estável do catálogo. Filtros fora do recorte respondem 404; ClickHouse ausente responde 503 padronizado",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Identidade · Logs"
+                ],
+                "summary": "Consulta a trilha de erros observados",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "UUID do workspace (fallback quando o host não tem subdomínio)",
+                        "name": "X-Workspace-Id",
+                        "in": "header"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Página (default 1)",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Itens por página (teto 100)",
+                        "name": "pageSize",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "UUID da organization (só tem efeito para super_admin)",
+                        "name": "organization_uuid",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "UUID do workspace",
+                        "name": "workspace_uuid",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "UUID do usuário em cujo contexto o erro ocorreu",
+                        "name": "user_uuid",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Código estável do erro (ex.: identidade.workspace.slug_em_uso)",
+                        "name": "acao",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Correlação por requisição",
+                        "name": "ray_trace",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Instante inicial (RFC3339 UTC)",
+                        "name": "inicio",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Instante final (RFC3339 UTC)",
+                        "name": "fim",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/pagination.Response-logs_ErroItemDto"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    }
+                }
+            }
+        },
         "/api/domain/identidade/organizations": {
             "get": {
                 "security": [
@@ -2023,6 +2359,123 @@ const docTemplate = `{
                 }
             }
         },
+        "logs.AcessoItemDto": {
+            "type": "object",
+            "properties": {
+                "duracao_ms": {
+                    "type": "integer"
+                },
+                "instante": {
+                    "type": "string"
+                },
+                "ip": {
+                    "type": "string"
+                },
+                "metodo": {
+                    "type": "string"
+                },
+                "organization_uuid": {
+                    "type": "string"
+                },
+                "path": {
+                    "type": "string"
+                },
+                "ray_trace": {
+                    "type": "string"
+                },
+                "rota": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "integer"
+                },
+                "user_agent": {
+                    "type": "string"
+                },
+                "user_uuid": {
+                    "type": "string"
+                },
+                "workspace_uuid": {
+                    "type": "string"
+                }
+            }
+        },
+        "logs.AuditoriaItemDto": {
+            "type": "object",
+            "properties": {
+                "acao": {
+                    "type": "string"
+                },
+                "detalhes": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "dominio": {
+                    "type": "string"
+                },
+                "instante": {
+                    "type": "string"
+                },
+                "organization_uuid": {
+                    "type": "string"
+                },
+                "ray_trace": {
+                    "type": "string"
+                },
+                "subdominio": {
+                    "type": "string"
+                },
+                "sucesso": {
+                    "type": "boolean"
+                },
+                "user_uuid": {
+                    "type": "string"
+                },
+                "workspace_uuid": {
+                    "type": "string"
+                }
+            }
+        },
+        "logs.ErroItemDto": {
+            "type": "object",
+            "properties": {
+                "codigo": {
+                    "type": "string"
+                },
+                "desconhecido": {
+                    "type": "boolean"
+                },
+                "dominio": {
+                    "type": "string"
+                },
+                "instante": {
+                    "type": "string"
+                },
+                "mensagem": {
+                    "type": "string"
+                },
+                "organization_uuid": {
+                    "type": "string"
+                },
+                "ray_trace": {
+                    "type": "string"
+                },
+                "severidade": {
+                    "type": "string"
+                },
+                "subdominio": {
+                    "type": "string"
+                },
+                "user_uuid": {
+                    "type": "string"
+                },
+                "workspace_uuid": {
+                    "type": "string"
+                }
+            }
+        },
         "organization.ApiKeyCriadaResponseDto": {
             "type": "object",
             "properties": {
@@ -2203,6 +2656,66 @@ const docTemplate = `{
                         "ativo",
                         "inativo"
                     ]
+                }
+            }
+        },
+        "pagination.Response-logs_AcessoItemDto": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/logs.AcessoItemDto"
+                    }
+                },
+                "page": {
+                    "type": "integer"
+                },
+                "page_size": {
+                    "type": "integer"
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "pagination.Response-logs_AuditoriaItemDto": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/logs.AuditoriaItemDto"
+                    }
+                },
+                "page": {
+                    "type": "integer"
+                },
+                "page_size": {
+                    "type": "integer"
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "pagination.Response-logs_ErroItemDto": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/logs.ErroItemDto"
+                    }
+                },
+                "page": {
+                    "type": "integer"
+                },
+                "page_size": {
+                    "type": "integer"
+                },
+                "total": {
+                    "type": "integer"
                 }
             }
         },

@@ -35,6 +35,7 @@ var (
 	mutex    sync.RWMutex
 	once     sync.Once
 	instance *Escritor
+	consult  *Consultor
 	connexao driver.Conn
 	iniciado bool
 	initErr  error
@@ -78,7 +79,8 @@ func Connect(cfg config.ClickHouseConfig) driver.Conn {
 // InitClickhouse monta o singleton do processo a partir da config do boot.
 // DEGRADÁVEL: nunca derruba o boot — sem servidor, devolve (nil, nil) e o
 // bootstrap liga os destinos stdout. Com servidor, abre o writer em lote que
-// consome as duas trilhas.
+// consome as duas trilhas e o consultor de leitura (E5) sobre a MESMA
+// conexão.
 func InitClickhouse() (*Escritor, error) {
 	mutex.Lock()
 	defer mutex.Unlock()
@@ -91,8 +93,10 @@ func InitClickhouse() (*Escritor, error) {
 		connexao = Connect(cfg.Databases.ClickHouse)
 		if connexao == nil {
 			instance = nil
+			consult = nil
 		} else {
 			instance = NovaEscritor(NovoGravador(connexao), cfg.Logs)
+			consult = NovoConsultor(connexao)
 			slog.Info("[BOOTSTRAP] clickhouse conectado",
 				"database", cfg.Databases.ClickHouse.Database)
 		}
@@ -115,6 +119,18 @@ func Use() (*Escritor, error) {
 	return instance, nil
 }
 
+// UseConsultor devolve o consultor de leitura das trilhas (E5). NIL com erro
+// nil = degradado (o consumidor responde 503 padronizado); erro só quando o
+// boot não rodou InitClickhouse.
+func UseConsultor() (*Consultor, error) {
+	mutex.RLock()
+	defer mutex.RUnlock()
+	if !iniciado {
+		return nil, ErrNaoInicializado
+	}
+	return consult, nil
+}
+
 // Close encerra o singleton: drena o writer (lotes pendentes vão ao banco)
 // e fecha a conexão. Idempotente; degradado é inofensivo.
 func Close() {
@@ -124,6 +140,7 @@ func Close() {
 		instance.Fechar()
 		instance = nil
 	}
+	consult = nil
 	if connexao != nil {
 		_ = connexao.Close()
 		connexao = nil
@@ -142,6 +159,7 @@ func ResetarParaTeste() {
 		_ = connexao.Close()
 	}
 	instance = nil
+	consult = nil
 	connexao = nil
 	iniciado = false
 	initErr = nil
