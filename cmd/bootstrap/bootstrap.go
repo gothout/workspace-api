@@ -154,12 +154,16 @@ func Serve(caminhoConfig string) error {
 
 	// 8. HTTP — sondas e provedor de domínios custom injetados como funções;
 	// o servidor drena requisições em voo antes do fechamento LIFO.
-	engine := routes.Montar(routes.Opcoes{
+	engine, err := routes.Montar(routes.Opcoes{
 		App:            cfg.App,
 		Cors:           cfg.Server.HTTP.Cors,
+		TrustedProxies: cfg.Server.HTTP.TrustedProxy,
 		SondaBanco:     postgres.Ping,
 		DominiosCustom: dominiosCustomParaCors,
 	})
+	if err != nil {
+		return fmt.Errorf("boot: %w", err)
+	}
 	readTimeout, writeTimeout, idleTimeout := cfg.Server.HTTP.Timeouts()
 	servidor := server.Novo(engine, server.Opcoes{
 		Porta:           cfg.Server.HTTP.Port,

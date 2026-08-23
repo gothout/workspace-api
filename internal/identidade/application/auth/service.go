@@ -9,6 +9,7 @@ import (
 	modeluser "workspace-api/internal/identidade/model/user"
 	"workspace-api/internal/infra/jwt"
 	"workspace-api/internal/pkg/orgctx"
+	"workspace-api/internal/pkg/pii"
 )
 
 // Service orquestra user × resolução da organization pelo Host — caso de uso
@@ -64,7 +65,9 @@ func (s *serviceImpl) Login(ctx context.Context, host string, in LoginEntrada) (
 	ctxOrg := orgctx.WithOrganization(ctx, org)
 	u, err := s.deps.Usuarios.Autenticar(ctxOrg, in.Email, in.Senha)
 	if err != nil {
-		s.auditar(ctx, "login", false, "email", in.Email)
+		// E-mail é PII e, aqui, input NÃO validado do cliente: vai mascarado
+		// (R7) — auditoria mantém o "quem" aproximado sem ecoar o valor.
+		s.auditar(ctx, "login", false, "email", pii.MascaraEmail(in.Email))
 		return nil, ErrCredenciaisInvalidas // o motivo exato fica no subdomínio/log
 	}
 	sessao, err := s.abrirSessao(ctxOrg, u)

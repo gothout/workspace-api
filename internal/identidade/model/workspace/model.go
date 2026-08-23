@@ -8,7 +8,6 @@ package workspace
 
 import (
 	"errors"
-	"regexp"
 	"strings"
 	"time"
 
@@ -16,6 +15,7 @@ import (
 	"gorm.io/gorm"
 
 	"workspace-api/internal/pkg/pagination"
+	"workspace-api/internal/pkg/validator"
 )
 
 const (
@@ -60,15 +60,13 @@ func (s StatusWorkspace) Valido() bool {
 // subdomínio, não daqui).
 type Slug string
 
-// slugRegex é o formato DNS do rótulo: minúsculas, dígitos e hífen, sem
-// começar nem terminar em hífen, 3 a 63 caracteres (doc 03, regra 8).
-var slugRegex = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{1,61}[a-z0-9])$`)
-
 // ParseSlug valida o formato DNS e devolve o VO; inválido = ErrSlugInvalido.
-// (A tag `slugdns` do DTO é a primeira linha de defesa; aqui é a garantia de
-// domínio.)
+// A expressão canônica mora em pkg/validator (única fonte: pkg é folha,
+// alcançável por todos; R7 deduplicou a cópia que vivia aqui) — a tag
+// `slugdns` do DTO executa a MESMA regex no binding; aqui é a garantia de
+// domínio. (A tag é primeira linha de defesa.)
 func ParseSlug(valor string) (Slug, error) {
-	if !slugRegex.MatchString(valor) {
+	if !validator.SlugValido(valor) {
 		return "", ErrSlugInvalido
 	}
 	return Slug(valor), nil

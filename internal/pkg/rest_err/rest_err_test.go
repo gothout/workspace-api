@@ -165,3 +165,30 @@ func TestWriteErrorComNilDevolveInterno(t *testing.T) {
 	WriteError(c, nil)
 	assert.Equal(t, http.StatusInternalServerError, recorder.Code)
 }
+
+// R7 (issue #25): DoCatalogo é DETERMINÍSTICO — a mesma sentinela casando em
+// DOIS catálogos (ou com duas entradas por wrapping) devolve sempre o menor
+// par (domínio.subdomínio, código), nunca o que o mapa do Go sortear.
+func TestDoCatalogoDeterministicoComEmpate(t *testing.T) {
+	ResetarRegistroParaTeste()
+	defer ResetarRegistroParaTeste()
+
+	sentinela := errors.New("erro compartilhado entre subdomínios")
+	registrar("identidade", "workspace", sentinela, "identidade.workspace.ultimo", 404)
+	registrar("identidade", "auth", sentinela, "identidade.auth.primeiro", 401)
+	registrar("aaa", "zzz", sentinela, "aaa.zzz.empata_no_grupo", 400)
+
+	for i := 0; i < 50; i++ {
+		err := DoCatalogo(sentinela)
+		assert.Equal(t, "aaa.zzz.empata_no_grupo", err.Code,
+			"menor grupo vence — ordem estável em %d execuções", i)
+		assert.Equal(t, 400, err.Status)
+	}
+}
+
+// registrar insere um catálogo de entrada única com o par sentinela → código.
+func registrar(grupo, sub string, sentinela error, codigo string, status int) {
+	RegistrarCatalogo(grupo, sub, map[error]ErroCatalogado{
+		sentinela: {Codigo: codigo, Mensagem: "mensagem", Status: status},
+	})
+}

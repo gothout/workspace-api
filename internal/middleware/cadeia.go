@@ -34,6 +34,10 @@ var (
 	once     sync.Once
 	initErr  error
 
+	// mu sincroniza o LAZY de fechada e as leituras de instance contra o
+	// ResetarParaTeste (R7): sem ele, Use rodando em paralelo com um reset
+	// do teste é disputa de dados (go test -race reprova).
+	mu      sync.RWMutex
 	fechada *Cadeia // cadeia FECHADA compartilhada quando não há New no boot
 )
 
@@ -45,7 +49,13 @@ type Cadeia struct {
 // New inicializa a cadeia do processo — chamada UMA vez pelo bootstrap,
 // antes do registro de rotas (o Routes() dos controllers consome as funções
 // de pacote). Erro aqui é fatal para o boot.
+//
+// O mutex cobre o once.Do INTEIRO (R7): o ResetarParaTeste escreve em
+// `once`, então o estado interno do Once precisa ser lido/escrito sob o
+// mesmo lock — sem isso, -race reprova a disputa New × Reset.
 func New(deps Dependencias) error {
+	mu.Lock()
+	defer mu.Unlock()
 	once.Do(func() {
 		if deps.JWT == nil {
 			initErr = errors.New("middleware: jwt ausente na montagem da cadeia")
@@ -67,9 +77,15 @@ func New(deps Dependencias) error {
 // Use devolve a cadeia do processo; sem New no boot devolve uma CADEIA
 // FECHADA — nunca erro nem pânico: toda rota protegida responde 403.
 func Use() *Cadeia {
+	mu.RLock()
 	if instance != nil {
+		defer mu.RUnlock()
 		return instance
 	}
+	mu.RUnlock()
+
+	mu.Lock()
+	defer mu.Unlock()
 	if fechada == nil {
 		fechada = &Cadeia{}
 	}
@@ -79,6 +95,8 @@ func Use() *Cadeia {
 // MustUse devolve a cadeia real e entra em pânico se não inicializada —
 // restrito ao cmd/bootstrap.
 func MustUse() *Cadeia {
+	mu.RLock()
+	defer mu.RUnlock()
 	if instance == nil {
 		panic(ErrNaoInicializada)
 	}
@@ -87,6 +105,8 @@ func MustUse() *Cadeia {
 
 // ResetarParaTeste restaura o estado do singleton — uso EXCLUSIVO dos testes.
 func ResetarParaTeste() {
+	mu.Lock()
+	defer mu.Unlock()
 	instance = nil
 	initErr = nil
 	once = sync.Once{}

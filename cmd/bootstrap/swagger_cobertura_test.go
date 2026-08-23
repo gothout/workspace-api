@@ -78,9 +78,10 @@ func TestSwaggerCobreExatamenteAsRotasRegistradas(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	engine := routes.Montar(routes.Opcoes{
+	engine, err := routes.Montar(routes.Opcoes{
 		App: config.AppConfig{Name: "cobertura-swagger", Env: "teste", Version: "0.0.0-teste", BaseDomain: "localhost"},
 	})
+	require.NoError(t, err)
 
 	// Rotas montadas pelo próprio routes FORA das famílias documentadas:
 	// sonda de sistema e UI do Swagger (exceção de prefixo decidida no doc 01).

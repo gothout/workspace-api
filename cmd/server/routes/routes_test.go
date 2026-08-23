@@ -31,7 +31,8 @@ func requisicao(engine *gin.Engine, metodo, alvo string) *httptest.ResponseRecor
 }
 
 func TestStatusOkComBancoRespondendo(t *testing.T) {
-	engine := Montar(opcoesTeste(func(context.Context) error { return nil }))
+	engine, err := Montar(opcoesTeste(func(context.Context) error { return nil }))
+	require.NoError(t, err)
 	resp := requisicao(engine, http.MethodGet, RotaStatus)
 	require.Equal(t, http.StatusOK, resp.Code)
 	var corpo map[string]any
@@ -41,20 +42,23 @@ func TestStatusOkComBancoRespondendo(t *testing.T) {
 }
 
 func TestStatusDegradadoSemBanco(t *testing.T) {
-	engine := Montar(opcoesTeste(func(context.Context) error { return errors.New("banco fora") }))
+	engine, err := Montar(opcoesTeste(func(context.Context) error { return errors.New("banco fora") }))
+	require.NoError(t, err)
 	resp := requisicao(engine, http.MethodGet, RotaStatus)
 	assert.Equal(t, http.StatusServiceUnavailable, resp.Code)
 	assert.Contains(t, resp.Body.String(), "degradado")
 }
 
 func TestStatusSemSondaInjetadaFicaDegradado(t *testing.T) {
-	engine := Montar(Opcoes{App: config.AppConfig{Name: "x", Env: "teste", BaseDomain: "localhost"}})
+	engine, err := Montar(Opcoes{App: config.AppConfig{Name: "x", Env: "teste", BaseDomain: "localhost"}})
+	require.NoError(t, err)
 	resp := requisicao(engine, http.MethodGet, RotaStatus)
 	assert.Equal(t, http.StatusServiceUnavailable, resp.Code)
 }
 
 func TestNoRouteRespondeCorpoPadronizado(t *testing.T) {
-	engine := Montar(opcoesTeste(nil))
+	engine, err := Montar(opcoesTeste(nil))
+	require.NoError(t, err)
 	resp := requisicao(engine, http.MethodGet, "/rota-estranha")
 	require.Equal(t, http.StatusNotFound, resp.Code)
 	corpo := resp.Body.String()
@@ -64,7 +68,8 @@ func TestNoRouteRespondeCorpoPadronizado(t *testing.T) {
 }
 
 func TestGruposBaseExistemMasNaoAceitamRaizVazia(t *testing.T) {
-	engine := Montar(opcoesTeste(nil))
+	engine, err := Montar(opcoesTeste(nil))
+	require.NoError(t, err)
 	for _, prefixo := range []string{PrefixoDominio, PrefixoAplicacao} {
 		resp := requisicao(engine, http.MethodGet, prefixo)
 		assert.Equal(t, http.StatusNotFound, resp.Code, "%s sem subdomínio registrado deve 404", prefixo)
@@ -72,7 +77,8 @@ func TestGruposBaseExistemMasNaoAceitamRaizVazia(t *testing.T) {
 }
 
 func TestCorsPorSufixoDoDominioBase(t *testing.T) {
-	engine := Montar(opcoesTeste(nil))
+	engine, err := Montar(opcoesTeste(nil))
+	require.NoError(t, err)
 
 	// Subdomínio do base_domain passa.
 	req := httptest.NewRequest(http.MethodOptions, RotaStatus, nil)
@@ -83,7 +89,8 @@ func TestCorsPorSufixoDoDominioBase(t *testing.T) {
 		resp.Header().Get("Access-Control-Allow-Origin"), "origem do base_domain deveria passar")
 
 	// Origem exata extra da config passa.
-	engineExtras := Montar(opcoesTeste(nil))
+	engineExtras, err := Montar(opcoesTeste(nil))
+	require.NoError(t, err)
 	reqExtra := httptest.NewRequest(http.MethodOptions, RotaStatus, nil)
 	reqExtra.Header.Set("Origin", "https://painel.exemplo.com.br")
 	respExtra := httptest.NewRecorder()
@@ -100,7 +107,8 @@ func TestCorsPorSufixoDoDominioBase(t *testing.T) {
 }
 
 func TestSwaggerMontadoEmDoc(t *testing.T) {
-	engine := Montar(opcoesTeste(nil))
+	engine, err := Montar(opcoesTeste(nil))
+	require.NoError(t, err)
 	resp := requisicao(engine, http.MethodGet, "/doc/index.html")
 	assert.Less(t, resp.Code, 500, "UI do swagger deveria estar montada (redirect/200), obtive %d", resp.Code)
 }

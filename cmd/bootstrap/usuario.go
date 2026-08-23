@@ -85,7 +85,7 @@ type validadorWorkspaces struct{}
 func (validadorWorkspaces) Pertence(ctx context.Context, organizationUUID, workspaceUUID uuid.UUID) (bool, error) {
 	ws, err := dominioWorkspace.MustUse().Service.ResolverPorUUID(ctx, workspaceUUID)
 	if err != nil {
-		if err == dominioWorkspace.ErrNotFound {
+		if errors.Is(err, dominioWorkspace.ErrNotFound) {
 			return false, nil // inexistente/inativo/alheio: mesma recusa
 		}
 		return false, err
@@ -222,7 +222,7 @@ func (resolvedorOrganizacao) Resolver(ctx context.Context, hostBruto string) (uu
 			!contemRotuloFixo(dominioWorkspace.MustUse().Service.SlugsFixos(), slug) {
 			resolvido, err := dominioWorkspace.MustUse().Service.ResolverPorSlug(ctx, slug)
 			if err != nil {
-				if err == dominioWorkspace.ErrNotFound {
+				if errors.Is(err, dominioWorkspace.ErrNotFound) {
 					return uuid.Nil, false, nil // slug não resolve organization nenhuma
 				}
 				return uuid.Nil, false, err

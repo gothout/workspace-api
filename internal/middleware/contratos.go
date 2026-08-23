@@ -49,11 +49,14 @@ type DominioCustom struct {
 // a busca por slug é a EXCEÇÃO global documentada (resolução acontece antes
 // de existir escopo; resultado nunca vaza para rotas de administração).
 type ResolvedorWorkspaces interface {
-	// BuscarPorSlug devolve ErrNaoEncontrado quando inexistente OU inativo —
-	// a resposta ao cliente não distingue os dois (não vaza existência).
+	// BuscarPorSlug devolve ErrNaoEncontrado quando INEXISTENTE; inativo
+	// volta com Ativo=false — a CADEIA responde o MESMO 404 para os dois
+	// (não vaza existência; R7 alinhou este doc ao comportamento real do
+	// adaptador, que devolve o registro com o status dele).
 	BuscarPorSlug(ctx context.Context, slug string) (*WorkspaceResolvido, error)
 	// BuscarPorUUID atende o fallback X-Workspace-Id (acesso direto/dev),
-	// com as mesmas regras de inatividade de BuscarPorSlug.
+	// com as mesmas regras de BuscarPorSlug: inexistente = ErrNaoEncontrado;
+	// inativo = Ativo=false e o mesmo 404 na cadeia.
 	BuscarPorUUID(ctx context.Context, id uuid.UUID) (*WorkspaceResolvido, error)
 	// Fixos devolve os rótulos de endereço fixo da plataforma (www, api,
 	// painel...) — Host com um deles NUNCA resolve workspace.

@@ -6,6 +6,7 @@ package routes
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -43,6 +44,9 @@ type Opcoes struct {
 	App        config.AppConfig
 	Cors       config.CorsConfig
 	SondaBanco func(context.Context) error
+	// TrustedProxies espelha server.http.trusted_proxy: endereços autorizados
+	// a informar X-Forwarded-For ao gin. Vazio = nenhum proxy confiável.
+	TrustedProxies []string
 	// DominiosCustom devolve os domínios white-label registrados pelas
 	// organizations (lowercase, sem porta); nil = só o domínio-base. Erro na
 	// consulta recusa a origem (fail-closed), nunca abre.
@@ -66,14 +70,23 @@ func registrarRotas(nome string, grupo *gin.RouterGroup, usar func() (Controlado
 	ctrl.Routes(grupo)
 }
 
-// Montar devolve o engine completo, pronto para o cmd/server servir.
-func Montar(opcoes Opcoes) *gin.Engine {
+// Montar devolve o engine completo, pronto para o cmd/server servir. Erro
+// aqui é problema de CONFIG (proxy confiável malformado) — fatal no boot,
+// nunca engine servindo com ClientIP duvidoso.
+func Montar(opcoes Opcoes) (*gin.Engine, error) {
 	if opcoes.App.Env == "producao" {
 		gin.SetMode(gin.ReleaseMode)
 	} else {
 		gin.SetMode(gin.DebugMode)
 	}
 	engine := gin.New()
+
+	// trusted_proxy da config aplicado ao gin (R7): só esses endereços podem
+	// informar X-Forwarded-For. Lista vazia = NENHUM proxy confiável — o
+	// ClientIP vira o RemoteAddr direto (fail-closed, default do template).
+	if err := engine.SetTrustedProxies(opcoes.TrustedProxies); err != nil {
+		return nil, fmt.Errorf("routes: server.http.trusted_proxy inválido: %w", err)
+	}
 
 	// Middlewares globais, nesta ordem: access log (slot reservado — a
 	// observabilidade assíncrona é evolução futura; slog básico por ora) →
@@ -96,7 +109,7 @@ func Montar(opcoes Opcoes) *gin.Engine {
 	aplicacao := engine.Group(PrefixoAplicacao)
 	registrarConhecidos(engine, dominio, aplicacao)
 
-	return engine
+	return engine, nil
 }
 
 // registrarConhecidos pendura os controllers já inicializados nos grupos.

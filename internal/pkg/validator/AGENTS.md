@@ -14,9 +14,11 @@ Tags de validação customizadas do `binding` do gin, registradas **no boot**
 - Validação de **formato** vive aqui; validação de **regra de negócio**
   (slug reservado, unicidade) vive no service do subdomínio. A fronteira é:
   o validator não consulta banco nem config de negócio.
-- Nada de regex "temporária": a expressão fica nomeada e testada, e quem a
-  define para negócio (ex.: regex de slug) é o subdomínio dono — o validator
-  só a executa.
+- Nada de regex "temporária": a expressão fica nomeada e testada. Desde a
+  R7 a regex do slug (`slugdns`) tem fonte ÚNICA **aqui** — pkg é folha, o
+  único lugar alcançável tanto pelo binding quanto pelo VO do subdomínio
+  (model/workspace delega em `SlugValido`); nunca recriar o literal em
+  outro pacote.
 
 ## Definição de pronto
 

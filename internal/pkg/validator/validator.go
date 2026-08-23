@@ -13,9 +13,10 @@ import (
 )
 
 // slugDNSRegex é o formato canônico do slug (label DNS): minúsculas,
-// dígitos e hífen interno, 3 a 63 caracteres. A expressão canônica mora no
-// VO do subdomínio dono (model/workspace); aqui ela só é executada para o
-// binding recusar cedo.
+// dígitos e hífen interno, 3 a 63 caracteres. Fonte ÚNICA da regra de
+// formato (R7): o pkg é folha — alcançável pelo binding E pelo VO do
+// subdomínio dono (model/workspace delega nele); regra de NEGÓCIO
+// (unicidade, reservados) segue no service.
 var slugDNSRegex = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{1,61}[a-z0-9])$`)
 
 var (

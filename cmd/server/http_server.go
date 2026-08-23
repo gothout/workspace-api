@@ -10,9 +10,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"os"
-	"os/signal"
-	"syscall"
 	"time"
 )
 
@@ -81,25 +78,4 @@ func (s *Servidor) Parar(ctx context.Context) error {
 	}
 	slog.Info("server: shutdown drenou requisições e fechou", "duracao_ms", time.Since(inicio).Milliseconds())
 	return nil
-}
-
-// ServirAteSinal sobe o servidor e aguarda SIGTERM/SIGINT; recebido o sinal,
-// drena as requisições em voo e devolve o processo ao bootstrap (que segue
-// o fechamento LIFO).
-func (s *Servidor) ServirAteSinal() error {
-	errCh := make(chan error, 1)
-	go func() { errCh <- s.Servir() }()
-
-	slog.Info("server: escutando", "porta", s.Porta())
-	sinais := make(chan os.Signal, 1)
-	signal.Notify(sinais, syscall.SIGTERM, syscall.SIGINT)
-	defer signal.Stop(sinais)
-
-	select {
-	case err := <-errCh:
-		return err
-	case sig := <-sinais:
-		slog.Info("server: sinal recebido, drenando conexões", "sinal", sig.String())
-		return s.Parar(context.Background())
-	}
 }

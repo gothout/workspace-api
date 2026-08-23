@@ -192,23 +192,43 @@ func codigoRegistrado(codigo string) bool {
 // código estável, mensagem e status do catálogo. Sentinela sem entrada cai no
 // 500 genérico do sistema (fail-closed: erro desconhecido não vira resposta
 // improvisada).
+//
+// Determinístico (R7): quando uma sentinela casar com MAIS de uma entrada
+// (mesmo erro catalogado em dois subdomínios ou wrapping que alcance dois
+// candidatos), vence o menor par (domínio.subdomínio, código) — mapas do Go
+// não têm ordem e a resposta não pode variar entre requisições.
 func DoCatalogo(sentinela error) *RestErr {
 	if sentinela == nil {
 		return Interno(errors.New("DoCatalogo chamado com erro nulo"))
 	}
 	registroMu.RLock()
-	defer registroMu.RUnlock()
-	for _, catalogo := range registro {
+	var (
+		grupos   []string
+		porGrupo = map[string][]ErroCatalogado{}
+	)
+	for chave, catalogo := range registro {
 		for candidata, entrada := range catalogo {
 			if errors.Is(sentinela, candidata) {
-				return &RestErr{
-					Status:  entrada.Status,
-					Code:    entrada.Codigo,
-					Error:   nomeDoStatus(entrada.Status),
-					Message: entrada.Mensagem,
-					causa:   sentinela,
+				if _, ok := porGrupo[chave]; !ok {
+					grupos = append(grupos, chave)
 				}
+				porGrupo[chave] = append(porGrupo[chave], entrada)
 			}
+		}
+	}
+	registroMu.RUnlock()
+
+	sort.Strings(grupos)
+	for _, chave := range grupos {
+		candidatas := porGrupo[chave]
+		sort.Slice(candidatas, func(i, j int) bool { return candidatas[i].Codigo < candidatas[j].Codigo })
+		entrada := candidatas[0]
+		return &RestErr{
+			Status:  entrada.Status,
+			Code:    entrada.Codigo,
+			Error:   nomeDoStatus(entrada.Status),
+			Message: entrada.Mensagem,
+			causa:   sentinela,
 		}
 	}
 	return Interno(fmt.Errorf("erro sem entrada no catálogo: %w", sentinela))

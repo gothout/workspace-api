@@ -12,6 +12,7 @@ import (
 
 	modeluser "workspace-api/internal/identidade/model/user"
 	"workspace-api/internal/pkg/orgctx"
+	"workspace-api/internal/pkg/pii"
 )
 
 // Nomes canônicos dos papéis de suporte (tabela identidade_user_papel.nome,
@@ -109,7 +110,7 @@ func (s *serviceImpl) Create(ctx context.Context, in EntradaCriacao) (*modeluser
 	if err := s.repo.Criar(ctx, u); err != nil {
 		return nil, err
 	}
-	s.auditar(ctx, "criar", u.UUID, true, "email", u.Email.String())
+	s.auditar(ctx, "criar", u.UUID, true, "email", pii.MascaraEmail(u.Email.String()))
 	return u, nil
 }
 
@@ -170,7 +171,7 @@ func (s *serviceImpl) Delete(ctx context.Context, id uuid.UUID) error {
 	if err := s.repo.Remover(ctx, id); err != nil {
 		return err
 	}
-	s.auditar(ctx, "remover", u.UUID, true, "email", u.Email.String(), "sessoes_encerradas", sessoes)
+	s.auditar(ctx, "remover", u.UUID, true, "email", pii.MascaraEmail(u.Email.String()), "sessoes_encerradas", sessoes)
 	return nil
 }
 
