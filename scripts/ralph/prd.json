@@ -408,16 +408,17 @@
     {
       "id": "E5",
       "title": "Endpoints de leitura de logs (auditoria, acesso, erros)",
-      "description": "As trilhas são gravadas no ClickHouse (E2) e catalogadas (E3/E4), mas não há API de consulta. Endpoints de leitura por trilha com escopo fail-closed, filtros, paginação e permissão granular, degradável quando ClickHouse ausente.",
+      "description": "As trilhas são gravadas no ClickHouse (E2) e catalogadas (E3/E4), mas não há API de consulta. Endpoints de leitura por trilha com modelo de escopo: plataforma (super_admin) lê logs de QUALQUER organization; organization lê os próprios (qualquer workspace dela); usuário de workspace lê os do PRÓPRIO workspace. Filtros, paginação, permissão granular, degradável quando ClickHouse ausente.",
       "acceptanceCriteria": [
         "Endpoints de leitura por trilha (ex.: GET /api/application/identidade/logs/auditoria, /acesso, /erros)",
-        "Escopo fail-closed: organization do ctx só vê os próprios logs; filtros por workspace, ação, usuário, janela de tempo e ray_trace",
+        "Escopo fail-closed em 3 recortes: super_admin lê qualquer organization (filtro opcional por organization_uuid); admin_organization lê só a própria (organization_uuid alheio = 403/404); usuário com vínculo no workspace resolvido lê só o recorte do próprio workspace",
+        "Filtros: workspace, ação, usuário, janela de tempo, ray_trace (e organization_uuid para a plataforma)",
         "Paginação padrão + ordenação por instante desc",
-        "Permissão granular nova (identidade:logs:ler) declarada rota a rota, registrada no permissions.go e no seed dos papéis",
+        "Permissões granulares novas declaradas rota a rota (ex.: identidade:logs:ler), registradas no permissions.go e no seed dos papéis; super_admin coberto por *:*",
         "ClickHouse ausente = 503 padronizado (nunca 500 nem lista vazia silenciosa)",
         "Contrato segue o doc 04 e campos alinhados ao catálogo de eventos (E3)",
         "Catálogo de erros/permissoes/eventos atualizado (endpoints novos entram nos mappings)",
-        "Testes: escopo, filtros, paginação, degradação, permissão — build/vet/test e -race verdes"
+        "Testes: os três recortes de escopo, filtros, paginação, degradação, permissão negada — build/vet/test e -race verdes"
       ],
       "priority": 19,
       "passes": false,
