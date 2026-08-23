@@ -660,3 +660,57 @@ Started: 2026-08-22
   - go get de UMA dependência pode arrastar upgrade transversal (testcontainers
     0.39→0.43): conferir go.mod depois de cada get e repinar.
 ---
+
+## 2026-08-23 - E3
+- Catálogo de eventos de auditoria completo (issue #26): `events.go` nos 4
+  emissores (organization/workspace/user + aplicação auth) com EventoMeta
+  nativo (ação estável + descrição PT-BR + Campos do payload) seguindo o
+  mesmo padrão dos errors.go/permissions.go — catálogo cobre TODO o
+  vocabulário auditado do subdomínio, incluindo os eventos slog com chave
+  "acao" (cascata_organization_inativada ×3 e [SUPORTE] suporte_concedido);
+  validarAcaoCatalogada PANICA em ação fora do events.go, chamada na 1ª
+  linha de cada auditar() (reprova em teste/boot); aplicação catalogo ganhou
+  ProvedorEventos + GET /api/system/eventos (rota pública no RoutesSistema,
+  agrupamento/ordenação determinísticos); bootstrap agrega os 4
+  CatalogoEventos() convertendo para a forma única (Dominio/Subdominio
+  preenchidos na conversão, copiarCampos isola fatias);
+  cmd/bootstrap/eventos_cobertura_test.go varre o FONTE por AST nos dois
+  sentidos ((a) ação emitida sem entrada / (c) entrada sem emissão /
+  (b) pacote emissor sem events.go), mutações provaram as 3 direções;
+  Swagger regenerado; agents/04 com a seção CONTRATO — mapa de eventos.
+- Files changed: internal/identidade/domain/{organization,workspace,user}/
+  {events.go,events_test.go}(NOVOS)+service.go(1 linha cada);
+  internal/identidade/application/auth/{events.go,events_test.go}(NOVOS)+
+  service.go; application/catalogo/* (contratos,dto_response,service,
+  singleton,controller,+testes); cmd/bootstrap/{catalogo,bootstrap}.go +
+  swagger_cobertura_test.go + eventos_cobertura_test.go(NOVO); docs/*
+  (swag init); agents/04, agents/06, AGENTS.md de catalogo/bootstrap/
+  domain; prd.json; progress.txt.
+- Docs read: issue #26 (gh api), agents/04-convencoes-api.md,
+  agents/05-padroes-codigo.md, AGENTS.md de application/catalogo,
+  cmd/bootstrap (+cmd), identidade/domain, application, infra/jwt (erros),
+  pkg/log/audit_log, domain/organization (service/errors/permissions).
+- Checks: build/vet/test verdes (28 pacotes, integração real incluída);
+  CGO_ENABLED=1 go test -race verde em catalogo/auth/domínios/bootstrap;
+  cobertura Swagger verde com a rota nova; arch-go segue 100/100 pelo gate
+  do go test (nenhum pacote novo).
+- **Learnings for future iterations:**
+  - Cobertura de eventos por AST (go/parser) é barata e forte: varrer
+    chamadas `auditar(` (literal no arg índice 1) + pares `"acao", "x"`
+    pega TODO o vocabulário sem banco nem docker; testar o teste com
+    mutações (remover catálogo/adicionar fantasma/adicionar emissor) antes
+    de confiar nele.
+  - O catálogo de eventos é do SUBDOMÍNIO inteiro: logs slog que carregam
+    chave "acao" fazem parte do vocabulário auditado — se não entrarem no
+    events.go, o teste (b)/(a) reprova; recusas SEM chave "acao"
+    (apikey_permissao_recusada) ficam fora por decisão documentada.
+  - panic(fmt.Sprintf(...)) sem passar o valor interpolado compila e só
+    falha NO TESTE da mensagem — escrever o teste junto com o pânico pegou
+    o argumento faltante na hora.
+  - Tipos nativos homônimos por pacote (EventoMeta ×4): conversão explícita
+    no agregador do bootstrap, como nos PermissaoMeta — genérico Go ajuda
+    no teste (converterMeta[T]), mas o agregador segue explícito.
+  - Novo campo em Dependencias = atualizar TODOS os bootadores (bootstrap.go
+    + swagger_cobertura_test.go) e todos os NewService de teste — grep pelo
+    construtor acha tudo.
+---
