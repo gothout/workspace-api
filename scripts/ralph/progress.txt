@@ -544,3 +544,62 @@ Started: 2026-08-22
   - pkg é a única casa compartilhada para regra de FORMATO usada por binding
     E VO (leaf rule decide a direção do dedup, não gosto).
 ---
+
+## 2026-08-23 - E1
+- Evolução Redis (issue #8) completa: pacote NOVO `internal/infra/redis`
+  degradável por desenho (`Connect` puro NUNCA erra: cliente vivo ou NIL +
+  log `[DEGRADADO]`; singleton com mutex cobrindo o once.Do inteiro);
+  `chaves.go` com prefixos fixos (`perm:`, `workspace:slug:`, `lock:c|b:{sha256(e-mail|IP)}`,
+  `idempot:` reservado, `jwt:deny:`) e builders que normalizam+hasheiam o par
+  do lockout (PII não repousa crua); Denylist que implementa ESTRUTURALMENTE
+  `jwt.RevogadorDeRefresh` SEM importar jwt; LimitadorLogin
+  contador+janela+marcador. Bootstrap compõe tudo em `cache_redis.go`:
+  revogador composto denylist→fonte persistida (SÓ positivo cacheado ⇒
+  logout/rotação valem na hora), cacheResolucaoRedis (contrato CacheResolucao
+  da F3, invalidação ativa nas escritas + cascata seletiva por SCAN),
+  decorador de permissões com cache perm:{org}:{user}:{wks} e invalidação via
+  NOVO contrato ObservadorAtribuicoes do user (OpcaoServico variadic —
+  atribuição=par exato, remoção=grosseira uuid.Nil), limitadorLoginAuth.
+  Auth ganhou LimitadorLogin opcional + ErrLoginBloqueado (429 padronizado,
+  code identidade.auth.login_bloqueado) checado ANTES da autenticação; falha
+  do limitador nunca recusa login. Config: databases.redis + cache (TTLs e
+  login_lockout) com defaults; docker-compose.yml de dev; configs_example +
+  README; agents/{02,03} e 6 AGENTS.md atualizados.
+- Files changed: internal/infra/redis/* (NOVO, 5+AGENTS.md);
+  internal/pkg/config/config.go; internal/identidade/domain/user/{contratos,
+  service,singleton}.go; internal/identidade/application/auth/{contratos,
+  errors,service,controller}.go + service_test.go;
+  cmd/bootstrap/cache_redis.go(NOVO)+test(NOVO)+{bootstrap,middleware}.go;
+  docker-compose.yml(NOVO); configs_example.json; README.md;
+  agents/{02,03,06}; AGENTS.md de infra/jwt/auth/workspace/user/bootstrap/
+  redis; docs/* (swag init); prd.json; progress.txt.
+- Docs read: issue #8 (gh api — gh issue view quebra no GraphQL Projects),
+  agents/README, agents/02, agents/03, AGENTS.md de internal/infra,
+  internal/infra/jwt, application/auth (+application), cmd/bootstrap (+cmd),
+  domain/workspace (+domain/user, identidade), pkg/config (+pkg), rest_err,
+  middleware; agents/05 (template singleton).
+- Checks: build/vet/test verdes (25 pacotes, integração postgres+redis
+  efêmeros reais); CGO_ENABLED=1 go test -race verde em redis/config/auth/
+  user/bootstrap; arch-go segue compliance/coverage 100 pelo gate do go test;
+  Swagger regenerado (só a anotação 429 do login mudou).
+- **Learnings for future iterations:**
+  - Tags mapstructure têm que casar com as CHAVES DO JSON EXEMPLO exatas
+    (`bloqueio_seg`, não BloqueioSec): mismatch não erra — cai no default
+    silencioso e só um teste de comportamento (TTL do marcador vivendo 900s)
+    teria pegado.
+  - Conformidade ESTRUTURAL resolve infra→infra sem import: a interface é do
+    consumidor (jwt.RevogadorDeRefresh), a implementação mora no outro pacote
+    e a ligação é no bootstrap — zero acoplamento entre os dois infa.
+  - Cache de revogação SEM invalidação: só positivo é cacheado (revogação é
+    permanente); negativos sempre alcançam a fonte — elimina a classe inteira
+    de bugs "cache liberou token revogado".
+  - Variadic OpcaoServico no NewService/New adiciona peça opcional ao
+    subdomínio sem ripple de assinatura em seed/testes chamadores.
+  - O worktree foi resetado por um processo externo NO MEIO da iteração
+    (commits de planejamento E3/E4 entraram de outra sessão): trabalho não
+    commitado sobreviveu porque havia cópia em /tmp/opencode — commitar cedo
+    e manter backup fora do worktree é parte do fluxo aqui.
+  - testcontainers-go/modules/redis precisa seguir PINADO na mesma versão do
+    núcleo testcontainers (v0.39): deixar o tidy resolver deu v0.44 e a API
+    de MappedPort mudou (build quebrou).
+---
