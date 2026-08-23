@@ -424,3 +424,45 @@ Started: 2026-08-22
   - Testes do pacote bootstrap que exercitam cascata/inativação precisam bootar o singleton do user ANTES (`MustUse` panicaria com encerrador resolvendo na chamada) — ponta a ponta e Swagger cobertura atualizados.
   - Integração R4 num único fio funciona bem: login JWT real → inativação → asserts de banco (SessaoAtiva/RefreshTokenRevogado), recusa do auth e JOIN da apikey.
 ---
+
+## 2026-08-23 - R5
+- Logout IDEMPOTENTE + ROTAÇÃO de refresh fechados (issue #23): jwt ganhou
+  `ValidarAssinatura` (assinatura/método/expiração/tipo SEM o revogador —
+  `Validar` refatorado sobre `parseValido` comum, denylist só nele); contrato
+  `EmissorToken` expõe `ValidarSemRevogacao`; logout saiu da porta do refresh
+  (`sessaoDoToken`) para `claimsParaEncerrar`: não exige jti ativo, conta
+  autenticável nem dona viva — destruição nunca concede acesso, então token
+  já revogado (logout repetido, rotação, cascata) confirma a revogação com
+  sucesso; linha AUSENTE segue recusando (anomalia honesta). Refresh com
+  ROTAÇÃO: `EncerrarSessao` do jti anterior ANTES de emitir o par novo —
+  reuso falha fechado; emissão falhando depois da revogação mata a sessão
+  (dono re-loga): direção fail-closed, nunca dois refresh válidos.
+- Files changed: internal/infra/jwt/{token.go,AGENTS.md};
+  internal/identidade/application/auth/{contratos,service,controller}.go +
+  AGENTS.md + service_test.go; internal/identidade/domain/user/AGENTS.md;
+  cmd/bootstrap/{usuario.go,cascata_organization_test.go,
+  auth_rotacao_test.go (NOVO)}; agents/03; docs/* (swag init); prd.json;
+  agents/06; progress.txt.
+- Docs read: issue #23 (gh issue view), agents/03-identidade-tenancy.md,
+  AGENTS.md de application/auth e infra/jwt (ambos atualizados no mesmo
+  commit), AGENTS.md de domain/user, cmd/bootstrap, cmd.
+- Checks: build/vet/test verdes (22 pacotes); `CGO_ENABLED=1 go test -race`
+  verde em auth+jwt+bootstrap COM os testes de integração reais
+  (testcontainers); Swagger regenerado (`swag init`) e diff conferido — só a
+  descrição nova do logout; arch-go segue no gate do `go test ./...`.
+- **Learnings for future iterations:**
+  - Operação de DESTRUIÇÃO (logout) não deve compartilhar a porta de quem
+    CONCEDE acesso (refresh): idempotência exige ler as claims sem a
+    denylist — daí a segunda porta `ValidarAssinatura`, com comentário
+    proibindo uso em caminho que concede acesso.
+  - Rotação na direção segura: revogar o jti antigo ANTES de emitir o novo;
+    o pior caso (falha na emissão) é o dono re-logar — melhor que dois
+    refresh válidos coexistindo.
+  - Dublê de EmissorToken: interface nova = método novo em TODOS os fakes
+    (`emissorFake` no auth, `emissorLocal` no bootstrap) — build pega.
+  - Teste ponta a ponta dos fluxos de sessão num arquivo próprio
+    (`auth_rotacao_test.go`) reaproveitando os dublês locais da cascata
+    (montarAuthReal/jtiDe/logarAna) manteve a cascata intacta.
+  - `RefreshTokenRevogado` do repo do user é o jeito direto de provar
+    revogação NO BANCO nos testes de integração (sem depender do validador).
+---
