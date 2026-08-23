@@ -96,7 +96,9 @@ func TestSubdominioOrganizationPontaAPonta(t *testing.T) {
 	// --- Ciclo de vida básico -------------------------------------------------
 	orgA, err := svc.Create(ctxFundo, orgmodel.CreateInput{Nome: "Parceiro A"})
 	require.NoError(t, err)
-	ctxA := orgctx.WithOrganization(ctxFundo, orgA.UUID)
+	// Criação de chave exige as permissões efetivas no ctx (R1): aqui o
+	// criador age como super_admin (*:*) — inclusive para a chave *:* de teste.
+	ctxA := orgctx.WithPermissoes(orgctx.WithOrganization(ctxFundo, orgA.UUID), []string{"*:*"})
 
 	vista, err := svc.Read(ctxA, orgA.UUID)
 	require.NoError(t, err)
@@ -158,6 +160,19 @@ func TestSubdominioOrganizationPontaAPonta(t *testing.T) {
 
 	_, err = (resolvedorApiKeys{}).BuscarPorChave(ctxFundo, "wka_"+uuid.NewString())
 	assert.ErrorIs(t, err, middleware.ErrNaoEncontrado, "chave desconhecida falha fechada")
+
+	// R1 (issue #19): criador com papel limitado NÃO fabrica chave *:* —
+	// cada permissão pedida é casada contra as efetivas do ctx.
+	ctxLimitado := orgctx.WithPermissoes(ctxA, []string{
+		"identidade:workspace:*", "identidade:user:*", "identidade:organization:gerenciar_apikeys",
+	})
+	_, _, err = svc.CriarApiKey(ctxLimitado, orgA.UUID, dominioOrganizacao.ApiKeyEntrada{
+		Nome:               "escalação",
+		EscopoOrganization: true,
+		Permissoes:         []string{"*:*"},
+	})
+	assert.ErrorIs(t, err, dominioOrganizacao.ErrPermissaoNaoPossuida,
+		"admin_organization não concede o que não possui")
 
 	expira := time.Now().UTC().Add(-time.Hour)
 	_, chaveExpiradaClara, err := svc.CriarApiKey(ctxA, orgA.UUID, dominioOrganizacao.ApiKeyEntrada{

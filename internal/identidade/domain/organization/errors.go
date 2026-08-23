@@ -15,11 +15,12 @@ import (
 // não encontrado = 404; conflito de UNICIDADE = 409; INVARIANTE de domínio
 // violada = 422; desconhecido = 500.
 var (
-	ErrNotFound            = errors.New("organization não encontrada")
-	ErrInvalidInput        = errors.New("dados de entrada inválidos")
-	ErrDominioEmUso        = errors.New("domínio já está em uso por outra organization")
-	ErrChaveEmUso          = errors.New("hash de chave de API já registrado")
-	ErrApiKeyNaoEncontrada = errors.New("chave de API não encontrada nesta organization")
+	ErrNotFound             = errors.New("organization não encontrada")
+	ErrInvalidInput         = errors.New("dados de entrada inválidos")
+	ErrDominioEmUso         = errors.New("domínio já está em uso por outra organization")
+	ErrChaveEmUso           = errors.New("hash de chave de API já registrado")
+	ErrApiKeyNaoEncontrada  = errors.New("chave de API não encontrada nesta organization")
+	ErrPermissaoNaoPossuida = errors.New("permissão pedida excede as permissões efetivas do criador da chave")
 )
 
 // errorCatalog é o contrato público de cada sentinela: código estável,
@@ -32,6 +33,10 @@ var errorCatalog = map[error]rest_err.ErroCatalogado{
 	ErrDominioEmUso:        {Codigo: "identidade.organization.dominio_em_uso", Mensagem: "Domínio já está em uso por outra organization.", Status: http.StatusConflict},
 	ErrChaveEmUso:          {Codigo: "identidade.organization.apikey_chave_em_uso", Mensagem: "Hash de chave de API já registrado.", Status: http.StatusConflict},
 	ErrApiKeyNaoEncontrada: {Codigo: "identidade.organization.apikey_nao_encontrada", Mensagem: "Chave de API não encontrada nesta organization.", Status: http.StatusNotFound},
+	// Autorização da criação (não confundir com 400 do FORMATO): a chave não
+	// pode conceder poder que quem a criou não tem — tentativa de escalação
+	// é recusada com 403, mesmo matcher do RequirePermission.
+	ErrPermissaoNaoPossuida: {Codigo: "identidade.organization.permissao_nao_possuida", Mensagem: "A chave não pode conceder permissões que o criador não possui.", Status: http.StatusForbidden},
 
 	// Sentinelas de invariante vindas do pacote model (folha).
 	orgmodel.ErrNomeInvalido:         {Codigo: "identidade.organization.nome_invalido", Mensagem: "Nome da organization fora do formato esperado.", Status: http.StatusBadRequest},

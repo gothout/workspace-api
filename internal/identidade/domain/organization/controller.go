@@ -289,7 +289,7 @@ func (ctrl *controllerImpl) RemoverDominio(c *gin.Context) {
 // @Param        request body CreateApiKeyRequestDto true "Dados da chave"
 // @Success      201 {object} ApiKeyCriadaResponseDto
 // @Failure      400 {object} rest_err.RestErr "Entrada inválida (permissão fora do formato, escopo vazio...)"
-// @Failure      403 {object} rest_err.RestErr
+// @Failure      403 {object} rest_err.RestErr "Sem permissão na rota ou chave pedindo permissão que o criador não possui"
 // @Failure      404 {object} rest_err.RestErr
 // @Router       /api/domain/identidade/organizations/{uuid}/api-keys [post]
 func (ctrl *controllerImpl) CriarApiKey(c *gin.Context) {
@@ -386,6 +386,7 @@ func traduzir(err error) *rest_err.RestErr {
 		errors.Is(err, ErrDominioEmUso),
 		errors.Is(err, ErrChaveEmUso),
 		errors.Is(err, ErrApiKeyNaoEncontrada),
+		errors.Is(err, ErrPermissaoNaoPossuida),
 		errors.Is(err, orgmodel.ErrNomeInvalido),
 		errors.Is(err, orgmodel.ErrDominioInvalido),
 		errors.Is(err, orgmodel.ErrDominioNaoDefinido),

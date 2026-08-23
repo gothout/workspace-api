@@ -677,7 +677,7 @@ const docTemplate = `{
                         }
                     },
                     "403": {
-                        "description": "Forbidden",
+                        "description": "Sem permissão na rota ou chave pedindo permissão que o criador não possui",
                         "schema": {
                             "$ref": "#/definitions/rest_err.RestErr"
                         }

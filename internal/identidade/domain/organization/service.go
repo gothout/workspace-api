@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"workspace-api/internal/middleware"
 	orgmodel "workspace-api/internal/identidade/model/organization"
 	"workspace-api/internal/pkg/orgctx"
 	"workspace-api/internal/pkg/pagination"
@@ -48,6 +49,10 @@ type DominioRegistrado struct {
 	Valor            string
 	OrganizationUUID uuid.UUID
 }
+
+// permissaoGlobal é a forma de 2 segmentos do super_admin — o único curinga
+// que não cabe na gramática dominio:subdominio:acao conferida pelo Atende.
+const permissaoGlobal = "*:*"
 
 // LeitorBaseDomain fornece o base_domain da plataforma sem acoplar o service
 // ao singleton de config — o singleton.go injeta a leitura real; testes
@@ -214,7 +219,8 @@ func (s *serviceImpl) ListarDominiosAtivos(ctx context.Context) ([]DominioRegist
 }
 
 // CriarApiKey opera o registro-filho pela RAIZ: confere pertencimento, gera o
-// segredo, monta a entidade válida e devolve a chave em claro UMA ÚNICA vez.
+// segredo, monta a entidade válida, confere que o criador POSSUI cada
+// permissão pedida e devolve a chave em claro UMA ÚNICA vez.
 // A chave em claro NUNCA entra em log nem auditoria.
 func (s *serviceImpl) CriarApiKey(ctx context.Context, organizationUUID uuid.UUID, in ApiKeyEntrada) (*orgmodel.ApiKey, string, error) {
 	if err := exigirOrganizacaoDoContexto(ctx, organizationUUID); err != nil {
@@ -234,6 +240,11 @@ func (s *serviceImpl) CriarApiKey(ctx context.Context, organizationUUID uuid.UUI
 		ExpiresAt:            in.ExpiresAt,
 	})
 	if err != nil {
+		return nil, "", err
+	}
+	// Escalação de privilégio é recusada ANTES da persistência: a chave nunca
+	// concede poder que quem a criou não tem — *:* só vale para quem possui *:*.
+	if err := exigirPermissoesPossuidas(ctx, in.Permissoes); err != nil {
 		return nil, "", err
 	}
 	if err := s.chaves.CriarApiKey(ctx, k); err != nil {
@@ -296,6 +307,42 @@ func exigirOrganizacaoDoContexto(ctx context.Context, alvo uuid.UUID) error {
 	atual := orgctx.OrganizationUUID(ctx)
 	if atual == uuid.Nil || atual != alvo {
 		return ErrNotFound
+	}
+	return nil
+}
+
+// exigirPermissoesPossuidas confere CADA permissão pedida para a chave contra
+// as EFETIVAS do criador no ctx, com o MESMO matcher do RequirePermission
+// (middleware.Atende): igualdade exata, curinga por segmento ou global.
+// Assim um admin_organization não fabrica poderes além do papel dele. A
+// forma global `*:*` tem DOIS segmentos — fora da gramática que o Atende
+// exige da pedida — e é conferida por pertencimento exato: só quem possui
+// `*:*` a concede. Curinga de pedida (`identidade:*:ler`) exige que o
+// efetivo tenha o `*` naquele segmento — nunca o contrário. ctx sem
+// permissões injetadas recusa tudo (fail-closed).
+func exigirPermissoesPossuidas(ctx context.Context, pedidas []string) error {
+	efetivas := orgctx.Permissoes(ctx)
+	for _, p := range pedidas {
+		possui := false
+		if p == permissaoGlobal {
+			for _, e := range efetivas {
+				if e == permissaoGlobal {
+					possui = true
+					break
+				}
+			}
+		} else {
+			possui = middleware.Atende(efetivas, p)
+		}
+		if possui {
+			continue
+		}
+		slog.WarnContext(ctx, "organization.apikey_permissao_recusada",
+			"dominio", orgmodel.Dominio, "subdominio", orgmodel.Subdominio,
+			"permissao_pedida", p, "user_uuid", orgctx.UserUUID(ctx).String(),
+			"organization_uuid", orgctx.OrganizationUUID(ctx).String(),
+			"ray_trace", orgctx.RayTrace(ctx))
+		return ErrPermissaoNaoPossuida
 	}
 	return nil
 }

@@ -298,7 +298,9 @@ func TestCicloCompletoDaApiKey(t *testing.T) {
 	svc, _, chaves, _ := montarServico(t)
 	o, err := svc.Create(context.Background(), orgmodel.CreateInput{Nome: "Acme"})
 	require.NoError(t, err)
-	ctx := ctxDaOrganizacao(o.UUID)
+	// O criador só consegue conceder permissões que POSSUI (R1): o ctx da
+	// requisição carrega as efetivas injetadas pela cadeia do middleware.
+	ctx := orgctx.WithPermissoes(ctxDaOrganizacao(o.UUID), []string{"identidade:workspace:ler"})
 
 	// Chave em claro nasce uma única vez e nunca coincide com o hash.
 	k, chave, err := svc.CriarApiKey(ctx, o.UUID, ApiKeyEntrada{
@@ -345,6 +347,80 @@ func TestCicloCompletoDaApiKey(t *testing.T) {
 	require.NoError(t, svc.RevogarApiKey(ctx, o.UUID, k.UUID))
 	assert.ErrorIs(t, svc.RevogarApiKey(ctx, o.UUID, k.UUID), ErrApiKeyNaoEncontrada, "revogar duas vezes não encontra")
 	require.Len(t, chaves.porOrg[o.UUID], 1)
+}
+
+// R1 (issue #19): a chave nunca concede poder que quem a criou não tem —
+// cada permissão pedida é casada contra as EFETIVAS do ctx com o mesmo
+// matcher do RequirePermission (middleware.Atende); *:* só vale para quem
+// possui *:*.
+func TestCriarApiKeyNaoEscalaPrivilegio(t *testing.T) {
+	svc, _, chaves, _ := montarServico(t)
+	o, err := svc.Create(context.Background(), orgmodel.CreateInput{Nome: "Acme"})
+	require.NoError(t, err)
+
+	// Conjunto efetivo do admin_organization no seed: curingas de workspace e
+	// user + a ÚNICA ação de organization que ele recebe (gerenciar_apikeys).
+	adminOrganization := []string{
+		"identidade:workspace:*", "identidade:user:*",
+		"identidade:organization:gerenciar_apikeys", "identidade:catalogo:ler",
+	}
+
+	casos := []struct {
+		nome       string
+		efetivas   []string // nil = ctx sem permissões injetadas
+		pedidas    []string
+		recusada   bool
+	}{
+		{
+			nome:     "admin_organization tentando *:*",
+			efetivas: adminOrganization,
+			pedidas:  []string{"*:*"},
+			recusada: true,
+		},
+		{
+			nome:     "admin_organization pedindo ação de organization fora do papel",
+			efetivas: adminOrganization,
+			pedidas:  []string{"identidade:workspace:ler", "identidade:organization:criar"},
+			recusada: true,
+		},
+		{
+			nome:     "ctx sem permissões injetadas recusa tudo (fail-closed)",
+			efetivas: nil,
+			pedidas:  []string{"identidade:workspace:ler"},
+			recusada: true,
+		},
+		{
+			nome:     "admin_organization concede o que possui via curinga de subdomínio",
+			efetivas: adminOrganization,
+			pedidas:  []string{"identidade:user:remover"},
+			recusada: false,
+		},
+		{
+			nome:     "super_admin (*:*) pode conceder *:*",
+			efetivas: []string{"*:*"},
+			pedidas:  []string{"*:*"},
+			recusada: false,
+		},
+	}
+
+	for _, caso := range casos {
+		ctx := ctxDaOrganizacao(o.UUID)
+		if caso.efetivas != nil {
+			ctx = orgctx.WithPermissoes(ctx, caso.efetivas)
+		}
+		_, _, err := svc.CriarApiKey(ctx, o.UUID, ApiKeyEntrada{
+			Nome:               "chave de " + caso.nome,
+			EscopoOrganization: true,
+			Permissoes:         caso.pedidas,
+		})
+		if caso.recusada {
+			assert.ErrorIs(t, err, ErrPermissaoNaoPossuida, caso.nome)
+			continue
+		}
+		require.NoError(t, err, caso.nome)
+	}
+	// Só os dois casos atendidos chegaram ao repositório.
+	assert.Len(t, chaves.porOrg[o.UUID], 2, "nenhuma chave recusada chega a persistir")
 }
 
 func ptrTexto(s string) *string       { return &s }
