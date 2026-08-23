@@ -93,16 +93,18 @@ func subirAmbiente(t *testing.T) *ambienteBanco {
 	porta, err := container.MappedPort(ctx, "5432")
 	require.NoError(t, err)
 
-	sqlDB, err := sql.Open("pgx", (&url.URL{
+	dsn := (&url.URL{
 		Scheme: "postgres",
 		User:   url.UserPassword("workspace", "workspace"),
 		Host:   host + ":" + porta.Port(),
 		Path:   "workspace",
-	}).String()+"?sslmode=disable")
+	}).String() + "?sslmode=disable"
+
+	sqlDB, err := sql.Open("pgx", dsn)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = sqlDB.Close() })
 
-	fonte := fonteEfemera{db: sqlDB}
+	fonte := fonteEfemera{db: sqlDB, dsn: dsn}
 	_, err = migrations.Subir(ctx, fonte, "../../db/migrations", migrations.TimeoutsMigracao{
 		LockTimeout:      5 * time.Second,
 		StatementTimeout: 10 * time.Minute,
@@ -115,10 +117,24 @@ func subirAmbiente(t *testing.T) *ambienteBanco {
 }
 
 // fonteEfemera adapta o sql.DB do container ao contrato FonteConexao.
-type fonteEfemera struct{ db *sql.DB }
+type fonteEfemera struct {
+	db  *sql.DB
+	dsn string
+}
 
 func (f fonteEfemera) SQLDB() (*sql.DB, error) { return f.db, nil }
 func (f fonteEfemera) NomeDatabase() string    { return "workspace" }
+
+// SessaoDedicada imita o fonteBanco real: pool NOVO de 1 conexão pela DSN.
+func (f fonteEfemera) SessaoDedicada() (*sql.DB, error) {
+	sessao, err := sql.Open("pgx", f.dsn)
+	if err != nil {
+		return nil, err
+	}
+	sessao.SetMaxOpenConns(1)
+	sessao.SetMaxIdleConns(1)
+	return sessao, nil
+}
 
 // --- Testes -----------------------------------------------------------------
 

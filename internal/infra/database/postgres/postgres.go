@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	_ "github.com/jackc/pgx/v5/stdlib" // driver "pgx" para o AbrirPoolSQL
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -51,6 +52,23 @@ func Connect(ctx context.Context, cfg config.PostgresConfig) (*gorm.DB, error) {
 			"lifetime_min", cfg.Pool.ConnMaxLifetimeMin, "idle_time_min", cfg.Pool.ConnMaxIdleTimeMin)
 	}
 	if err := sqlDB.PingContext(ctx); err != nil {
+		return nil, fmt.Errorf("postgres: banco em %s:%d/%s não respondeu ao ping: %s",
+			cfg.Host, cfg.Port, cfg.Name, sanitizar(err.Error(), cfg.Pass))
+	}
+	return db, nil
+}
+
+// AbrirPoolSQL abre um database/sql PURO com a mesma DSN da conexão gorm —
+// função pura, sem estado global. O bootstrap o usa para dar ao runner de
+// migrations uma SESSÃO DEDICADA (pool de 1), fora do pool do ORM: os SETs
+// da migração nunca tocam uma conexão que o negócio vá reusar.
+func AbrirPoolSQL(ctx context.Context, cfg config.PostgresConfig) (*sql.DB, error) {
+	db, err := sql.Open("pgx", cfg.DSN())
+	if err != nil {
+		return nil, fmt.Errorf("postgres: falha ao abrir pool sql: %w", err)
+	}
+	if err := db.PingContext(ctx); err != nil {
+		_ = db.Close()
 		return nil, fmt.Errorf("postgres: banco em %s:%d/%s não respondeu ao ping: %s",
 			cfg.Host, cfg.Port, cfg.Name, sanitizar(err.Error(), cfg.Pass))
 	}

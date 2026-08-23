@@ -46,6 +46,15 @@
   para `*:*` (o mesmo tratamento do curinga global dentro do matcher).
 - `gh api -f` é raw-field e NÃO lê @file (grava o caminho literal); usar
   `-F body=@arquivo` para corpos longos de PR/issue.
+- SET de GUC de tempo no Postgres: mandar INTEIRO EM MS (`SET lock_timeout
+  = '5000'`) — `time.Duration.String()` do Go ("10m0s") é sintaxe inválida
+  (SQLSTATE 22023); para assert, ler `pg_settings.setting` (sempre ms),
+  nunca o SHOW, que normaliza a unidade de exibição.
+- Sessão dedicada de migration: `FonteConexao.SessaoDedicada()` devolve pool
+  exclusivo de 1 conexão (bootstrap abre via `postgres.AbrirPoolSQL`, fora
+  do pool gorm); driver pgx/v5 do golang-migrate v4.19 já roda tudo em
+  `*sql.Conn` própria e `Migrate.Close()` fecha conn+db — quem cria a
+  instância dá defer de encerrar, senão vaza uma conexão por operação.
 
 Started: 2026-08-22
 ---
@@ -323,4 +332,41 @@ Started: 2026-08-22
     (mesma regra dos dublês de contrato escopados).
   - Validação de posse entra DEPOIS do construtor do model — mantém os codes
     400 de entrada inválida estáveis e separa invariante de autorização.
+---
+
+## 2026-08-23 - R2
+- Sessão de migration em conexão DEDICADA (issue #20): `FonteConexao` ganhou
+  `SessaoDedicada()` — pool exclusivo de 1 conexão aberto pelo bootstrap via
+  `postgres.AbrirPoolSQL` (database/sql puro, mesma DSN, fora do pool gorm).
+  `novaInstancia` monta o driver pgx/v5 sobre essa sessão e aplica os SETs de
+  `lock_timeout`/`statement_timeout` NESSA conexão (pool de 1 ⇒ mesma física
+  que o driver usa para advisory lock, schema_migrations e todo o DDL); os
+  valores vão em ms puros (`emMilissegundos`) — o formato Go "10m0s" é
+  inválido no Postgres e quebrou no primeiro run. Cada operação
+  (Subir/Descer/IrPara/Forcar) fecha a própria sessão com `defer encerrar`.
+  O pool de negócio nunca recebe SET nem DDL — contaminação eliminada.
+- Files changed: internal/infra/database/migrations/{migrations.go,AGENTS.md,
+  migrations_test.go}; internal/infra/database/postgres/postgres.go;
+  cmd/bootstrap/{bootstrap.go,middleware_test.go}; agents/06; prd.json;
+  progress.txt.
+- Docs read: issue #20, agents/02 (seção Migrations), AGENTS.md de db/migrations,
+  infra/database/migrations, infra/database{,/postgres}, infra/, internal/,
+  cmd/bootstrap; fonte do golang-migrate v4.19.0 (pgx/v5) no module cache.
+- Checks: build/vet/test verdes (22 pacotes, testcontainers reais);
+  `-race` verde nos pacotes tocados; arch-go compliance 100 + coverage 100;
+  up→down→up real revalidado. Testes novos:
+  TestTimeoutsFicamNaConexaoDedicada, TestPoolDeNegocioNaoContaminadoPelaMigracao
+  (duas conexões do pool seguradas juntas antes/depois do Subir — settings
+  idênticos), TestOperacoesFalhamSemSessaoDedicada (fail-closed sem sessão).
+- **Learnings for future iterations:**
+  - O driver pgx/v5 do golang-migrate v4.19 já roda TUDO em `*sql.Conn`
+    dedicada — o bug era só o nosso SET via `sqlDB.Exec` no pool: além de não
+    valer para o DDL, gravava lock_timeout=5s permanente na conexão devolvida.
+  - Interface nova = atualizar TODOS os implementadores (2 fakes de teste +
+    fonteBanco); grep por NomeDatabase encontra todos.
+  - `sql.Conn.QueryRowContext` + `pg_settings` para inspecionar estado de
+    sessão POR conexão física; segurar N conns simultâneas força o pool a
+    abrir N físicas (prova de contaminação cobre todas).
+  - `migrate.Migrate.Close()` fecha source E database drivers; fechar sql.DB
+    duas vezes é inofensivo, mas o dono da sessão deve encerrar UMA vez.
 ---

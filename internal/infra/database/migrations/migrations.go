@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 	"time"
 
@@ -14,11 +15,16 @@ import (
 )
 
 // FonteConexao é o contrato estreito do runner com o banco — implementado
-// pelo cmd/bootstrap sobre o pool do Postgres; este pacote nunca importa
-// outro infra (regra 2 de agents/01).
+// pelo cmd/bootstrap; este pacote nunca importa outro infra (regra 2 de
+// agents/01).
 type FonteConexao interface {
 	SQLDB() (*sql.DB, error)
 	NomeDatabase() string
+	// SessaoDedicada abre um pool EXCLUSIVO de UMA conexão para a sessão de
+	// migração — nunca o pool compartilhado do negócio. Os timeouts curtos
+	// são SET de sessão: aplicados na conexão errada não valem para o DDL e
+	// ficariam gravados no pool depois dela devolver a conexão.
+	SessaoDedicada() (*sql.DB, error)
 }
 
 // TimeoutsMigracao são os limites curtos exigidos pelo doc 02: falha rápida
@@ -53,38 +59,71 @@ type Estado struct {
 	Pendentes   int           `json:"pendentes"`
 }
 
-// novaInstancia monta o par fonte+driver sobre a conexão, com os timeouts
-// curtos da sessão de migração e advisory lock do próprio driver do banco
-// (pg_advisory_lock — quem perde espera e reconfere a versão antes de rodar).
+// novaInstancia monta o par fonte+driver sobre uma SESSÃO DEDICADA de
+// migração: pool exclusivo de 1 conexão vindo de SessaoDedicada, com os
+// timeouts curtos gravados NESSA conexão — a mesma que o driver usa para
+// advisory lock, schema_migrations e todo o DDL. O pool do negócio não é
+// tocado. Quem fecha a sessão é encerrar, ao fim de cada operação.
 func novaInstancia(fonte FonteConexao, dir string, timeouts TimeoutsMigracao) (*migrate.Migrate, error) {
-	sqlDB, err := fonte.SQLDB()
-	if err != nil {
-		return nil, fmt.Errorf("migrations: conexão indisponível: %w", err)
-	}
 	pares, err := listarPares(dir)
 	if err != nil {
 		return nil, err
 	}
-	fonteDriver := novoDriverFonte(pares)
-
+	sessao, err := fonte.SessaoDedicada()
+	if err != nil {
+		return nil, fmt.Errorf("migrations: conexão dedicada indisponível: %w", err)
+	}
 	limites := timeouts.comDefaults()
-	driverBanco, err := pgxmig.WithInstance(sqlDB, &pgxmig.Config{
+	if err := aplicarTimeouts(sessao, limites); err != nil {
+		_ = sessao.Close()
+		return nil, err
+	}
+	fonteDriver := novoDriverFonte(pares)
+	driverBanco, err := pgxmig.WithInstance(sessao, &pgxmig.Config{
 		MigrationsTable:  "schema_migrations",
 		DatabaseName:     fonte.NomeDatabase(),
 		StatementTimeout: limites.StatementTimeout,
 	})
 	if err != nil {
+		_ = sessao.Close()
 		return nil, fmt.Errorf("migrations: falha ao preparar driver do banco: %w", err)
 	}
 	instancia, err := migrate.NewWithInstance("fs", fonteDriver, fonte.NomeDatabase(), driverBanco)
 	if err != nil {
+		_ = sessao.Close()
 		return nil, fmt.Errorf("migrations: falha ao montar runner: %w", err)
 	}
-	// lock_timeout curto na sessão: DDL travado por outra operação falha rápido.
-	if _, err := sqlDB.Exec(fmt.Sprintf("SET lock_timeout = '%s'", limites.LockTimeout)); err != nil {
-		return nil, fmt.Errorf("migrations: falha ao aplicar lock_timeout: %w", err)
-	}
 	return instancia, nil
+}
+
+// aplicarTimeouts grava os limites curtos na conexão DEDICADA da migração
+// (pool de 1 ⇒ mesma conexão física que o driver usará): lock_timeout curto
+// faz DDL travado por outra operação falhar rápido e statement_timeout é o
+// teto servidor-side de cada statement. Valores vão em milissegundos puros —
+// o formato de duração do Go ("10m0s") não é sintaxe válida do Postgres.
+// Nunca roda no pool compartilhado.
+func aplicarTimeouts(sessao *sql.DB, limites TimeoutsMigracao) error {
+	if _, err := sessao.Exec(fmt.Sprintf("SET lock_timeout = '%s'", emMilissegundos(limites.LockTimeout))); err != nil {
+		return fmt.Errorf("migrations: falha ao aplicar lock_timeout: %w", err)
+	}
+	if _, err := sessao.Exec(fmt.Sprintf("SET statement_timeout = '%s'", emMilissegundos(limites.StatementTimeout))); err != nil {
+		return fmt.Errorf("migrations: falha ao aplicar statement_timeout: %w", err)
+	}
+	return nil
+}
+
+// emMilissegundos converte a duração para inteiro em ms — unidade base dos
+// GUCs de timeout do Postgres, aceita sem ambiguidade de formato.
+func emMilissegundos(d time.Duration) string {
+	return strconv.FormatInt(d.Milliseconds(), 10)
+}
+
+// encerrar fecha a instância (e com ela a conexão dedicada da sessão).
+func encerrar(instancia *migrate.Migrate) {
+	if instancia == nil {
+		return
+	}
+	_, _ = instancia.Close()
 }
 
 // Subir aplica todas as pendentes (exceto manuais) — usado no boot quando
@@ -102,6 +141,7 @@ func Subir(ctx context.Context, fonte FonteConexao, dir string, timeouts Timeout
 	if err != nil {
 		return 0, err
 	}
+	defer encerrar(instancia)
 	antes := estadoVersao(instancia)
 	if err := instancia.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
 		return 0, traduzirErroMigrate(err)
@@ -133,6 +173,7 @@ func Descer(fonte FonteConexao, dir string, n int, timeouts TimeoutsMigracao) er
 	if err != nil {
 		return err
 	}
+	defer encerrar(instancia)
 	if err := instancia.Steps(-n); err != nil && !errors.Is(err, migrate.ErrNoChange) {
 		return traduzirErroMigrate(err)
 	}
@@ -146,6 +187,7 @@ func IrPara(fonte FonteConexao, dir string, versao uint, timeouts TimeoutsMigrac
 	if err != nil {
 		return err
 	}
+	defer encerrar(instancia)
 	if err := instancia.Migrate(versao); err != nil && !errors.Is(err, migrate.ErrNoChange) {
 		return traduzirErroMigrate(err)
 	}
@@ -160,6 +202,7 @@ func Forcar(fonte FonteConexao, dir string, versao int, timeouts TimeoutsMigraca
 	if err != nil {
 		return err
 	}
+	defer encerrar(instancia)
 	if err := instancia.Force(versao); err != nil {
 		return traduzirErroMigrate(err)
 	}

@@ -3,6 +3,7 @@ package migrations
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -24,11 +25,35 @@ import (
 
 type fonteSQL struct {
 	db   *sql.DB
+	dsn  string
 	nome string
 }
 
 func (f fonteSQL) SQLDB() (*sql.DB, error) { return f.db, nil }
 func (f fonteSQL) NomeDatabase() string    { return f.nome }
+
+// SessaoDedicada imita o bootstrap: abre pool NOVO de 1 conexão pela DSN —
+// a sessão de migração nunca roda no pool devolvido por SQLDB.
+func (f fonteSQL) SessaoDedicada() (*sql.DB, error) {
+	if f.dsn == "" {
+		return nil, fmt.Errorf("fonte de teste sem dsn para sessão dedicada")
+	}
+	sessao, err := sql.Open("pgx", f.dsn)
+	if err != nil {
+		return nil, err
+	}
+	sessao.SetMaxOpenConns(1)
+	sessao.SetMaxIdleConns(1)
+	return sessao, nil
+}
+
+// fonteSemSessao prova o fail-closed do runner: sem conexão dedicada, nenhuma
+// operação de migração acontece (e o pool compartilhado não é tocado).
+type fonteSemSessao struct{}
+
+func (fonteSemSessao) SQLDB() (*sql.DB, error)             { return nil, errors.New("não deveria ser consultada") }
+func (fonteSemSessao) NomeDatabase() string                { return "workspace" }
+func (fonteSemSessao) SessaoDedicada() (*sql.DB, error)    { return nil, errors.New("sessão dedicada indisponível") }
 
 func escreverPar(t *testing.T, dir string, versao int, nome, up, down string) {
 	t.Helper()
@@ -62,8 +87,9 @@ func dockerDisponivel(t *testing.T) bool {
 	return cmd.Run() == nil
 }
 
-// subirBancoEfemero sobe um Postgres descartável (postgres:16) e devolve o pool.
-func subirBancoEfemero(t *testing.T) *sql.DB {
+// subirBancoEfemero sobe um Postgres descartável (postgres:16) e devolve o
+// pool de negócio + a DSN (para as fontes montarem a sessão dedicada).
+func subirBancoEfemero(t *testing.T) (*sql.DB, string) {
 	t.Helper()
 	if !dockerDisponivel(t) {
 		t.Skip("docker indisponível: teste de migrations pulado")
@@ -89,7 +115,7 @@ func subirBancoEfemero(t *testing.T) *sql.DB {
 	t.Cleanup(func() { _ = db.Close() })
 	require.Eventually(t, func() bool { return db.PingContext(ctx) == nil },
 		30*time.Second, 500*time.Millisecond, "banco não respondeu ao ping")
-	return db
+	return db, dsn
 }
 
 func tabelaExiste(t *testing.T, db *sql.DB, nome string) bool {
@@ -253,8 +279,8 @@ func TestMigrationsSobemEDescem(t *testing.T) {
 	if !dockerDisponivel(t) {
 		t.Skip("docker indisponível: teste de migrations pulado")
 	}
-	db := subirBancoEfemero(t)
-	fonte := fonteSQL{db: db, nome: "workspace"}
+	db, dsn := subirBancoEfemero(t)
+	fonte := fonteSQL{db: db, dsn: dsn, nome: "workspace"}
 	dir := caminhoMigrationsReais(t)
 
 	aplicadas, err := Subir(context.Background(), fonte, dir, TimeoutsMigracao{})
@@ -288,8 +314,8 @@ func TestMigrationsSobemEDescem(t *testing.T) {
 // TestCicloCompletoIgnoraArquivoManual prova: up aplica só os executáveis,
 // status lista o manual como pendente-manual e o down desfaz tudo limpo.
 func TestCicloCompletoIgnoraArquivoManual(t *testing.T) {
-	db := subirBancoEfemero(t)
-	fonte := fonteSQL{db: db, nome: "workspace"}
+	db, dsn := subirBancoEfemero(t)
+	fonte := fonteSQL{db: db, dsn: dsn, nome: "workspace"}
 	dir := diretorioTemporario(t)
 	escreverPar(t, dir, 1, "identidade_exemplo_tabela", fixtureUpTabela, fixtureDownTabela)
 	parIndiceUp, parIndiceDown, err := Create(dir, "identidade_exemplo_indice_manual")
@@ -335,6 +361,96 @@ func rewriteComCabecalhoManual(t *testing.T, caminho, sqlCorpo string) {
 	linhas[0] = PrefixoManual
 	conteudo := strings.Join(linhas, "\n") + "\n" + sqlCorpo + "\n"
 	require.NoError(t, os.WriteFile(caminho, []byte(conteudo), 0o644))
+}
+
+// --- Integração: sessão dedicada da migração (issue #20) ----------------------
+
+// TestTimeoutsFicamNaConexaoDedicada prova que os SETs caem na conexão
+// EXCLUSIVA da migração — pool de 1 ⇒ mesma conexão física que o driver usa.
+func TestTimeoutsFicamNaConexaoDedicada(t *testing.T) {
+	db, dsn := subirBancoEfemero(t)
+	fonte := fonteSQL{db: db, dsn: dsn, nome: "workspace"}
+	sessao, err := fonte.SessaoDedicada()
+	require.NoError(t, err)
+	defer func() { _ = sessao.Close() }()
+
+	limites := TimeoutsMigracao{LockTimeout: 3 * time.Second, StatementTimeout: 7 * time.Minute}.comDefaults()
+	require.NoError(t, aplicarTimeouts(sessao, limites))
+
+	// pg_settings devolve o valor na unidade base (ms) — determinístico,
+	// sem depender do formato de exibição do SHOW.
+	var lock, stmt string
+	require.NoError(t, sessao.QueryRow(
+		`SELECT setting FROM pg_settings WHERE name = 'lock_timeout'`).Scan(&lock))
+	assert.Equal(t, "3000", lock)
+	require.NoError(t, sessao.QueryRow(
+		`SELECT setting FROM pg_settings WHERE name = 'statement_timeout'`).Scan(&stmt))
+	assert.Equal(t, "420000", stmt)
+}
+
+// TestPoolDeNegocioNaoContaminadoPelaMigracao é o achado da issue #20: rodar
+// migrations NÃO deixa lock_timeout/statement_timeout alterados em NENHUMA
+// conexão do pool compartilhado.
+func TestPoolDeNegocioNaoContaminadoPelaMigracao(t *testing.T) {
+	ctx := context.Background()
+	db, dsn := subirBancoEfemero(t)
+	db.SetMaxOpenConns(2)
+	db.SetMaxIdleConns(2)
+
+	antes := mostrarNoPool(t, ctx, db)
+	for _, valor := range antes {
+		assert.NotEqual(t, "3000", valor[0], "pool já nasceu com o lock_timeout da migração (comparação vazia)")
+		assert.NotEqual(t, "420000", valor[1], "pool já nasceu com o statement_timeout da migração (comparação vazia)")
+	}
+
+	fonte := fonteSQL{db: db, dsn: dsn, nome: "workspace"}
+	aplicadas, err := Subir(ctx, fonte, caminhoMigrationsReais(t),
+		TimeoutsMigracao{LockTimeout: 3 * time.Second, StatementTimeout: 7 * time.Minute})
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, aplicadas, 0)
+
+	depois := mostrarNoPool(t, ctx, db)
+	assert.Equal(t, antes, depois,
+		"nenhuma configuração de sessão do pool de negócio pode mudar após a migração")
+}
+
+// mostrarNoPool segura DUAS conexões do pool ao mesmo tempo (força duas
+// conexões físicas) e devolve {lock_timeout, statement_timeout} de cada uma.
+func mostrarNoPool(t *testing.T, ctx context.Context, db *sql.DB) [][2]string {
+	t.Helper()
+	conns := make([]*sql.Conn, 0, 2)
+	for range 2 {
+		c, err := db.Conn(ctx)
+		require.NoError(t, err)
+		defer func() { _ = c.Close() }()
+		conns = append(conns, c)
+	}
+	valores := make([][2]string, 0, len(conns))
+	for _, c := range conns {
+		var lock, stmt string
+		require.NoError(t, c.QueryRowContext(ctx,
+			`SELECT setting FROM pg_settings WHERE name = 'lock_timeout'`).Scan(&lock))
+		require.NoError(t, c.QueryRowContext(ctx,
+			`SELECT setting FROM pg_settings WHERE name = 'statement_timeout'`).Scan(&stmt))
+		valores = append(valores, [2]string{lock, stmt})
+	}
+	return valores
+}
+
+// --- Unidade: fail-closed sem sessão dedicada ---------------------------------
+
+func TestOperacoesFalhamSemSessaoDedicada(t *testing.T) {
+	dir := diretorioTemporario(t)
+	escreverPar(t, dir, 1, "identidade_exemplo_tabela", fixtureUpTabela, fixtureDownTabela)
+	timeouts := TimeoutsMigracao{}
+
+	_, err := Subir(context.Background(), fonteSemSessao{}, dir, timeouts)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "conexão dedicada")
+
+	err = Descer(fonteSemSessao{}, dir, 1, timeouts)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "conexão dedicada")
 }
 
 func caminhoMigrationsReais(t *testing.T) string {

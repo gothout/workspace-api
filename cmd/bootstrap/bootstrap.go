@@ -302,8 +302,8 @@ func MigrateCreate(caminhoConfig, descricao string) (string, string, error) {
 
 // --- Adaptadores ------------------------------------------------------------
 
-// fonteBanco adapta o pool do postgres ao contrato do runner de migrations.
-// A dependência entre os dois infra entra por interface declarada no
+// fonteBanco adapta o postgres ao contrato do runner de migrations. A
+// dependência entre os dois infra entra por interface declarada no
 // consumidor e é ligada SÓ aqui (regra 2 de agents/01).
 type fonteBanco struct{}
 
@@ -321,6 +321,23 @@ func (fonteBanco) NomeDatabase() string {
 		return ""
 	}
 	return cfg.Databases.Postgres.Name
+}
+
+// SessaoDedicada abre um pool NOVO de 1 conexão para a sessão de migração —
+// o pool gorm do negócio nunca recebe SET nem DDL, e a conexão da migração
+// morre com ela (fechada pelo runner ao fim de cada operação).
+func (fonteBanco) SessaoDedicada() (*sql.DB, error) {
+	cfg, err := config.Use()
+	if err != nil {
+		return nil, fmt.Errorf("migrations: config ausente para sessão dedicada: %w", err)
+	}
+	sessao, err := postgres.AbrirPoolSQL(context.Background(), cfg.Databases.Postgres)
+	if err != nil {
+		return nil, err
+	}
+	sessao.SetMaxOpenConns(1)
+	sessao.SetMaxIdleConns(1)
+	return sessao, nil
 }
 
 // pilhaFenchamento guarda os Close na ordem de subida e desce na INVERSA.
