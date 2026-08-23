@@ -917,3 +917,48 @@ Started: 2026-08-22
     recorte básico: teste ponta a ponta precisa montar org+ws+PermLer (org
     sozinha = ErrForaDoEscopo antes de chegar ao consultor).
 ---
+
+## 2026-08-23 - UX3
+- Opções de filtro de logs + filtros método/status (issue #30): GET /api/
+  application/identidade/logs/opcoes-filtro devolve {organizacoes, workspaces,
+  usuarios} (uuid+nome) JÁ recortados pelo MESMO recorte em 3 níveis da
+  leitura — plataforma tudo, organization a própria inteira, workspace os
+  usuários COM ATRIBUIÇÃO viva nele e ele como workspace único; fail-closed =
+  ErrForaDoEscopo. Contrato ProvedorOpcoes EXIGIDO no boot, implementado no
+  bootstrap sobre repositórios PUROS dos 3 subdomínios resolvendo NA CHAMADA
+  (funções injetáveis p/ integração). Trilha de acesso ganha query `metodo`
+  (normalizado) e `status_classe` (2xx–5xx → faixa SQL); auditoria/erros
+  ZERAM os campos (colunas só existem lá); PermLer basta para as opções.
+  ListarOpcoes novo nos 3 repos (organization nil=TODAS raiz; workspace por
+  org; user por org OU EXISTS atribuição com deleted_at explícito).
+  Swagger regenerado; agents/04 + AGENTS.md atualizados.
+- Files changed: internal/identidade/application/logs/{contratos,service,
+  dto_request,dto_response,singleton,controller,permissions}.go +
+  opcoes_filtro_test.go(NOVO) + filtros_acesso_test.go(NOVO) + AGENTS.md;
+  internal/infra/clickhouse/{consultor.go,escritor_test.go};
+  internal/identidade/domain/{organization,workspace,user}/repository.go
+  (+fakes de teste dos 4 pacotes); cmd/bootstrap/{logs.go,bootstrap.go,
+  logs_opcoes_test.go(NOVO),logs_leitura_test.go,swagger_cobertura_test.go};
+  agents/04; docs/*; prd.json; agents/06; progress.txt.
+- Docs read: issue #30 (gh api), AGENTS.md de application/logs, infra/
+  clickhouse, domain/organization (+model), permissions.go da aplicação;
+  consultor.go e dto_request.go como referência do padrão E5.
+- Checks: build/vet/test verdes (30 pacotes, integrações testcontainers
+  reais); CGO_ENABLED=1 go test -race verde em logs/clickhouse/user/org/ws/
+  config/bootstrap; arch-go 100/100 pelo gate; Swagger com o path novo.
+- **Learnings for future iterations:**
+  - config.Init é sync.Once: SEGUNDO Init no processo é NO-OP silencioso —
+    sintomei como "flake de infra" (connection refused no porto do CH antigo)
+    antes de achar: helper de config de teste DEVE ResetarParaTeste antes do
+    Init e o teste deve resetar no defer (padrão já usado no cache_redis).
+  - Teste passando sozinho e falhando na suíte = suspeitar de singleton de
+    PACOTE compartilhado (config/clickhouse/jwt), não de infraestrutura.
+  - Projeções uuid+nome nos repos: Select("uuid","nome") + Find(Model) herda
+    soft delete; subquery de atribuição continua precisando deleted_at IS
+    NULL explícito (Table() cru não herda).
+  - Filtros exclusivos de UMA trilha (metodo/status só no acesso): zerar no
+    service ANTES do consultor evita virarem SQL contra coluna inexistente —
+    regra de negócio na aplicação, consultor continua sem regra.
+  - Genérico opcoesDe[T](itens, chave func(T)(uuid,string)) eliminou três
+    loops idênticos de mapeamento entidade→OpcaoFiltro no adaptador.
+---

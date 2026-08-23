@@ -488,7 +488,7 @@
         "build/vet/test verdes"
       ],
       "priority": 22,
-      "passes": false,
+      "passes": true,
       "issue": 30,
       "branch": "ox-alpha/ux-logs-filtros",
       "docs": [
