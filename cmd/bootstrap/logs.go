@@ -13,12 +13,15 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/google/uuid"
+
 	"workspace-api/internal/infra/clickhouse"
 	"workspace-api/internal/pkg/config"
 	"workspace-api/internal/pkg/errobserve"
 	"workspace-api/internal/pkg/log/access_log"
 	"workspace-api/internal/pkg/log/audit_log"
 
+	dominioUsuario "workspace-api/internal/identidade/domain/user"
 	aplicacaologs "workspace-api/internal/identidade/application/logs"
 )
 
@@ -141,3 +144,48 @@ func consultadorAtivo() (*clickhouse.Consultor, error) {
 }
 
 var _ aplicacaologs.ConsultaTrilhas = consultorLogs{}
+
+// --- Enriquecimento das linhas com o usuário (UX2, issue #29) ---------------
+
+// resolvedorUsuariosLogs liga o contrato ResolvedorUsuarios da aplicação logs
+// ao repositório do subdomínio user (identidade_user_user mora no Postgres; a
+// trilha no ClickHouse — join entre bancos não existe, lote sim). Resolve o
+// singleton NA CHAMADA; a função de acesso é injetável para testes de
+// integração usarem construtores puros.
+type resolvedorUsuariosLogs struct {
+	repositorio func() dominioUsuario.Repository // nil = singleton do processo
+}
+
+func novoResolvedorUsuariosLogs() resolvedorUsuariosLogs {
+	return resolvedorUsuariosLogs{
+		repositorio: func() dominioUsuario.Repository { return dominioUsuario.MustUse().Repository },
+	}
+}
+
+func (r resolvedorUsuariosLogs) Resolver(ctx context.Context, uuidsTexto []string) (map[string]aplicacaologs.UsuarioLog, error) {
+	ids := make([]uuid.UUID, 0, len(uuidsTexto))
+	for _, texto := range uuidsTexto {
+		id, err := uuid.Parse(texto)
+		if err != nil {
+			continue // lixo na trilha nunca derruba o enriquecimento
+		}
+		ids = append(ids, id)
+	}
+	if len(ids) == 0 {
+		return map[string]aplicacaologs.UsuarioLog{}, nil
+	}
+	repo := r.repositorio()
+	usuarios, err := repo.BuscarPorUUIDs(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	mapa := make(map[string]aplicacaologs.UsuarioLog, len(usuarios))
+	for _, u := range usuarios {
+		mapa[u.UUID.String()] = aplicacaologs.UsuarioLog{
+			UUID: u.UUID.String(), Nome: u.Nome, Email: u.Email.String(),
+		}
+	}
+	return mapa, nil
+}
+
+var _ aplicacaologs.ResolvedorUsuarios = resolvedorUsuariosLogs{}

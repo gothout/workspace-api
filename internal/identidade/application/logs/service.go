@@ -2,11 +2,15 @@ package logs
 
 import (
 	"context"
+	"log/slog"
 
 	"github.com/google/uuid"
 
 	"workspace-api/internal/infra/clickhouse"
 	"workspace-api/internal/middleware"
+	"workspace-api/internal/pkg/errobserve"
+	"workspace-api/internal/pkg/log/access_log"
+	"workspace-api/internal/pkg/log/audit_log"
 	"workspace-api/internal/pkg/orgctx"
 	"workspace-api/internal/pkg/pagination"
 )
@@ -20,13 +24,28 @@ type Service interface {
 }
 
 type serviceImpl struct {
-	trilhas ConsultaTrilhas
+	trilhas  ConsultaTrilhas
+	usuarios ResolvedorUsuarios // opcional (UX2): nil = linhas sem nome/e-mail
+}
+
+// OpcaoServico adiciona peças opcionais ao service sem mudar a assinatura
+// para os chamadores existentes (mesmo padrão dos subdomínios).
+type OpcaoServico func(*serviceImpl)
+
+// ComResolvedorUsuarios liga o enriquecimento user_nome/user_email das
+// linhas de log (issue #29).
+func ComResolvedorUsuarios(u ResolvedorUsuarios) OpcaoServico {
+	return func(s *serviceImpl) { s.usuarios = u }
 }
 
 // NewService devolve o service DECORADO (service_observado.go): todo erro
 // que sobe ao chamador é observado — singleton e testes pelo mesmo caminho.
-func NewService(trilhas ConsultaTrilhas) Service {
-	return serviceObservado{Service: &serviceImpl{trilhas: trilhas}, obs: observadorErros}
+func NewService(trilhas ConsultaTrilhas, opcoes ...OpcaoServico) Service {
+	s := &serviceImpl{trilhas: trilhas}
+	for _, aplicar := range opcoes {
+		aplicar(s)
+	}
+	return serviceObservado{Service: s, obs: observadorErros}
 }
 
 // recorte é o recorte de leitura derivado do ctx — o chamador NUNCA escolhe:
@@ -105,6 +124,47 @@ func contemGlobal(efetivas []string) bool {
 
 const permGlobal = "*:*"
 
+// coletarUserUUIDs devolve os uuids DISTINTOS e não vazios das linhas — a
+// resolução é em lote, uma consulta por resposta (issue #29).
+func coletarUserUUIDs[T any](itens []T, campo func(T) string) []string {
+	vistos := map[string]bool{}
+	uuids := make([]string, 0, len(itens))
+	for _, item := range itens {
+		u := campo(item)
+		if u == "" || vistos[u] {
+			continue
+		}
+		vistos[u] = true
+		uuids = append(uuids, u)
+	}
+	return uuids
+}
+
+// usuariosDasLinhas resolve nome/e-mail EM LOTE para as linhas da página.
+// Enriquecimento é leitura COMPLEMENTAR: falha do resolvedor nunca derruba a
+// consulta — as linhas seguem com os campos vazios e o motivo sai no log
+// (mesma filosofia degradável das dependências opcionais do template).
+func (s *serviceImpl) usuariosDasLinhas(ctx context.Context, uuids []string) map[string]UsuarioLog {
+	if s.usuarios == nil || len(uuids) == 0 {
+		return map[string]UsuarioLog{}
+	}
+	mapa, err := s.usuarios.Resolver(ctx, uuids)
+	if err != nil || mapa == nil {
+		slog.WarnContext(ctx, "logs.enriquecimento_usuarios_degradado",
+			"dominio", Dominio, "subdominio", Subdominio,
+			"motivo", motivoDe(err), "linhas", len(uuids))
+		return map[string]UsuarioLog{}
+	}
+	return mapa
+}
+
+func motivoDe(err error) string {
+	if err == nil {
+		return "resposta vazia"
+	}
+	return err.Error()
+}
+
 // Auditoria consulta a trilha de auditoria no recorte do ctx. Leitura pura —
 // ler NÃO audita (doc 04).
 func (s *serviceImpl) Auditoria(ctx context.Context, filtro clickhouse.FiltroTrilha, p pagination.Pagination) (pagination.Response[AuditoriaItemDto], error) {
@@ -117,7 +177,8 @@ func (s *serviceImpl) Auditoria(ctx context.Context, filtro clickhouse.FiltroTri
 	if err != nil {
 		return pagination.Response[AuditoriaItemDto]{}, err
 	}
-	return NovoAuditoriaResponseDto(itens, total, p), nil
+	usuarios := s.usuariosDasLinhas(ctx, coletarUserUUIDs(itens, func(ev audit_log.Evento) string { return ev.UserUUID }))
+	return NovoAuditoriaResponseDto(itens, total, p, usuarios), nil
 }
 
 // Acesso consulta a trilha de acesso HTTP no recorte do ctx.
@@ -131,7 +192,8 @@ func (s *serviceImpl) Acesso(ctx context.Context, filtro clickhouse.FiltroTrilha
 	if err != nil {
 		return pagination.Response[AcessoItemDto]{}, err
 	}
-	return NovoAcessoResponseDto(itens, total, p), nil
+	usuarios := s.usuariosDasLinhas(ctx, coletarUserUUIDs(itens, func(ev access_log.Evento) string { return ev.UserUUID }))
+	return NovoAcessoResponseDto(itens, total, p, usuarios), nil
 }
 
 // Erros consulta a trilha de erros observados no recorte do ctx.
@@ -145,5 +207,6 @@ func (s *serviceImpl) Erros(ctx context.Context, filtro clickhouse.FiltroTrilha,
 	if err != nil {
 		return pagination.Response[ErroItemDto]{}, err
 	}
-	return NovoErrosResponseDto(itens, total, p), nil
+	usuarios := s.usuariosDasLinhas(ctx, coletarUserUUIDs(itens, func(ev errobserve.Evento) string { return ev.UserUUID }))
+	return NovoErrosResponseDto(itens, total, p, usuarios), nil
 }

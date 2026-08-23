@@ -39,14 +39,19 @@ type UseLogs struct {
 
 // New inicializa o singleton da aplicação montando service → controller.
 // Chamado UMA vez pelo cmd/bootstrap com o contrato das trilhas ligado;
-// faltar é erro de boot — leitura pela metade não sobe.
+// faltar é erro de boot — leitura pela metade não sobe. O enriquecimento de
+// usuários (UX2) é OPCIONAL: sem ele as linhas saem com os campos vazios.
 func New(deps Dependencias) (Controller, error) {
 	once.Do(func() {
 		if deps.Trilhas == nil {
 			initErr = errors.New("contrato ausente na montagem da aplicação logs (consulta de trilhas)")
 			return
 		}
-		serviceInstance = NewService(deps.Trilhas)
+		opcoes := []OpcaoServico{}
+		if deps.Usuarios != nil {
+			opcoes = append(opcoes, ComResolvedorUsuarios(deps.Usuarios))
+		}
+		serviceInstance = NewService(deps.Trilhas, opcoes...)
 		controllerInstance = NewController(serviceInstance)
 	})
 	return controllerInstance, initErr

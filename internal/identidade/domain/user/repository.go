@@ -29,6 +29,7 @@ import (
 type Repository interface {
 	Criar(ctx context.Context, u *modeluser.User) error
 	BuscarPorUUID(ctx context.Context, id uuid.UUID) (*modeluser.User, error)
+	BuscarPorUUIDs(ctx context.Context, ids []uuid.UUID) ([]modeluser.User, error)
 	BuscarPorEmail(ctx context.Context, email modeluser.Email) (*modeluser.User, error)
 	Listar(ctx context.Context, f modeluser.ListFilter) ([]modeluser.User, int64, error)
 	Atualizar(ctx context.Context, u *modeluser.User) error
@@ -61,6 +62,28 @@ func (r *repositoryImpl) BuscarPorUUID(ctx context.Context, id uuid.UUID) (*mode
 		return nil, err
 	}
 	return &u, nil
+}
+
+// BuscarPorUUIDs devolve EM LOTE os usuários pedidos (issue #29 —
+// enriquecimento das trilhas de log). ESCOPADA quando o ctx carrega
+// organization (recortes organization/workspace da aplicação logs);
+// GLOBAL quando não carrega (caminho da plataforma, que atravessa
+// organizations por natureza). Devolve só os encontrados: uuid sem linha
+// (anônimo/sistema/removido/alheio) simplesmente falta no resultado.
+func (r *repositoryImpl) BuscarPorUUIDs(ctx context.Context, ids []uuid.UUID) ([]modeluser.User, error) {
+	if len(ids) == 0 {
+		return []modeluser.User{}, nil
+	}
+	q := r.db.WithContext(ctx)
+	if orgctx.OrganizationUUID(ctx) != uuid.Nil {
+		q = orgctx.ScopeOrganization(r.db.WithContext(ctx), ctx)
+	}
+	var usuarios []modeluser.User
+	err := q.Where("uuid IN ?", ids).Find(&usuarios).Error
+	if err != nil {
+		return nil, err
+	}
+	return usuarios, nil
 }
 
 // BuscarPorEmail é a porta do login: escopada pela organization resolvida

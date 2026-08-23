@@ -84,6 +84,26 @@ func (r *repoFake) BuscarPorUUID(ctx context.Context, id uuid.UUID) (*modeluser.
 	return &copia, nil
 }
 
+// BuscarPorUUIDs emula o lote real: escopado quando o ctx carrega
+// organization, global caso contrário; ausentes simplesmente faltam.
+func (r *repoFake) BuscarPorUUIDs(ctx context.Context, ids []uuid.UUID) ([]modeluser.User, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	encontrados := make([]modeluser.User, 0, len(ids))
+	for _, id := range ids {
+		u, ok := r.porUUID[id]
+		if !ok {
+			continue
+		}
+		org := orgctx.OrganizationUUID(ctx)
+		if org != uuid.Nil && u.OrganizationUUID != org {
+			continue // alheio não existe para este escopo
+		}
+		encontrados = append(encontrados, *u)
+	}
+	return encontrados, nil
+}
+
 func (r *repoFake) BuscarPorEmail(ctx context.Context, email modeluser.Email) (*modeluser.User, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

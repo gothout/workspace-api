@@ -20,6 +20,10 @@ import (
 // pelo cmd/bootstrap (adaptador que resolve o singleton NA CHAMADA).
 type Dependencias struct {
 	Trilhas ConsultaTrilhas
+	// Usuarios é o enriquecimento OPCIONAL das linhas com nome/e-mail do
+	// usuário (UX2): nil = campos vazios nas respostas, a consulta segue
+	// funcionando — degradação honesta.
+	Usuarios ResolvedorUsuarios
 }
 
 // ConsultaTrilhas é a face de leitura das trilhas — implementada pelo
@@ -31,4 +35,22 @@ type ConsultaTrilhas interface {
 	Auditoria(ctx context.Context, filtro clickhouse.FiltroTrilha) ([]audit_log.Evento, int64, error)
 	Acesso(ctx context.Context, filtro clickhouse.FiltroTrilha) ([]access_log.Evento, int64, error)
 	Erros(ctx context.Context, filtro clickhouse.FiltroTrilha) ([]errobserve.Evento, int64, error)
+}
+
+// UsuarioLog é o enriquecimento de UMA identidade referenciada pelas linhas
+// de log: o trio que a coluna "Usuário" da tela exibe.
+type UsuarioLog struct {
+	UUID  string
+	Nome  string
+	Email string
+}
+
+// ResolvedorUsuarios devolve EM LOTE nome/e-mail dos usuários pedidos
+// (issue #29) — implementado no bootstrap sobre o repositório do subdomínio
+// user (identidade_user_user mora no Postgres; a trilha, no ClickHouse:
+// join entre bancos não existe, resolução em lote sim). Só chegam aqui uuids
+// de linhas JÁ recortadas pelo service; linhas sem usuário (sistema/
+// anônimo/removido) simplesmente não voltam no mapa — campos vazios na tela.
+type ResolvedorUsuarios interface {
+	Resolver(ctx context.Context, uuids []string) (map[string]UsuarioLog, error)
 }

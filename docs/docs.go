@@ -2434,6 +2434,12 @@ const docTemplate = `{
                 "user_agent": {
                     "type": "string"
                 },
+                "user_email": {
+                    "type": "string"
+                },
+                "user_nome": {
+                    "type": "string"
+                },
                 "user_uuid": {
                     "type": "string"
                 },
@@ -2472,6 +2478,12 @@ const docTemplate = `{
                 "sucesso": {
                     "type": "boolean"
                 },
+                "user_email": {
+                    "type": "string"
+                },
+                "user_nome": {
+                    "type": "string"
+                },
                 "user_uuid": {
                     "type": "string"
                 },
@@ -2508,6 +2520,12 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "subdominio": {
+                    "type": "string"
+                },
+                "user_email": {
+                    "type": "string"
+                },
+                "user_nome": {
                     "type": "string"
                 },
                 "user_uuid": {
