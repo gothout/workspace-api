@@ -466,3 +466,34 @@ Started: 2026-08-22
   - `RefreshTokenRevogado` do repo do user é o jeito direto de provar
     revogação NO BANCO nos testes de integração (sem depender do validador).
 ---
+
+## 2026-08-23 - R6
+- Segredo JWT mínimo 32 BYTES (issue #24): `comprimentoMinimoSegredo` 16 →
+  32 com erro claro ("mínimo 32 bytes — HS256 exige chave de 256 bits");
+  `configs_example.json` + agents/02 com exemplo novo de 45 bytes (ainda
+  placeholder); guarda do "valor de exemplo em produção" no config.go
+  atualizada para o MESMO literal novo; README documenta o mínimo; testes
+  ajustados (segredos de teste < 32 substituídos) e NOVO teste de fronteira:
+  31 bytes recusa, exatamente 32 passa.
+- Files changed: internal/infra/jwt/{jwt.go,jwt_test.go,AGENTS.md};
+  internal/pkg/config/{config.go,config_test.go};
+  internal/middleware/doubles_test.go;
+  internal/infra/database/postgres/helpers_test.go;
+  configs_example.json (+ configs.json local, gitignored); agents/02;
+  README.md; prd.json; agents/06; progress.txt.
+- Docs read: issue #24 (gh issue view), agents/02-stack-e-infra.md,
+  AGENTS.md de internal/infra/jwt, internal/pkg/config.
+- Checks: build/vet/test verdes (22 pacotes, testcontainers incluída);
+  `CGO_ENABLED=1 go test -race` verde em jwt+config+middleware. Sem rota
+  nova → Swagger intacto; arch-go segue no gate do `go test ./...`.
+- **Learnings for future iterations:**
+  - A guarda `segredoExemplo` em config.go é ACOPLADA ao literal do
+    configs_example.json: mudar o exemplo sem atualizar a guarda desativa a
+    proteção de produção EM SILÊNCIO — grep pelo valor antigo antes de
+    trocar placeholders versionados.
+  - Segredos de teste espalhados por vários pacotes (jwt, middleware,
+    postgres helpers, config): grep global por `jwt.Connect(` e
+    `"jwt_secret"` acha todos os fixtures que precisam crescer junto.
+  - configs.json é LOCAL/gitignored mas existe na máquina: atualizá-lo
+    junto evita boot morto local após apertar exigência de segredo.
+---
