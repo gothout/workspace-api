@@ -377,6 +377,32 @@
         "internal/identidade/application/catalogo/AGENTS.md",
         "cmd/bootstrap/AGENTS.md"
       ]
+    },
+    {
+      "id": "E4",
+      "title": "errobserve — eventos de erro observados + namespace reservado",
+      "description": "Observador de erros por subdomínio: todo retorno de erro do service passa por obs.Observe (erro intacto), sentinela fora do catálogo vira ErrUnknown, severidades warn/error/critical, sinks plugáveis (slog, ClickHouse da E2, alerta para critical). Namespace reservado 'sistema.*' para eventos de plataforma (boot, migrations, shutdown, degradação) — nunca usado por subdomínios de negócio.",
+      "acceptanceCriteria": [
+        "internal/pkg/errobserve (folha): For(dominio, subdominio, errCodes) no singleton de cada subdomínio; Observe(ctx, err) devolve o erro intacto",
+        "Sentinela fora do catálogo do subdomínio vira ErrUnknown e sobe como critical",
+        "Severidades warn/error/critical definidas por catálogo",
+        "Namespace reservado 'sistema.*' para eventos de plataforma (boot, migrations.up, shutdown, degradacao de dependência) — subdomínio de negócio não pode registrar evento nesse namespace (reprova em teste/boot)",
+        "Eventos de erro entram no catálogo de eventos (E3) e saem em GET /api/system/eventos com o namespace reservado visível",
+        "Sinks plugáveis: slog sempre ativo; ClickHouse (E2) quando ligado; sink de alerta [ALERTA] para critical com janela de agregação",
+        "Enqueue não-bloqueante — erro na telemetria nunca muda a resposta ao cliente",
+        "Testes: sentinela desconhecida, namespace reservado, sinks, degradação — build/vet/test e -race verdes"
+      ],
+      "priority": 18,
+      "passes": false,
+      "issue": 10,
+      "branch": "ox-alpha/evolucao-errobserve",
+      "docs": [
+        "agents/02-stack-e-infra.md",
+        "agents/05-padroes-codigo.md",
+        "internal/pkg/AGENTS.md",
+        "internal/pkg/rest_err/AGENTS.md",
+        "cmd/bootstrap/AGENTS.md"
+      ]
     }
   ]
 }
