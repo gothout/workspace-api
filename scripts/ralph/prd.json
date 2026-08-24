@@ -496,6 +496,48 @@
         "agents/03-identidade-tenancy.md",
         "internal/identidade/application/logs/AGENTS.md"
       ]
+    },
+    {
+      "id": "UX4",
+      "title": "Gestão cross-tenant: workspaces por organization + criação explícita",
+      "description": "Super_admin não gerencia outras organizations sem estar num workspace delas. GET workspaces com filtro organization_uuid para a plataforma; POST workspaces aceitando organization_uuid explícito (primeiro workspace de org nova).",
+      "acceptanceCriteria": [
+        "GET /api/domain/identidade/workspaces aceita organization_uuid para a plataforma (super_admin); sem o filtro, comportamento atual",
+        "POST /workspaces aceita organization_uuid explícito SÓ para plataforma — cria o primeiro workspace de organization sem nenhum",
+        "organization_uuid alheio para não-plataforma = 403/404 conforme convenção",
+        "Auditoria da criação cross-tenant; permissões/seed/catalogos atualizados",
+        "Testes dos recortes (plataforma, organization, alheio negado) + build/vet/test verdes"
+      ],
+      "priority": 23,
+      "passes": false,
+      "issue": 32,
+      "branch": "ox-alpha/ux-cross-tenant",
+      "docs": [
+        "agents/03-identidade-tenancy.md",
+        "agents/04-convencoes-api.md",
+        "internal/identidade/domain/workspace/AGENTS.md"
+      ]
+    },
+    {
+      "id": "UX5",
+      "title": "Provisionamento de admin inicial por organization (endpoint)",
+      "description": "Organization criada pelo painel nasce ilesa. Endpoint de provisionamento: admin inicial + workspace inicial com papel admin_organization, restrito à plataforma, idempotente.",
+      "acceptanceCriteria": [
+        "POST /api/domain/identidade/organizations/{uuid}/provisionamento cria admin inicial (nome, e-mail, senha do chamador) e workspace inicial (slug), papel admin_organization atribuído",
+        "Restrito à plataforma (super_admin); organization já provisionada = 409 mapeado",
+        "Auditado; senha nunca gerada/em claro sem pedido; e-mail mascarado no log",
+        "Permissão granular + seed + catalogos + Swagger",
+        "Testes de integração (idempotência, escopo, papel atribuído) + build/vet/test verdes"
+      ],
+      "priority": 24,
+      "passes": false,
+      "issue": 33,
+      "branch": "ox-alpha/ux-provisionamento",
+      "docs": [
+        "agents/03-identidade-tenancy.md",
+        "agents/04-convencoes-api.md",
+        "cmd/bootstrap/AGENTS.md"
+      ]
     }
   ]
 }
