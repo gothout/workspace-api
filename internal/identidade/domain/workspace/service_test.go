@@ -33,6 +33,11 @@ func novoRepoFake() *repoFake {
 func (r *repoFake) Criar(ctx context.Context, w *modelworkspace.Workspace) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	// Emula o fail-closed do orgctx.ScopeOrganization no banco real: INSERT
+	// sem organization no ctx é RECUSADO (o erro acumulado impede o SQL).
+	if orgctx.OrganizationUUID(ctx) == uuid.Nil {
+		return orgctx.ErrEscopoAusente
+	}
 	if r.erroAoSalvar != nil {
 		return r.erroAoSalvar
 	}
@@ -88,11 +93,20 @@ func (r *repoFake) BuscarPorUUIDGlobal(ctx context.Context, id uuid.UUID) (*mode
 	return r.BuscarPorUUID(ctx, id)
 }
 
-func (r *repoFake) Listar(_ context.Context, f modelworkspace.ListFilter) ([]modelworkspace.Workspace, int64, error) {
+func (r *repoFake) Listar(ctx context.Context, f modelworkspace.ListFilter) ([]modelworkspace.Workspace, int64, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	// Emula o fail-closed do orgctx.ScopeOrganization no banco real: ctx sem
+	// organization = query RECUSADA; com organization = recorte exato.
+	org := orgctx.OrganizationUUID(ctx)
+	if org == uuid.Nil {
+		return nil, 0, orgctx.ErrEscopoAusente
+	}
 	items := make([]modelworkspace.Workspace, 0, len(r.porUUID))
 	for _, w := range r.porUUID {
+		if w.OrganizationUUID != org {
+			continue
+		}
 		if f.Status != nil && w.Status != *f.Status {
 			continue
 		}
@@ -400,4 +414,199 @@ func TestSlugsFixosExpoeListaCompleta(t *testing.T) {
 
 func (r *repoFake) ListarOpcoes(_ context.Context, organizacaoUUID *uuid.UUID) ([]modelworkspace.Workspace, error) {
 	return nil, nil
+}
+
+// --- UX4: gestão cross-tenant (filtro/criação pela plataforma) ---------------
+
+// estadoFake implementa o contrato ResolvedorEstadoOrganization com resposta
+// fixa — a vitalidade real do irmão é coisa de integração (bootstrap).
+type estadoFake struct {
+	existe bool
+	ativa  bool
+	erro   error
+}
+
+func (e estadoFake) Estado(context.Context, uuid.UUID) (bool, bool, error) {
+	return e.existe, e.ativa, e.erro
+}
+
+// ctxPlataforma simula o super_admin no console master: posse EXATA de `*:*`
+// SEM organization resolvida (painel.{base_domain} não tem workspace).
+func ctxPlataforma() context.Context {
+	return orgctx.WithPermissoes(context.Background(), []string{"*:*"})
+}
+
+// ctxDeAdminOrganizacao simula o dono do contrato: permissões de papel real,
+// escopado na própria organization.
+func ctxDeAdminOrganizacao(id uuid.UUID) context.Context {
+	return orgctx.WithPermissoes(orgctx.WithOrganization(context.Background(), id),
+		[]string{"identidade:workspace:*", "identidade:user:*", "identidade:catalogo:ler"})
+}
+
+func TestCreateCrossTenantSomentePlataforma(t *testing.T) {
+	orgAlvo := uuid.New()
+
+	casos := []struct {
+		nome       string
+		ctx        context.Context
+		estado     ResolvedorEstadoOrganization
+		esperado   error
+		criou      bool
+		donoEsperd uuid.UUID
+	}{
+		{
+			nome:       "plataforma cria o primeiro workspace da organization nova",
+			ctx:        ctxPlataforma(),
+			estado:     estadoFake{existe: true, ativa: true},
+			criou:      true,
+			donoEsperd: orgAlvo,
+		},
+		{
+			nome:     "plataforma não cria sob organization inexistente",
+			ctx:      ctxPlataforma(),
+			estado:   estadoFake{existe: false, ativa: false},
+			esperado: ErrOrganizacaoNaoEncontrada,
+		},
+		{
+			nome:     "plataforma não cria filho sob pai inativo",
+			ctx:      ctxPlataforma(),
+			estado:   estadoFake{existe: true, ativa: false},
+			esperado: ErrOrganizacaoInativa,
+		},
+		{
+			nome:     "sem o resolvedor ligado a criação cross-tenant falha FECHADA",
+			ctx:      ctxPlataforma(),
+			estado:   nil,
+			esperado: nil, // erro interno genérico — assert separado abaixo
+		},
+		{
+			nome:     "admin_organization apontando organization alheia é recusado sem vazar existência",
+			ctx:      ctxDeAdminOrganizacao(uuid.New()),
+			estado:   estadoFake{existe: true, ativa: true},
+			esperado: ErrForaDoEscopo,
+		},
+	}
+
+	for _, caso := range casos {
+		t.Run(caso.nome, func(t *testing.T) {
+			svc, repo, _ := montarServico(t)
+			opcoes := []OpcaoServico{}
+			if caso.estado != nil {
+				opcoes = append(opcoes, ComEstadoOrganizacao(caso.estado))
+			}
+			svc = NewService(repo, novoCacheFake(), opcoes...)
+
+			pedida := orgAlvo
+			w, err := svc.Create(caso.ctx, modelworkspace.CreateInput{
+				Nome: "Filial Nova", Slug: "filial-nova", OrganizationPedida: &pedida,
+			})
+
+			if caso.nome == "sem o resolvedor ligado a criação cross-tenant falha FECHADA" {
+				require.Error(t, err, "fail-closed sem o contrato ligado")
+				assert.Nil(t, w)
+				assert.Empty(t, repo.porUUID, "nada persistido")
+				return
+			}
+			if caso.esperado != nil {
+				assert.ErrorIs(t, err, caso.esperado)
+				assert.Empty(t, repo.porUUID, "recusa NUNCA persiste")
+				return
+			}
+			require.NoError(t, err)
+			require.True(t, caso.criou)
+			assert.Equal(t, caso.donoEsperd, w.OrganizationUUID, "workspace nasce na organization PEDIDA")
+		})
+	}
+}
+
+func TestCreateSemPedidoExplicitoMantemEscopoDoCtx(t *testing.T) {
+	svc, _, _ := montarServico(t)
+	dono := uuid.New()
+
+	// Sem organization_pedida o comportamento é o de sempre — mesmo para quem
+	// seria plataforma: o escopo vem do ctx.
+	w, err := svc.Create(ctxPlataforma(), modelworkspace.CreateInput{Nome: "Do Ctx", Slug: "do-ctx"})
+	assert.ErrorIs(t, err, orgctx.ErrEscopoAusente, "plataforma sem organization no ctx não cria por acidente")
+
+	w, err = svc.Create(ctxDaOrganizacao(dono), modelworkspace.CreateInput{Nome: "Do Ctx", Slug: "do-ctx"})
+	require.NoError(t, err)
+	assert.Equal(t, dono, w.OrganizationUUID)
+
+	// Apontar a PRÓPRIA organization é aceito (equivalente ao escopo).
+	pedida := dono
+	mesmo, err := svc.Create(ctxDaOrganizacao(dono), modelworkspace.CreateInput{
+		Nome: "Própria", Slug: "propria-explicita", OrganizationPedida: &pedida,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, dono, mesmo.OrganizationUUID)
+
+	// Unicidade global segue valendo para criação cross-tenant: mesmo slug,
+	// organization diferente — o índice é GLOBAL e recusa.
+	repo2 := novoRepoFake()
+	svc2 := NewService(repo2, novoCacheFake())
+	_, err = svc2.Create(ctxDaOrganizacao(uuid.New()), modelworkspace.CreateInput{Nome: "Dono Um", Slug: "slug-global"})
+	require.NoError(t, err)
+	svc2 = NewService(repo2, novoCacheFake(), ComEstadoOrganizacao(estadoFake{existe: true, ativa: true}))
+	pedida2 := uuid.New()
+	_, err = svc2.Create(ctxPlataforma(), modelworkspace.CreateInput{Nome: "X Dois", Slug: "slug-global", OrganizationPedida: &pedida2})
+	assert.ErrorIs(t, err, ErrSlugEmUso, "cross-tenant não escapa da unicidade GLOBAL do slug")
+}
+
+func TestListComFiltroCrossTenant(t *testing.T) {
+	orgB := uuid.New()
+
+	novoCenario := func(t *testing.T) (Service, *repoFake, uuid.UUID) {
+		t.Helper()
+		repo := novoRepoFake()
+		svc := NewService(repo, novoCacheFake())
+		donoA := uuid.New()
+		for _, slug := range []string{"a-sul", "a-norte"} {
+			_, err := svc.Create(ctxDaOrganizacao(donoA), modelworkspace.CreateInput{Nome: "A " + slug, Slug: slug})
+			require.NoError(t, err)
+		}
+		for _, slug := range []string{"b-centro"} {
+			_, err := svc.Create(ctxDaOrganizacao(orgB), modelworkspace.CreateInput{Nome: "B " + slug, Slug: slug})
+			require.NoError(t, err)
+		}
+		return svc, repo, donoA
+	}
+
+	filtro := func(org uuid.UUID) modelworkspace.ListFilter {
+		return modelworkspace.ListFilter{OrganizationUUID: &org}
+	}
+
+	t.Run("plataforma lista qualquer organization pelo filtro — mesmo sem escopo no ctx", func(t *testing.T) {
+		svc, _, _ := novoCenario(t)
+		itens, total, err := svc.List(ctxPlataforma(), filtro(orgB))
+		require.NoError(t, err)
+		assert.EqualValues(t, 1, total)
+		require.Len(t, itens, 1)
+		assert.Equal(t, orgB, itens[0].OrganizationUUID)
+	})
+
+	t.Run("sem filtro a plataforma segue fail-closed (comportamento atual)", func(t *testing.T) {
+		svc, _, _ := novoCenario(t)
+		_, _, err := svc.List(ctxPlataforma(), modelworkspace.ListFilter{})
+		assert.ErrorIs(t, err, orgctx.ErrEscopoAusente)
+	})
+
+	t.Run("organization lista a própria pelo filtro", func(t *testing.T) {
+		svc, _, donoA := novoCenario(t)
+		itens, total, err := svc.List(ctxDeAdminOrganizacao(donoA), filtro(donoA))
+		require.NoError(t, err)
+		assert.EqualValues(t, 2, total)
+		for _, w := range itens {
+			assert.Equal(t, donoA, w.OrganizationUUID)
+		}
+	})
+
+	t.Run("organization apontando alheia recebe fora_do_escopo sem vazar existência", func(t *testing.T) {
+		svc, _, donoA := novoCenario(t)
+		_, _, err := svc.List(ctxDeAdminOrganizacao(donoA), filtro(orgB))
+		assert.ErrorIs(t, err, ErrForaDoEscopo)
+
+		// Alheia INEXISTENTE recebe a mesma resposta (não distingue).
+		_, _, err = svc.List(ctxDeAdminOrganizacao(donoA), filtro(uuid.New()))
+		assert.ErrorIs(t, err, ErrForaDoEscopo)
+	})
 }

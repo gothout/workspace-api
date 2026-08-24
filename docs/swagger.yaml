@@ -556,6 +556,8 @@ definitions:
         maxLength: 120
         minLength: 2
         type: string
+      organization_uuid:
+        type: string
       slug:
         description: 'slugdns: tag do pkg/validator'
         maxLength: 63
@@ -1815,7 +1817,10 @@ paths:
       - Identidade · Usuário
   /api/domain/identidade/workspaces:
     get:
-      description: Lista paginada dos workspaces da organization, com filtros
+      description: Lista paginada dos workspaces da organization, com filtros. A PLATAFORMA
+        (super_admin) pode filtrar por organization_uuid para listar os workspaces
+        de qualquer organization; para os demais chamadores o filtro apontando organization
+        alheia recusa com 404
       parameters:
       - description: UUID do workspace (fallback quando o host não tem subdomínio)
         in: header
@@ -1837,6 +1842,11 @@ paths:
         in: query
         name: status
         type: string
+      - description: UUID da organization (SÓ a plataforma; demais recusam alheia
+          com 404)
+        in: query
+        name: organization_uuid
+        type: string
       produces:
       - application/json
       responses:
@@ -1852,6 +1862,10 @@ paths:
           description: Forbidden
           schema:
             $ref: '#/definitions/rest_err.RestErr'
+        "404":
+          description: organization_uuid alheia ao chamador
+          schema:
+            $ref: '#/definitions/rest_err.RestErr'
       security:
       - BearerAuth: []
       summary: Lista workspaces
@@ -1861,7 +1875,9 @@ paths:
       consumes:
       - application/json
       description: Cria workspace na organization autenticada, validando slug único
-        global e reservados
+        global e reservados. Chamador PLATAFORMA (super_admin) pode apontar organization_uuid
+        explícito para criar o primeiro workspace de outra organization — criação
+        cross-tenant auditada; para os demais, organization alheia recusa com 404
       parameters:
       - description: UUID do workspace (fallback quando o host não tem subdomínio)
         in: header
@@ -1888,12 +1904,16 @@ paths:
           description: Forbidden
           schema:
             $ref: '#/definitions/rest_err.RestErr'
+        "404":
+          description: Organization pedida não encontrada ou fora do escopo
+          schema:
+            $ref: '#/definitions/rest_err.RestErr'
         "409":
           description: Slug em uso
           schema:
             $ref: '#/definitions/rest_err.RestErr'
         "422":
-          description: Slug reservado pela plataforma
+          description: Slug reservado ou organization alvo inativa
           schema:
             $ref: '#/definitions/rest_err.RestErr'
       security:

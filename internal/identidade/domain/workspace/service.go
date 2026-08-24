@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"time"
 
@@ -56,18 +57,27 @@ type Resolvido struct {
 func (r Resolvido) Ativo() bool { return r.Status == string(modelworkspace.StatusAtivo) }
 
 type serviceImpl struct {
-	repo   Repository
-	cache  CacheResolucao    // nil é operação normal: sem cache, só mais caro
-	trilha audit_log.Destino // trilha de auditoria assíncrona (#9); nil = slog legado
+	repo         Repository
+	cache        CacheResolucao               // nil é operação normal: sem cache, só mais caro
+	trilha       audit_log.Destino            // trilha de auditoria assíncrona (#9); nil = slog legado
+	organizacoes ResolvedorEstadoOrganization // UX4: criação cross-tenant da plataforma; nil = recusada
 }
 
 // OpcaoServico adiciona peça opcional ao service na montagem (padrão F4/E1):
-// hoje, a trilha de auditoria assíncrona ligada pelo bootstrap.
+// hoje, a trilha de auditoria assíncrona e o resolvedor de organizations
+// para a gestão cross-tenant (UX4).
 type OpcaoServico func(*serviceImpl)
 
 // ComTrilha liga o destino assíncrono da auditoria (evolução #9).
 func ComTrilha(t audit_log.Destino) OpcaoServico {
 	return func(s *serviceImpl) { s.trilha = t }
+}
+
+// ComEstadoOrganizacao liga a face do irmão organization usada na criação
+// cross-tenant da plataforma (UX4). Sem ela, pedidos com organization
+// explícita falham FECHADOS.
+func ComEstadoOrganizacao(r ResolvedorEstadoOrganization) OpcaoServico {
+	return func(s *serviceImpl) { s.organizacoes = r }
 }
 
 func NewService(repo Repository, cache CacheResolucao, opcoes ...OpcaoServico) Service {
@@ -92,10 +102,46 @@ var conjuntosFixos = func() map[string]bool {
 	return conjunto
 }()
 
+// permissaoGlobal é a forma de 2 segmentos do super_admin — fora da
+// gramária dominio:subdominio:acao que o middleware.Atende exige da pedida,
+// então a posse é conferida por PERTENCIMENTO EXATO (mesma exceção da
+// validação de posse de API keys, R1, e do recorte dos logs, E5).
+const permissaoGlobal = "*:*"
+
+// ehPlataforma confere a posse EXATA do curinga global nas efetivas do ctx:
+// é o que autoriza a gestão cross-tenant (UX4) — listar workspaces de
+// qualquer organization e criar o primeiro workspace dela.
+func ehPlataforma(ctx context.Context) bool {
+	for _, p := range orgctx.Permissoes(ctx) {
+		if p == permissaoGlobal {
+			return true
+		}
+	}
+	return false
+}
+
 // Create: input cru → escopo do ctx → entidade VÁLIDA pelo construtor →
-// regras → persistência → invalidação de cache → auditoria.
+// regras → persistência → invalidação de cache → auditoria. A EXCEÇÃO ao
+// "escopo vem do ctx" é a criação cross-tenant da plataforma (UX4): super_admin
+// aponta a organization no corpo para criar o PRIMEIRO workspace dela —
+// auditada com cross_tenant e com a vitalidade do pai conferida antes.
 func (s *serviceImpl) Create(ctx context.Context, in modelworkspace.CreateInput) (*modelworkspace.Workspace, error) {
-	in.OrganizationUUID = orgctx.OrganizationUUID(ctx) // escopo vem do ctx, NUNCA do corpo
+	crossTenant := false
+	if in.OrganizationPedida != nil && *in.OrganizationPedida != uuid.Nil {
+		alvo, err := s.resolverOrganizacaoAlvo(ctx, *in.OrganizationPedida)
+		if err != nil {
+			return nil, err
+		}
+		// Autorização conferida: a operação segue sob o ESCOPO DA ORGANIZATION
+		// ALVO — o repository continua fail-closed, só muda para quem recorta
+		// (mesma técnica do List). Super_admin no console master (sem
+		// organization no ctx) cria na alvo sem abrir exceção nenhuma.
+		crossTenant = alvo != orgctx.OrganizationUUID(ctx)
+		ctx = orgctx.WithOrganization(ctx, alvo)
+		in.OrganizationUUID = alvo
+	} else {
+		in.OrganizationUUID = orgctx.OrganizationUUID(ctx) // escopo vem do ctx
+	}
 	w, err := modelworkspace.NewWorkspace(in)
 	if err != nil {
 		return nil, err
@@ -107,15 +153,65 @@ func (s *serviceImpl) Create(ctx context.Context, in modelworkspace.CreateInput)
 		return nil, err
 	}
 	s.auditar(ctx, "criar", w.UUID, w.OrganizationUUID, true,
-		"slug", w.Slug.String())
+		"slug", w.Slug.String(), "cross_tenant", crossTenant)
 	return w, nil
+}
+
+// resolverOrganizacaoAlvo decide a organization dona de um workspace criado
+// com organization explícita no corpo (UX4). Não-plataforma só pode apontar a
+// PRÓPRIA organization (equivalente ao escopo do ctx); apontando alheia =
+// ErrForaDoEscopo (404 — não confirma existência). A plataforma atravessa
+// tenants, mas nunca cria filho sob pai morto: existência e vitalidade vêm
+// do contrato ligado no bootstrap; sem ele, falha FECHADA.
+func (s *serviceImpl) resolverOrganizacaoAlvo(ctx context.Context, pedida uuid.UUID) (uuid.UUID, error) {
+	if !ehPlataforma(ctx) {
+		if orgctx.OrganizationUUID(ctx) != pedida {
+			slog.WarnContext(ctx, "workspace.criacao_fora_do_escopo",
+				"organization_uuid", orgctx.OrganizationUUID(ctx).String(),
+				"organization_pedida", pedida.String(),
+				"user_uuid", orgctx.UserUUID(ctx).String(),
+				"ray_trace", orgctx.RayTrace(ctx))
+			return uuid.Nil, ErrForaDoEscopo
+		}
+		return pedida, nil
+	}
+	if s.organizacoes == nil {
+		return uuid.Nil, errors.New("workspace: criação cross-tenant exige o resolvedor de organizations ligado no boot")
+	}
+	existe, ativa, err := s.organizacoes.Estado(ctx, pedida)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	if !existe {
+		return uuid.Nil, ErrOrganizacaoNaoEncontrada
+	}
+	if !ativa {
+		return uuid.Nil, ErrOrganizacaoInativa
+	}
+	return pedida, nil
 }
 
 func (s *serviceImpl) Read(ctx context.Context, id uuid.UUID) (*modelworkspace.Workspace, error) {
 	return s.repo.BuscarPorUUID(ctx, id)
 }
 
+// List honra o filtro organization_uuid SÓ para a plataforma (UX4): troca o
+// escopo do ctx pela organization pedida — o repository continua fail-closed,
+// só muda PARA QUEM ele recorta. Não-plataforma apontando alheia = 404
+// fora_do_escopo; apontando a própria é equivalente ao escopo de sempre. Sem
+// filtro, o comportamento é exatamente o de antes (escopo do ctx, inclusive
+// o fail-closed quando não há organization resolvida).
 func (s *serviceImpl) List(ctx context.Context, f modelworkspace.ListFilter) ([]modelworkspace.Workspace, int64, error) {
+	if f.OrganizationUUID != nil && *f.OrganizationUUID != uuid.Nil {
+		pedida := *f.OrganizationUUID
+		if !ehPlataforma(ctx) {
+			if orgctx.OrganizationUUID(ctx) != pedida {
+				return nil, 0, ErrForaDoEscopo
+			}
+		} else {
+			ctx = orgctx.WithOrganization(ctx, pedida)
+		}
+	}
 	return s.repo.Listar(ctx, f)
 }
 

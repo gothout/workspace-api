@@ -1854,7 +1854,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Lista paginada dos workspaces da organization, com filtros",
+                "description": "Lista paginada dos workspaces da organization, com filtros. A PLATAFORMA (super_admin) pode filtrar por organization_uuid para listar os workspaces de qualquer organization; para os demais chamadores o filtro apontando organization alheia recusa com 404",
                 "produces": [
                     "application/json"
                 ],
@@ -1892,6 +1892,12 @@ const docTemplate = `{
                         "description": "Filtro por status (ativo|inativo)",
                         "name": "status",
                         "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "UUID da organization (SÓ a plataforma; demais recusam alheia com 404)",
+                        "name": "organization_uuid",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -1912,6 +1918,12 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/rest_err.RestErr"
                         }
+                    },
+                    "404": {
+                        "description": "organization_uuid alheia ao chamador",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
                     }
                 }
             },
@@ -1921,7 +1933,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Cria workspace na organization autenticada, validando slug único global e reservados",
+                "description": "Cria workspace na organization autenticada, validando slug único global e reservados. Chamador PLATAFORMA (super_admin) pode apontar organization_uuid explícito para criar o primeiro workspace de outra organization — criação cross-tenant auditada; para os demais, organization alheia recusa com 404",
                 "consumes": [
                     "application/json"
                 ],
@@ -1968,6 +1980,12 @@ const docTemplate = `{
                             "$ref": "#/definitions/rest_err.RestErr"
                         }
                     },
+                    "404": {
+                        "description": "Organization pedida não encontrada ou fora do escopo",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
                     "409": {
                         "description": "Slug em uso",
                         "schema": {
@@ -1975,7 +1993,7 @@ const docTemplate = `{
                         }
                     },
                     "422": {
-                        "description": "Slug reservado pela plataforma",
+                        "description": "Slug reservado ou organization alvo inativa",
                         "schema": {
                             "$ref": "#/definitions/rest_err.RestErr"
                         }
@@ -3119,6 +3137,9 @@ const docTemplate = `{
                     "type": "string",
                     "maxLength": 120,
                     "minLength": 2
+                },
+                "organization_uuid": {
+                    "type": "string"
                 },
                 "slug": {
                     "description": "slugdns: tag do pkg/validator",

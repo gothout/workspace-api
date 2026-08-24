@@ -150,8 +150,12 @@ func Serve(caminhoConfig string) error {
 
 	// Cache de resolução por slug (#8): contrato CacheResolucao do subdomínio
 	// com implementação Redis — sem Redis o adaptador vira no-op (consulta
-	// direta à fonte, operação normal).
-	_, err = dominioWorkspace.New(db, cacheResolucaoRedis{}, dominioWorkspace.ComTrilha(trilhasLog.auditoria))
+	// direta à fonte, operação normal). O resolvedor de organizations (UX4)
+	// habilita a gestão cross-tenant da plataforma: criar o primeiro workspace
+	// de uma organization nova e listar os workspaces dela por filtro.
+	_, err = dominioWorkspace.New(db, cacheResolucaoRedis{},
+		dominioWorkspace.ComTrilha(trilhasLog.auditoria),
+		dominioWorkspace.ComEstadoOrganizacao(estadoOrganizacaoAlvo{}))
 	if err != nil {
 		return fmt.Errorf("boot: %w", err)
 	}

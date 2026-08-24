@@ -509,7 +509,7 @@
         "Testes dos recortes (plataforma, organization, alheio negado) + build/vet/test verdes"
       ],
       "priority": 23,
-      "passes": false,
+      "passes": true,
       "issue": 32,
       "branch": "ox-alpha/ux-cross-tenant",
       "docs": [

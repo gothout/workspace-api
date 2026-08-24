@@ -962,3 +962,44 @@ Started: 2026-08-22
   - Genérico opcoesDe[T](itens, chave func(T)(uuid,string)) eliminou três
     loops idênticos de mapeamento entidade→OpcaoFiltro no adaptador.
 ---
+
+## 2026-08-24 - UX4
+- Gestão cross-tenant fechada (issue #32): GET /api/domain/identidade/workspaces aceita
+  organization_uuid SÓ para plataforma (posse EXATA de *:* — mesma exceção de R1/E5) e
+  POST aceita organization_uuid explícito no corpo para criar workspace em outra
+  organization (primeiro workspace de org nova). Autorização no service (`ehPlataforma`);
+  criação confere existência/vitalidade do pai pelo NOVO contrato
+  `ResolvedorEstadoOrganization` (adaptador no bootstrap resolvendo MustUse NA CHAMADA),
+  REESCOPEIA o ctx na organização ALVO antes de persistir e audita com cross_tenant=true.
+  Não-plataforma apontando alheia = ErrForaDoEscopo 404 (não vaza existência; própria =
+  aceita, equivalente ao escopo). +3 sentinelas catalogadas (fora_do_escopo 404,
+  organization_nao_encontrada 404, organization_inativa 422), severidade error na recusa
+  de escopo. Sem filtro/pedido: comportamento anterior intacto (inclusive fail-closed).
+- Files changed: internal/identidade/model/workspace/model.go;
+  internal/identidade/domain/workspace/{contratos,errors,singleton,service,controller,
+  dto_request,events}.go + service_test.go; cmd/bootstrap/{workspace.go,bootstrap.go,
+  cross_tenant_test.go(NOVO)}; internal/identidade/domain/workspace/AGENTS.md;
+  agents/06; docs/* (swag init); prd.json; progress.txt.
+- Docs read: issue #32 (gh api), agents/03, agents/04, AGENTS.md de domain/workspace
+  (+model/workspace, domain, identidade, internal), application/logs (referência do
+  recorte E5), application/auth (contrato VitalidadeOrganization), cmd/bootstrap,
+  pkg/orgctx, middleware/autorizacao.go.
+- Checks: build/vet/test verdes (29 pacotes, integrações testcontainers reais);
+  CGO_ENABLED=1 go test -race ./... VERDE completo (slug é invariante disputada);
+  arch-go segue compliance/coverage 100 pelo gate do go test; Swagger regenerado
+  (params/respostas novos nos dois handlers).
+- **Learnings for future iterations:**
+  - GORM IGNORA Where() em INSERT: o fail-closed real do Create vem do ERRO ACUMULADO
+    (comErroAcumulado) quando falta escopo — operação "em nome de outro tenant" precisa
+    REESCOPEIAR o ctx (orgctx.WithOrganization(ctx, alvo)) depois da autorização, senão
+    nem a plataforma consegue gravar. O dublê de repo tem que emular isso (Criar recusa
+    ctx sem org) — sem isso o teste valida um comportamento que não existe.
+  - crossTenant flag tem que ser calculada ANTES do reescopo do ctx (depois da troca,
+    ctx org == alvo sempre e a comparação vira tautologia — quase cometi o bug com || true).
+  - Sem restrição "só o primeiro workspace" da criação explícita: seria inaplicável sob
+    concorrência sem transação serializável; slug único GLOBAL + auditoria cobrem o risco
+    (decisão documentada no PR e no AGENTS.md).
+  - Binding de query gin não cobre uuid: parse manual no controller com c.Query +
+    uuid.Parse (inválido = 400); no CORPO json, *uuid.UUID funciona nativamente
+    (encoding/json usa UnmarshalText do google/uuid) com binding omitempty,uuid.
+---
