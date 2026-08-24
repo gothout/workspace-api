@@ -1003,3 +1003,46 @@ Started: 2026-08-22
     uuid.Parse (inválido = 400); no CORPO json, *uuid.UUID funciona nativamente
     (encoding/json usa UnmarshalText do google/uuid) com binding omitempty,uuid.
 ---
+
+## 2026-08-24 - UX5
+- Provisionamento de admin inicial por organization (issue #33) completo: aplicação NOVA
+  `internal/identidade/application/provisionamento` orquestrando os 3 subdomínios —
+  POST /api/domain/identidade/organizations/{uuid}/provisionamento cria o admin inicial
+  (nome/e-mail/senha do chamador; senha nunca gerada em claro nem devolvida) + workspace
+  inicial (slug), atribuindo admin_organization. Restrito à plataforma DUAS vezes:
+  RequirePermission(identidade:provisionamento:executar) na rota e re-conferência da
+  posse de *:* dentro do subdomínio workspace na criação cross-tenant (UX4). Ordem
+  fail-closed: VOs cedo → alvo existe+ativa → já-provisionada=409 (idempotente) →
+  workspace pelo subdomínio → ctx REESCOPEIADO na alvo → admin criado OU reconhecido
+  (recuperação de tentativa interrompida) → papel seed atribuído (duplicata engolida).
+  Auditado como evento próprio com e-mail MASCARADO. Adaptadores no bootstrap traduzem
+  o vocabulário dos irmãos; agregadores de permissões/eventos e cobertura de eventos
+  atualizados para o 5º emissor.
+- Files changed: internal/identidade/application/provisionamento/* (NOVO, 10 arquivos +
+  service_test.go); cmd/bootstrap/{provisionamento_app.go(NOVO),bootstrap.go,catalogo.go,
+  eventos_cobertura_test.go,swagger_cobertura_test.go,provisionamento_endpoint_test.go(NOVO)};
+  cmd/server/routes/routes.go; internal/identidade/application/AGENTS.md;
+  cmd/bootstrap/AGENTS.md; agents/03; agents/06; docs/* (swag init); prd.json;
+  progress.txt.
+- Docs read: issue #33 (gh api), AGENTS.md de application (+auth como template),
+  cmd/bootstrap, cmd/server{,/routes}, domain/workspace (UX4 recém-feita), model/user,
+  pkg/pii, pkg/log/audit_log, errobserve.
+- Checks: build/vet/test verdes (30 pacotes, integrações testcontainers reais);
+  CGO_ENABLED=1 go test -race ./... VERDE completo; arch-go segue compliance/coverage
+  100 pelo gate do go test; Swagger regenerado com o path novo e cobertura verde.
+- **Learnings for future iterations:**
+  - Aplicação nova = atualizar OS TRÊS gates codificados em teste: emissoresConhecidos
+    (eventos_cobertura_test), nativos[] do agregador (contagem) e boot no
+    swagger_cobertura_test (senão a rota existe nos docs mas não no engine — sentido 2
+    reprova).
+  - Sentinelas de irmão NUNCA são recatalogadas: rest_err pânica code duplicado no init
+    (pegou no primeiro run). Direção certa: adaptador do bootstrap TRADUZ a sentinela do
+    subdomínio para o vocabulário da aplicação; sentinelas de VOs já catalogadas pelo
+    dono são resolvidas via registro global no traduzir().
+  - DoCatalogo deriva entradas DO errorCatalog: sentinela no catálogo sem severidade no
+    singleton pânica no IMPORT (segunda direção do fail-fast) — manter os dois mapas em
+    par quando uma sentinela própria entra.
+  - FK real derruba atalho de teste: criar workspace numa org inexistente para "tomar
+    slug" viola a FK da migration 0005 — usar org real criada no cenário.
+  - uuid.MustParse aceita só hex (2ª vez): sufixos mnemônicos ("pa01") panicam no teste.
+---

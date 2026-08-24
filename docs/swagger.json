@@ -1264,6 +1264,88 @@
                 }
             }
         },
+        "/api/domain/identidade/organizations/{uuid}/provisionamento": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Função da PLATAFORMA (super_admin): cria o admin inicial (nome, e-mail e senha definidos pelo chamador; a senha nunca é gerada nem devolvida em claro) e o workspace inicial com o slug informado, atribuindo o papel admin_organization. Idempotente: organization que já possui workspace responde 409 ja_provisionado; peças de tentativa anterior interrompida são reconhecidas, não duplicadas",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Identidade · Provisionamento"
+                ],
+                "summary": "Provisiona o admin inicial e o workspace inicial de uma organization",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "UUID do workspace (fallback quando o host não tem subdomínio)",
+                        "name": "X-Workspace-Id",
+                        "in": "header"
+                    },
+                    {
+                        "type": "string",
+                        "description": "UUID da organization",
+                        "name": "uuid",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Dados do admin e do workspace inicial",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/provisionamento.ProvisionamentoRequestDto"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/provisionamento.ProvisionamentoResponseDto"
+                        }
+                    },
+                    "400": {
+                        "description": "Entrada inválida",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "403": {
+                        "description": "Restrito à plataforma",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "404": {
+                        "description": "Organization não encontrada",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "409": {
+                        "description": "Já provisionada / slug ou e-mail em uso",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "422": {
+                        "description": "Organization inativa",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    }
+                }
+            }
+        },
         "/api/domain/identidade/user/papeis": {
             "get": {
                 "security": [
@@ -2945,6 +3027,56 @@
                 },
                 "total": {
                     "type": "integer"
+                }
+            }
+        },
+        "provisionamento.ProvisionamentoRequestDto": {
+            "type": "object",
+            "required": [
+                "email",
+                "nome",
+                "senha",
+                "slug"
+            ],
+            "properties": {
+                "email": {
+                    "type": "string"
+                },
+                "nome": {
+                    "type": "string",
+                    "maxLength": 120,
+                    "minLength": 2
+                },
+                "senha": {
+                    "type": "string",
+                    "maxLength": 72,
+                    "minLength": 8
+                },
+                "slug": {
+                    "description": "slugdns: tag do pkg/validator",
+                    "type": "string",
+                    "maxLength": 63,
+                    "minLength": 3
+                }
+            }
+        },
+        "provisionamento.ProvisionamentoResponseDto": {
+            "type": "object",
+            "properties": {
+                "admin_uuid": {
+                    "type": "string"
+                },
+                "email": {
+                    "type": "string"
+                },
+                "organization_uuid": {
+                    "type": "string"
+                },
+                "slug": {
+                    "type": "string"
+                },
+                "workspace_uuid": {
+                    "type": "string"
                 }
             }
         },

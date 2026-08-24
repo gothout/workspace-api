@@ -15,6 +15,7 @@ import (
 	aplicacaoauth "workspace-api/internal/identidade/application/auth"
 	aplicacaocatalogo "workspace-api/internal/identidade/application/catalogo"
 	aplicacaologs "workspace-api/internal/identidade/application/logs"
+	aplicacaoprovisionamento "workspace-api/internal/identidade/application/provisionamento"
 	dominioOrganizacao "workspace-api/internal/identidade/domain/organization"
 	dominioUsuario "workspace-api/internal/identidade/domain/user"
 	dominioWorkspace "workspace-api/internal/identidade/domain/workspace"
@@ -76,6 +77,17 @@ func novoAgregadorPermissoes() agregadorPermissoes {
 			Rotas: rotas, GrupoMenu: meta.GrupoMenu,
 		})
 	}
+	// Aplicação provisionamento (UX5): permissão da plataforma, mesma forma.
+	for _, meta := range aplicacaoprovisionamento.Catalogo() {
+		rotas := make([]aplicacaocatalogo.RotaMeta, 0, len(meta.Rotas))
+		for _, rota := range meta.Rotas {
+			rotas = append(rotas, aplicacaocatalogo.RotaMeta{Rota: rota.Rota, Metodo: rota.Metodo})
+		}
+		itens = append(itens, aplicacaocatalogo.PermissaoMeta{
+			Permissao: meta.Permissao, Descricao: meta.Descricao,
+			Rotas: rotas, GrupoMenu: meta.GrupoMenu,
+		})
+	}
 	return agregadorPermissoes{itens: itens}
 }
 
@@ -123,6 +135,16 @@ func novoAgregadorEventos() agregadorEventos {
 		itens = append(itens, aplicacaocatalogo.EventoMeta{
 			Dominio:    aplicacaoauth.Dominio,
 			Subdominio: aplicacaoauth.Subdominio,
+			Acao:       meta.Acao, Descricao: meta.Descricao,
+			Campos: copiarCampos(meta.Campos),
+		})
+	}
+	// Aplicação provisionamento (UX5): o evento da ORQUESTRAÇÃO (as escritas
+	// componentes já são auditadas pelos subdomínios).
+	for _, meta := range aplicacaoprovisionamento.CatalogoEventos() {
+		itens = append(itens, aplicacaocatalogo.EventoMeta{
+			Dominio:    aplicacaoprovisionamento.Dominio,
+			Subdominio: aplicacaoprovisionamento.Subdominio,
 			Acao:       meta.Acao, Descricao: meta.Descricao,
 			Campos: copiarCampos(meta.Campos),
 		})

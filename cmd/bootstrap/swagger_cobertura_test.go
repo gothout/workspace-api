@@ -15,6 +15,7 @@ import (
 	aplicacaoauth "workspace-api/internal/identidade/application/auth"
 	aplicacaocatalogo "workspace-api/internal/identidade/application/catalogo"
 	aplicacaologs "workspace-api/internal/identidade/application/logs"
+	aplicacaoprovisionamento "workspace-api/internal/identidade/application/provisionamento"
 	dominioOrganizacao "workspace-api/internal/identidade/domain/organization"
 	dominioUsuario "workspace-api/internal/identidade/domain/user"
 	dominioWorkspace "workspace-api/internal/identidade/domain/workspace"
@@ -91,6 +92,15 @@ func TestSwaggerCobreExatamenteAsRotasRegistradas(t *testing.T) {
 	_, err = aplicacaologs.New(aplicacaologs.Dependencias{
 		Trilhas: consultorSwaggerFake{},
 		Opcoes:  provedorOpcoesSwaggerFake{},
+	})
+	require.NoError(t, err)
+	// Aplicação provisionamento (UX5): idem — os adaptadores reais resolvem os
+	// singletons NA CHAMADA e o registro de rotas não dispara nenhum deles.
+	_, err = aplicacaoprovisionamento.New(aplicacaoprovisionamento.Dependencias{
+		Organizacoes: estadoOrganizacaoAlvo{},
+		Workspaces:   workspacesProvisionamento{},
+		Usuarios:     usuariosProvisionamento{},
+		Papeis:       papeisProvisionamento{},
 	})
 	require.NoError(t, err)
 

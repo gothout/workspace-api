@@ -23,6 +23,7 @@ import (
 	aplicacaoauth "workspace-api/internal/identidade/application/auth"
 	aplicacaocatalogo "workspace-api/internal/identidade/application/catalogo"
 	aplicacaologs "workspace-api/internal/identidade/application/logs"
+	aplicacaoprovisionamento "workspace-api/internal/identidade/application/provisionamento"
 
 	"workspace-api/cmd/server"
 	"workspace-api/cmd/server/routes"
@@ -185,6 +186,20 @@ func Serve(caminhoConfig string) error {
 		return fmt.Errorf("boot: %w", err)
 	}
 	slog.Info("[BOOTSTRAP-DI] Contêiner Identidade/Auth inicializado.")
+
+	// Aplicação provisionamento (UX5): admin inicial + workspace inicial de
+	// uma organization pela PLATAFORMA — orquestração entre os três
+	// subdomínios acima, com os contratos resolvidos NA CHAMADA.
+	if _, err := aplicacaoprovisionamento.New(aplicacaoprovisionamento.Dependencias{
+		Organizacoes: estadoOrganizacaoAlvo{},
+		Workspaces:   workspacesProvisionamento{},
+		Usuarios:     usuariosProvisionamento{},
+		Papeis:       papeisProvisionamento{},
+		Trilha:       trilhasLog.auditoria,
+	}); err != nil {
+		return fmt.Errorf("boot: %w", err)
+	}
+	slog.Info("[BOOTSTRAP-DI] Contêiner Identidade/Provisionamento inicializado.")
 
 	// Aplicação logs (E5) — leitura das trilhas do ClickHouse com recorte em
 	// 3 níveis; o adaptador resolve o consultor NA CHAMADA, então ClickHouse

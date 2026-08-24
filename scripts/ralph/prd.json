@@ -530,7 +530,7 @@
         "Testes de integração (idempotência, escopo, papel atribuído) + build/vet/test verdes"
       ],
       "priority": 24,
-      "passes": false,
+      "passes": true,
       "issue": 33,
       "branch": "ox-alpha/ux-provisionamento",
       "docs": [

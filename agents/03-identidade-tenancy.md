@@ -129,6 +129,10 @@ Regras do `ResolveWorkspace` (fail-closed):
 - Chave de API **nunca** ganha suporte.
 - O console master da plataforma vive em `painel.{base_domain}` (slug reservado).
 
+## Provisionamento de organization (UX5)
+
+Organization criada pelo painel nasce ilesa — sem usuário nem workspace, ninguém loga nela. `POST /api/domain/identidade/organizations/{uuid}/provisionamento` (aplicação `identidade/application/provisionamento`, orquestração entre os três subdomínios) cria o **admin inicial** (nome/e-mail/senha definidos pelo chamador; senha nunca gerada em claro nem devolvida) e o **workspace inicial** (slug), atribuindo o papel `admin_organization`. Restrito à plataforma: permissão `identidade:provisionamento:executar` na rota e re-conferência da posse de `*:*` dentro do subdomínio workspace na criação cross-tenant. Organization que já tem workspace = **409** (`ja_provisionado`); peças de tentativa interrompida são reconhecidas (idempotente). Auditado como evento próprio da aplicação, com e-mail mascarado. O provisionamento do PRIMEIRO super_admin/workspace segue sendo o seed opcional da CLI (R3).
+
 ## Escopo de dados (fail-closed)
 
 - Toda query de tabela de negócio passa por `orgctx.Scope(db, ctx)` (organization **e** workspace) ou `orgctx.ScopeOrganization(db, ctx)` (só organization), conforme a tabela — variantes na seção de entidades acima.
