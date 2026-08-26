@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 
 	modeluser "workspace-api/internal/identidade/model/user"
+	modelativacao "workspace-api/internal/licensing/model/ativacao"
 	"workspace-api/internal/infra/jwt"
 	"workspace-api/internal/pkg/log/audit_log"
 	"workspace-api/internal/pkg/orgctx"
@@ -47,7 +48,9 @@ type Dependencias struct {
 	Organizacoes ResolvedorOrganization
 	Vitalidade   VitalidadeOrganization
 	Limite       LimitadorLogin    // opcional: nil = sem lockout (Redis ausente é operação normal)
-	Trilha       audit_log.Destino // opcional (#9): nil = slog legado nos auditar()
+	Par          ResolvedorParLogin  // opcional: nil = login sem lista de aplicações
+	Acessos      ProvedorAcessos     // opcional: nil = feature desligada
+	Trilha       audit_log.Destino   // opcional (#9): nil = slog legado nos auditar()
 }
 
 type serviceImpl struct {
@@ -100,6 +103,10 @@ func (s *serviceImpl) Login(ctx context.Context, host string, in LoginEntrada) (
 	if err != nil {
 		return nil, err
 	}
+	// Seletor de aplicações (F9): a lista vem do PAR (org, ws) resolvido pelo
+	// Host — DECORATIVA, nunca derruba o login (falha = lista vazia + log;
+	// /minhas-aplicacoes é a revalidação autoritativa).
+	sessao.Aplicacoes = s.aplicacoesDoHost(ctx, host)
 	s.limparFalhasLogin(ctx, in) // login bom zera o histórico do par
 	s.auditar(ctx, "login", true,
 		"user_uuid", u.UUID.String(), "organization_uuid", u.OrganizationUUID.String())
@@ -250,6 +257,34 @@ func (s *serviceImpl) claimsParaEncerrar(refreshToken string) (usuarioUUID, orga
 		return uuid.Nil, uuid.Nil, "", ErrSessaoInvalida
 	}
 	return usuarioUUID, organizationUUID, claims.JTI, nil
+}
+
+// aplicacoesDoHost resolve o par (org, ws) do Host e lista os módulos
+// liberados — decorativo: qualquer falha vira lista VAZIA com log, nunca
+// erro (o login já aconteceu; o seletor revalida pelo endpoint próprio).
+func (s *serviceImpl) aplicacoesDoHost(ctx context.Context, host string) []modelativacao.AplicacaoDisponivelDto {
+	if s.deps.Par == nil || s.deps.Acessos == nil {
+		return []modelativacao.AplicacaoDisponivelDto{}
+	}
+	organizationUUID, workspaceUUID, resolvido, err := s.deps.Par.ResolverPar(ctx, host)
+	if err != nil {
+		slog.WarnContext(ctx, "auth.aplicacoes_resolucao_falhou", "erro", err.Error())
+		return []modelativacao.AplicacaoDisponivelDto{}
+	}
+	if !resolvido || workspaceUUID == uuid.Nil {
+		// Portal raiz do parceiro (white-label sem rótulo): sem workspace,
+		// sem módulo — o painel core é a casa dele.
+		return []modelativacao.AplicacaoDisponivelDto{}
+	}
+	itens, err := s.deps.Acessos.Aplicacoes(ctx, organizationUUID, workspaceUUID)
+	if err != nil {
+		slog.WarnContext(ctx, "auth.aplicacoes_falharam", "erro", err.Error())
+		return []modelativacao.AplicacaoDisponivelDto{}
+	}
+	if itens == nil {
+		return []modelativacao.AplicacaoDisponivelDto{}
+	}
+	return itens
 }
 
 // contarFalhaLogin alimenta o lockout com a credencial recusada. Erro do

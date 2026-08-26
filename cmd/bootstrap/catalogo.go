@@ -20,6 +20,16 @@ import (
 	dominioUsuario "workspace-api/internal/identidade/domain/user"
 	dominioWorkspace "workspace-api/internal/identidade/domain/workspace"
 
+	modulomodel "workspace-api/internal/licensing/model/modulo"
+	licencamodel "workspace-api/internal/licensing/model/licenca"
+	ativacaomodel "workspace-api/internal/licensing/model/ativacao"
+	dominioLicenca "workspace-api/internal/licensing/domain/licenca"
+	dominioModulo "workspace-api/internal/licensing/domain/modulo"
+	dominioAtivacao "workspace-api/internal/licensing/domain/ativacao"
+
+	tarefamodel "workspace-api/internal/todolist/model/tarefa"
+	dominioTarefa "workspace-api/internal/todolist/domain/tarefa"
+
 	"workspace-api/internal/pkg/errobserve"
 )
 
@@ -88,6 +98,49 @@ func novoAgregadorPermissoes() agregadorPermissoes {
 			Rotas: rotas, GrupoMenu: meta.GrupoMenu,
 		})
 	}
+	// Domínio licensing — catálogo de módulos, licenças por organization e
+	// ativações por workspace; mesma forma nativa convertida.
+	for _, meta := range dominioModulo.Catalogo() {
+		rotas := make([]aplicacaocatalogo.RotaMeta, 0, len(meta.Rotas))
+		for _, rota := range meta.Rotas {
+			rotas = append(rotas, aplicacaocatalogo.RotaMeta{Rota: rota.Rota, Metodo: rota.Metodo})
+		}
+		itens = append(itens, aplicacaocatalogo.PermissaoMeta{
+			Permissao: meta.Permissao, Descricao: meta.Descricao,
+			Rotas: rotas, GrupoMenu: meta.GrupoMenu,
+		})
+	}
+	for _, meta := range dominioLicenca.Catalogo() {
+		rotas := make([]aplicacaocatalogo.RotaMeta, 0, len(meta.Rotas))
+		for _, rota := range meta.Rotas {
+			rotas = append(rotas, aplicacaocatalogo.RotaMeta{Rota: rota.Rota, Metodo: rota.Metodo})
+		}
+		itens = append(itens, aplicacaocatalogo.PermissaoMeta{
+			Permissao: meta.Permissao, Descricao: meta.Descricao,
+			Rotas: rotas, GrupoMenu: meta.GrupoMenu,
+		})
+	}
+	for _, meta := range dominioAtivacao.Catalogo() {
+		rotas := make([]aplicacaocatalogo.RotaMeta, 0, len(meta.Rotas))
+		for _, rota := range meta.Rotas {
+			rotas = append(rotas, aplicacaocatalogo.RotaMeta{Rota: rota.Rota, Metodo: rota.Metodo})
+		}
+		itens = append(itens, aplicacaocatalogo.PermissaoMeta{
+			Permissao: meta.Permissao, Descricao: meta.Descricao,
+			Rotas: rotas, GrupoMenu: meta.GrupoMenu,
+		})
+	}
+	// Módulo todolist (F10): permissões do app, mesma forma.
+	for _, meta := range dominioTarefa.Catalogo() {
+		rotas := make([]aplicacaocatalogo.RotaMeta, 0, len(meta.Rotas))
+		for _, rota := range meta.Rotas {
+			rotas = append(rotas, aplicacaocatalogo.RotaMeta{Rota: rota.Rota, Metodo: rota.Metodo})
+		}
+		itens = append(itens, aplicacaocatalogo.PermissaoMeta{
+			Permissao: meta.Permissao, Descricao: meta.Descricao,
+			Rotas: rotas, GrupoMenu: meta.GrupoMenu,
+		})
+	}
 	return agregadorPermissoes{itens: itens}
 }
 
@@ -145,6 +198,40 @@ func novoAgregadorEventos() agregadorEventos {
 		itens = append(itens, aplicacaocatalogo.EventoMeta{
 			Dominio:    aplicacaoprovisionamento.Dominio,
 			Subdominio: aplicacaoprovisionamento.Subdominio,
+			Acao:       meta.Acao, Descricao: meta.Descricao,
+			Campos: copiarCampos(meta.Campos),
+		})
+	}
+	// Domínio licensing — eventos dos três subdomínios.
+	for _, meta := range dominioModulo.CatalogoEventos() {
+		itens = append(itens, aplicacaocatalogo.EventoMeta{
+			Dominio:    modulomodel.Dominio,
+			Subdominio: modulomodel.Subdominio,
+			Acao:       meta.Acao, Descricao: meta.Descricao,
+			Campos: copiarCampos(meta.Campos),
+		})
+	}
+	for _, meta := range dominioLicenca.CatalogoEventos() {
+		itens = append(itens, aplicacaocatalogo.EventoMeta{
+			Dominio:    licencamodel.Dominio,
+			Subdominio: licencamodel.Subdominio,
+			Acao:       meta.Acao, Descricao: meta.Descricao,
+			Campos: copiarCampos(meta.Campos),
+		})
+	}
+	for _, meta := range dominioAtivacao.CatalogoEventos() {
+		itens = append(itens, aplicacaocatalogo.EventoMeta{
+			Dominio:    ativacaomodel.Dominio,
+			Subdominio: ativacaomodel.Subdominio,
+			Acao:       meta.Acao, Descricao: meta.Descricao,
+			Campos: copiarCampos(meta.Campos),
+		})
+	}
+	// Módulo todolist (F10): eventos do app.
+	for _, meta := range dominioTarefa.CatalogoEventos() {
+		itens = append(itens, aplicacaocatalogo.EventoMeta{
+			Dominio:    tarefamodel.Dominio,
+			Subdominio: tarefamodel.Subdominio,
 			Acao:       meta.Acao, Descricao: meta.Descricao,
 			Campos: copiarCampos(meta.Campos),
 		})

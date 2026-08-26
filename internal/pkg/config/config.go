@@ -127,6 +127,7 @@ func (r RedisConfig) Addr() string {
 type CacheConfig struct {
 	TtlResolucaoSeg  int             `mapstructure:"ttl_resolucao_seg"`
 	TtlPermissoesSeg int             `mapstructure:"ttl_permissoes_seg"`
+	TtlAplicacoesSeg int             `mapstructure:"ttl_aplicacoes_seg"`
 	LoginLockout     LoginLockConfig `mapstructure:"login_lockout"`
 }
 
@@ -288,6 +289,9 @@ func (c *Config) validar() error {
 	}
 	if c.Cache.TtlPermissoesSeg <= 0 {
 		c.Cache.TtlPermissoesSeg = 60
+	}
+	if c.Cache.TtlAplicacoesSeg <= 0 {
+		c.Cache.TtlAplicacoesSeg = 60
 	}
 	if c.Cache.LoginLockout.MaxTentativas <= 0 {
 		c.Cache.LoginLockout.MaxTentativas = 5

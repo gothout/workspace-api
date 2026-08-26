@@ -27,6 +27,7 @@ const (
 	chaveUserUUID
 	chaveRayTrace
 	chavePermissoes
+	chaveAplicacao
 )
 
 // WithOrganization injeta a organization resolvida da requisição.
@@ -56,6 +57,19 @@ func WithPermissoes(ctx context.Context, permissoes []string) context.Context {
 		conjunto[p] = struct{}{}
 	}
 	return context.WithValue(ctx, chavePermissoes, conjunto)
+}
+
+// WithAplicacao injeta o slug do módulo selecionado na requisição — validado
+// e injetado pelo RequireAplicacao do middleware; ausente = requisição sem
+// contexto de aplicação (rotas core da plataforma).
+func WithAplicacao(ctx context.Context, slug string) context.Context {
+	return context.WithValue(ctx, chaveAplicacao, slug)
+}
+
+// Aplicacao devolve o slug do módulo ativo na requisição (vazio se ausente).
+func Aplicacao(ctx context.Context) string {
+	v, _ := ctx.Value(chaveAplicacao).(string)
+	return v
 }
 
 func valorUUID(ctx context.Context, k chave) uuid.UUID {

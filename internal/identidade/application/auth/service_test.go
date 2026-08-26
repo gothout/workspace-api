@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	modeluser "workspace-api/internal/identidade/model/user"
+	modelativacao "workspace-api/internal/licensing/model/ativacao"
 	"workspace-api/internal/infra/jwt"
 	"workspace-api/internal/pkg/orgctx"
 )
@@ -174,6 +175,27 @@ func (o *organizacoesFake) Resolver(context.Context, string) (uuid.UUID, bool, e
 	return o.org, o.resolvido, o.falha
 }
 
+// parFake simula o ResolvedorParLogin (F9): org + workspace do Host.
+type parFake struct {
+	org, ws  uuid.UUID
+	resolvido bool
+	falha     error
+}
+
+func (p *parFake) ResolverPar(context.Context, string) (uuid.UUID, uuid.UUID, bool, error) {
+	return p.org, p.ws, p.resolvido, p.falha
+}
+
+// acessosFake simula o ProvedorAcessos do login.
+type acessosFake struct {
+	itens []modelativacao.AplicacaoDisponivelDto
+	falha error
+}
+
+func (a *acessosFake) Aplicacoes(context.Context, uuid.UUID, uuid.UUID) ([]modelativacao.AplicacaoDisponivelDto, error) {
+	return a.itens, a.falha
+}
+
 // vitalidadeFake é o dublê do contrato R4: a dona da sessão vive ou não.
 type vitalidadeFake struct {
 	mu    sync.Mutex
@@ -219,6 +241,49 @@ func montarApp(t *testing.T) (Service, *usuariosFake, *emissorFake, *organizacoe
 }
 
 const hostDeTeste = "filial-sul.exemplo.com"
+
+func TestLoginCarregaAplicacoesDoPar(t *testing.T) {
+	usuarios := novoUsuariosFake()
+	emissor := novoEmissorFake()
+	orgs := &organizacoesFake{org: uuid.New(), resolvido: true}
+	par := &parFake{org: orgs.org, ws: uuid.New(), resolvido: true}
+	acessos := &acessosFake{itens: []modelativacao.AplicacaoDisponivelDto{
+		{Slug: "todolist", Nome: "Todolist"},
+		{Slug: "crm", Nome: "CRM"},
+	}}
+	svc := NewService(Dependencias{
+		Usuarios: usuarios, Emissor: emissor, Organizacoes: orgs,
+		Vitalidade: novaVitalidadeFake(), Par: par, Acessos: acessos,
+	})
+	usuarios.semear(orgs.org, "ana@exemplo.com")
+
+	sessao, err := svc.Login(context.Background(), hostDeTeste, LoginEntrada{Email: "ana@exemplo.com", Senha: "senha-segura-123"})
+	require.NoError(t, err)
+	require.Len(t, sessao.Aplicacoes, 2)
+	assert.Equal(t, "todolist", sessao.Aplicacoes[0].Slug)
+
+	// Falha do provedor NUNCA derruba o login: lista vazia e sessão aberta.
+	acessos.falha = errors.New("banco fora")
+	sessao, err = svc.Login(context.Background(), hostDeTeste, LoginEntrada{Email: "ana@exemplo.com", Senha: "senha-segura-123"})
+	require.NoError(t, err)
+	assert.Empty(t, sessao.Aplicacoes, "falha do seletor degrada para lista vazia")
+
+	// Host de white-label raiz (sem rótulo): par sem workspace = lista vazia.
+	par.resolvido, par.ws = true, uuid.Nil
+	sessao, err = svc.Login(context.Background(), hostDeTeste, LoginEntrada{Email: "ana@exemplo.com", Senha: "senha-segura-123"})
+	require.NoError(t, err)
+	assert.Empty(t, sessao.Aplicacoes, "portal raiz do parceiro não tem módulo")
+
+	// Peças ausentes (boot antigo): login segue com lista vazia, nunca quebra.
+	acessos.falha = nil
+	svcSemSeletor := NewService(Dependencias{
+		Usuarios: usuarios, Emissor: emissor, Organizacoes: orgs,
+		Vitalidade: novaVitalidadeFake(),
+	})
+	sessao, err = svcSemSeletor.Login(context.Background(), hostDeTeste, LoginEntrada{Email: "ana@exemplo.com", Senha: "senha-segura-123"})
+	require.NoError(t, err)
+	assert.Empty(t, sessao.Aplicacoes)
+}
 
 func TestLoginBomEmiteOParEPersisteOJti(t *testing.T) {
 	svc, usuarios, _, orgs, _ := montarApp(t)

@@ -25,5 +25,6 @@ func ligarMiddleware(gerenciador *jwt.Manager) error {
 		DominiosCustom: provedorDominiosCustom{},
 		Permissoes:     novoResolvedorPermissoesComCache(resolvedorPermissoesUser{}),
 		ApiKeys:        resolvedorApiKeys{},
+		Aplicacoes:     novoResolvedorAplicacoesComCache(nil),
 	})
 }

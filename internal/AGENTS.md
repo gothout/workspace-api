@@ -11,10 +11,10 @@ completa em `agents/01`.
 | `pkg` | utilidades transversais, **folha** do grafo |
 | `infra` | adaptadores técnicos (Postgres, JWT, migrations) |
 | `middleware` | cadeia de autenticação/autorização/resolução |
-| `identidade/` | **domínio** do negócio (bounded context) — pasta direta de `internal/` |
-| `identidade/model/` | **modelos expostos** do domínio (entidades, VOs, invariantes) — **folha**, importável por todas as camadas |
-| `identidade/domain/` | subdomínios do domínio (`organization`, `workspace`, `user`) |
-| `identidade/application/` | orquestrações entre os subdomínios do domínio (`catalogo`, `auth`) |
+| `identidade/`, `licensing/` | **domínios** do negócio (bounded contexts) — pastas diretas de `internal/` |
+| `{dominio}/model/` | **modelos expostos** do domínio (entidades, VOs, invariantes) — **folha**, importável por todas as camadas |
+| `{dominio}/domain/` | subdomínios de cada domínio |
+| `{dominio}/application/` | orquestrações entre subdomínios do domínio |
 
 Fluxo permitido: `pkg ← infra ← {dominio}/model ← {dominio}/domain ← {dominio}/application ← cmd`.
 

@@ -296,13 +296,113 @@ func (invalidadorPermissoesRedis) AtribuicaoAlterada(ctx context.Context, usuari
 	}
 }
 
+// --- Cache de aplicações liberadas (app:{org}:{ws}) --------------------------
+
+// cacheAplicacoesRedis é o lado Redis da resolução de MÓDULOS LIBERADOS do
+// par (organization, workspace): guarda a lista de slugs em app:{org}:{ws}
+// com TTL de cache.ttl_aplicacoes_seg. A invalidação ATIVA é quem garante
+// revogação/desativação valerem na hora — três granulosidades, uma por
+// escritor: par exato (ativação), organization inteira (licença), tudo
+// (catálogo — evento raro). Sem Redis, todos os métodos são no-op.
+type cacheAplicacoesRedis struct{}
+
+func (cacheAplicacoesRedis) Buscar(ctx context.Context, organizationUUID, workspaceUUID string) ([]string, bool) {
+	cliente, err := rediscache.Get()
+	if err != nil || cliente == nil {
+		return nil, false
+	}
+	bruto, err := cliente.Get(ctx, rediscache.ChaveAplicacoes(organizationUUID, workspaceUUID)).Bytes()
+	if err != nil {
+		return nil, false // ausente E falha: consulta real (degradar, não bloquear)
+	}
+	var slugs []string
+	if json.Unmarshal(bruto, &slugs) != nil || slugs == nil {
+		return nil, false // lixo corrompido: trata como ausente, nunca propaga
+	}
+	return slugs, true
+}
+
+func (cacheAplicacoesRedis) Guardar(ctx context.Context, organizationUUID, workspaceUUID string, slugs []string) {
+	cliente, err := rediscache.Get()
+	if err != nil || cliente == nil {
+		return
+	}
+	corpo, err := json.Marshal(slugs)
+	if err != nil {
+		return
+	}
+	ttl := time.Duration(config.MustUse().Cache.TtlAplicacoesSeg) * time.Second
+	if err := cliente.Set(ctx, rediscache.ChaveAplicacoes(organizationUUID, workspaceUUID), corpo, ttl).Err(); err != nil {
+		slog.Warn("[DEGRADADO] escrita no cache de aplicações falhou", "erro", err.Error())
+	}
+}
+
+// InvalidarPar derruba a entrada EXATA do par (escrita de ativação).
+func (cacheAplicacoesRedis) InvalidarPar(ctx context.Context, organizationUUID, workspaceUUID string) {
+	cliente, err := rediscache.Get()
+	if err != nil || cliente == nil {
+		return
+	}
+	if err := cliente.Del(ctx, rediscache.ChaveAplicacoes(organizationUUID, workspaceUUID)).Err(); err != nil {
+		slog.Warn("[DEGRADADO] invalidação do cache de aplicações (par) falhou", "erro", err.Error())
+	}
+}
+
+// InvalidarOrganization é a invalidação GROSSEIRA da licença: toda entrada
+// derivada da organization cai (revogar licença afeta todos os workspaces).
+func (cacheAplicacoesRedis) InvalidarOrganization(ctx context.Context, organizationUUID string) {
+	cliente, err := rediscache.Get()
+	if err != nil || cliente == nil {
+		return
+	}
+	var cursor uint64
+	padrao := rediscache.PadraoAplicacoesOrganization(organizationUUID)
+	for {
+		pagina, proximo, err := cliente.Scan(ctx, cursor, padrao, 100).Result()
+		if err != nil {
+			slog.Warn("[DEGRADADO] invalidação do cache de aplicações (organization) falhou", "erro", err.Error())
+			return
+		}
+		for _, chave := range pagina {
+			_ = cliente.Del(ctx, chave).Err()
+		}
+		cursor = proximo
+		if cursor == 0 {
+			return
+		}
+	}
+}
+
+// InvalidarTudo varre o namespace inteiro (desativar módulo do catálogo) —
+// evento raro, espaço proporcional aos pares (org, ws) ativos.
+func (cacheAplicacoesRedis) InvalidarTudo(ctx context.Context) {
+	cliente, err := rediscache.Get()
+	if err != nil || cliente == nil {
+		return
+	}
+	var cursor uint64
+	for {
+		pagina, proximo, err := cliente.Scan(ctx, cursor, rediscache.PrefixoAplicacoes+"*", 100).Result()
+		if err != nil {
+			slog.Warn("[DEGRADADO] invalidação do cache de aplicações (global) falhou", "erro", err.Error())
+			return
+		}
+		for _, chave := range pagina {
+			_ = cliente.Del(ctx, chave).Err()
+		}
+		cursor = proximo
+		if cursor == 0 {
+			return
+		}
+	}
+}
+
 // --- Contrato LimitadorLogin (aplicação auth) --------------------------------
 
 // limitadorLoginAuth monta o lockout por (e-mail, IP) NA CHAMADA: parâmetros
 // vêm da config corrente e cliente ausente devolve limitador no-op (sem
 // Redis = sem lockout, com log uma única vez no boot).
 type limitadorLoginAuth struct{}
-
 func (limitadorLoginAuth) limitador() *rediscache.LimitadorLogin {
 	cliente, err := rediscache.Get()
 	if err != nil || cliente == nil {

@@ -213,7 +213,20 @@ func (emissorToken) ValidarSemRevogacao(tokenTexto string) (*jwt.Claims, error) 
 // desconhecido NÃO resolvem organization: a aplicação devolve o 401 genérico.
 type resolvedorOrganizacao struct{}
 
-func (resolvedorOrganizacao) Resolver(ctx context.Context, hostBruto string) (uuid.UUID, bool, error) {
+// Resolver é a face clássica (organization só) — o workspace fica de fora.
+func (r resolvedorOrganizacao) Resolver(ctx context.Context, hostBruto string) (uuid.UUID, bool, error) {
+	org, _, resolvido, err := r.resolver(ctx, hostBruto)
+	return org, resolvido, err
+}
+
+// ResolverPar é a face do seletor de aplicações (F9): organization E
+// workspace do Host — a lista de módulos liberados é do PAR, não da
+// organização sozinha.
+func (r resolvedorOrganizacao) ResolverPar(ctx context.Context, hostBruto string) (uuid.UUID, uuid.UUID, bool, error) {
+	return r.resolver(ctx, hostBruto)
+}
+
+func (resolvedorOrganizacao) resolver(ctx context.Context, hostBruto string) (uuid.UUID, uuid.UUID, bool, error) {
 	host := hostSemPorta(hostBruto)
 	baseDomain := normalizarDominio(config.MustUse().App.BaseDomain)
 
@@ -223,32 +236,36 @@ func (resolvedorOrganizacao) Resolver(ctx context.Context, hostBruto string) (uu
 			resolvido, err := dominioWorkspace.MustUse().Service.ResolverPorSlug(ctx, slug)
 			if err != nil {
 				if errors.Is(err, dominioWorkspace.ErrNotFound) {
-					return uuid.Nil, false, nil // slug não resolve organization nenhuma
+					return uuid.Nil, uuid.Nil, false, nil // slug não resolve organization nenhuma
 				}
-				return uuid.Nil, false, err
+				return uuid.Nil, uuid.Nil, false, err
 			}
 			if resolvido.Ativo() {
-				return resolvido.OrganizationUUID, true, nil
+				return resolvido.OrganizationUUID, resolvido.UUID, true, nil
 			}
-			return uuid.Nil, false, nil // workspace inativo não abre sessão
+			return uuid.Nil, uuid.Nil, false, nil // workspace inativo não abre sessão
 		}
 	}
 
-	// White-label: {qualquer-coisa}.dominio-custom → organization dona.
+	// White-label: {qualquer-coisa}.dominio-custom → organization dona. O
+	// workspace fica Nil (rótulo irrelevante: portal raiz do parceiro).
 	listados, err := provedorDominiosCustom{}.Listar(ctx)
 	if err != nil {
-		return uuid.Nil, false, err
+		return uuid.Nil, uuid.Nil, false, err
 	}
 	for _, d := range listados {
 		if _, casou := rotuloDeSufixo(host, normalizarDominio(d.Dominio)); casou {
 			// O login resolve ORGANIZATION, não workspace: o rótulo é
 			// irrelevante aqui — qualquer host sob o domínio do parceiro
 			// endereça a organization dele.
-			return d.OrganizationUUID, true, nil
+			return d.OrganizationUUID, uuid.Nil, true, nil
 		}
 	}
-	return uuid.Nil, false, nil
+	return uuid.Nil, uuid.Nil, false, nil
 }
+
+var _ aplicacaoauth.ResolvedorOrganization = resolvedorOrganizacao{}
+var _ aplicacaoauth.ResolvedorParLogin = resolvedorOrganizacao{}
 
 // --- Helpers de Host (espelhos puros dos do middleware — cmd não importa
 // os internos de lá; mesma gramática: case-insensitive, sem porta) ----------

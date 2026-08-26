@@ -35,6 +35,12 @@ const (
 	// refresh token (a verdade fica em identidade_user_refresh_token). Só
 	// resultado POSITIVO é cacheado — revogação é permanente.
 	PrefixoDenylistJWT = "jwt:deny:"
+
+	// PrefixoAplicacoes — app:{org}:{ws}: módulos liberados do par
+	// (organization, workspace) — licença ∩ ativação ∩ módulo ativo.
+	// Consumido pelo RequireAplicacao do middleware em toda requisição de
+	// módulo; invalidação ativa nas escritas de licença/ativação/módulo.
+	PrefixoAplicacoes = "app:"
 )
 
 // ChavePermissoes monta perm:{org}:{user}:{wks}.
@@ -68,6 +74,18 @@ func ChaveLockBloqueio(email, ip string) string {
 // ChaveDenylistJWT monta jwt:deny:{jti}.
 func ChaveDenylistJWT(jti string) string {
 	return PrefixoDenylistJWT + jti
+}
+
+// ChaveAplicacoes monta app:{org}:{ws} — o par resolve os módulos liberados.
+func ChaveAplicacoes(organizationUUID, workspaceUUID string) string {
+	return PrefixoAplicacoes + organizationUUID + ":" + workspaceUUID
+}
+
+// PadraoAplicacoesOrganization é o padrão de TODAS as entradas de uma
+// organization — usado pela invalidação grosseira (SCAN + DEL) nas escritas
+// de licença.
+func PadraoAplicacoesOrganization(organizationUUID string) string {
+	return PrefixoAplicacoes + organizationUUID + ":*"
 }
 
 // hashPar resume o par JÁ normalizado para chave: PII não repousa cru no

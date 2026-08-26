@@ -106,7 +106,7 @@ var papeisSeed = []papelSeed{
 	},
 	{
 		nome:      papelAdminOrganization,
-		descricao: "Dono do contrato: administra workspaces, usuários e as chaves de API da organization; suporte em qualquer workspace da própria; lê os logs da organization inteira.",
+		descricao: "Dono do contrato: administra workspaces, usuários e as chaves de API da organization; suporte em qualquer workspace da própria; lê os logs da organization inteira; licencia módulos nos próprios workspaces.",
 		permissoes: []string{
 			"identidade:workspace:*",
 			"identidade:user:*",
@@ -114,6 +114,10 @@ var papeisSeed = []papelSeed{
 			"identidade:catalogo:ler",
 			"identidade:logs:ler",
 			"identidade:logs:ler_organization",
+			"licensing:modulo:ler",
+			"licensing:licenca:ler",
+			"licensing:ativacao:*",
+			"todolist:tarefa:*",
 		},
 	},
 	{
@@ -124,6 +128,9 @@ var papeisSeed = []papelSeed{
 			"identidade:user:*",
 			"identidade:catalogo:ler",
 			"identidade:logs:ler",
+			"licensing:modulo:ler",
+			"licensing:ativacao:ler",
+			"todolist:tarefa:*",
 		},
 	},
 	{
@@ -132,6 +139,9 @@ var papeisSeed = []papelSeed{
 		permissoes: []string{
 			"identidade:workspace:ler",
 			"identidade:catalogo:ler",
+			"todolist:tarefa:criar",
+			"todolist:tarefa:ler",
+			"todolist:tarefa:editar",
 		},
 	},
 	{
@@ -143,6 +153,10 @@ var papeisSeed = []papelSeed{
 			"identidade:user:ler",
 			"identidade:catalogo:ler",
 			"identidade:logs:ler",
+			"licensing:modulo:ler",
+			"licensing:licenca:ler",
+			"licensing:ativacao:ler",
+			"todolist:tarefa:ler",
 		},
 	},
 }

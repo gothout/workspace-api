@@ -19,6 +19,12 @@ import (
 	dominioUsuario "workspace-api/internal/identidade/domain/user"
 	dominioWorkspace "workspace-api/internal/identidade/domain/workspace"
 
+	dominioAtivacao "workspace-api/internal/licensing/domain/ativacao"
+	dominioLicenca "workspace-api/internal/licensing/domain/licenca"
+	dominioModulo "workspace-api/internal/licensing/domain/modulo"
+
+	dominioTarefa "workspace-api/internal/todolist/domain/tarefa"
+
 	"workspace-api/internal/pkg/errobserve"
 )
 
@@ -55,6 +61,10 @@ var emissoresConhecidos = []struct {
 	{dir: "internal/identidade/domain/user", grupo: "identidade/user", catalogo: metaUsuario},
 	{dir: "internal/identidade/application/auth", grupo: "identidade/auth", catalogo: metaAuth},
 	{dir: "internal/identidade/application/provisionamento", grupo: "identidade/provisionamento", catalogo: metaProvisionamento},
+	{dir: "internal/licensing/domain/modulo", grupo: "licensing/modulo", catalogo: metaModulo},
+	{dir: "internal/licensing/domain/licenca", grupo: "licensing/licenca", catalogo: metaLicenca},
+	{dir: "internal/licensing/domain/ativacao", grupo: "licensing/ativacao", catalogo: metaAtivacao},
+	{dir: "internal/todolist/domain/tarefa", grupo: "todolist/tarefa", catalogo: metaTarefa},
 }
 
 // Conversões dos catálogos NATIVOS (tipos homônimos por pacote) para a forma
@@ -89,6 +99,30 @@ func metaProvisionamento() []metaEvento {
 	})
 }
 
+func metaModulo() []metaEvento {
+	return converterMeta(dominioModulo.CatalogoEventos(), func(m dominioModulo.EventoMeta) metaEvento {
+		return metaEvento{Acao: m.Acao, Descricao: m.Descricao, Campos: m.Campos}
+	})
+}
+
+func metaLicenca() []metaEvento {
+	return converterMeta(dominioLicenca.CatalogoEventos(), func(m dominioLicenca.EventoMeta) metaEvento {
+		return metaEvento{Acao: m.Acao, Descricao: m.Descricao, Campos: m.Campos}
+	})
+}
+
+func metaAtivacao() []metaEvento {
+	return converterMeta(dominioAtivacao.CatalogoEventos(), func(m dominioAtivacao.EventoMeta) metaEvento {
+		return metaEvento{Acao: m.Acao, Descricao: m.Descricao, Campos: m.Campos}
+	})
+}
+
+func metaTarefa() []metaEvento {
+	return converterMeta(dominioTarefa.CatalogoEventos(), func(m dominioTarefa.EventoMeta) metaEvento {
+		return metaEvento{Acao: m.Acao, Descricao: m.Descricao, Campos: m.Campos}
+	})
+}
+
 func converterMeta[T any](itens []T, para func(T) metaEvento) []metaEvento {
 	lista := make([]metaEvento, 0, len(itens))
 	for _, item := range itens {
@@ -102,25 +136,31 @@ func TestCoberturaDeEventosNosDoisSentidos(t *testing.T) {
 
 	// Varredura genérica: TODO diretório de subdomínio/aplicação que emite
 	// eventos deve estar na lista dos conhecidos (que têm events.go +
-	// CatalogoEventos exportado e são comparados adiante).
+	// CatalogoEventos exportado e são comparados adiante) — em TODO domínio
+	// de negócio (identidade, licensing, …).
 	emitentes := map[string][]string{}
-	pastas, err := os.ReadDir(filepath.Join(raiz, "internal", "identidade"))
+	dominiosNegocio, err := os.ReadDir(filepath.Join(raiz, "internal"))
 	require.NoError(t, err)
-	for _, familia := range pastas {
-		if !familia.IsDir() || (familia.Name() != "domain" && familia.Name() != "application") {
+	for _, dominio := range dominiosNegocio {
+		if !dominio.IsDir() || dominio.Name() == "pkg" || dominio.Name() == "infra" ||
+			dominio.Name() == "middleware" {
 			continue
 		}
-		subdirs, err := os.ReadDir(filepath.Join(raiz, "internal", "identidade", familia.Name()))
-		require.NoError(t, err)
-		for _, sub := range subdirs {
-			if !sub.IsDir() {
-				continue
+		for _, familia := range []string{"domain", "application"} {
+			subdirs, err := os.ReadDir(filepath.Join(raiz, "internal", dominio.Name(), familia))
+			if err != nil {
+				continue // domínio sem esta camada — nada a varrer
 			}
-			caminho := "internal/identidade/" + familia.Name() + "/" + sub.Name()
-			usadas, err := acoesEmitidasNoFonte(filepath.Join(raiz, caminho))
-			require.NoError(t, err, "parse dos fontes de %s", caminho)
-			if len(usadas) > 0 {
-				emitentes[caminho] = usadas
+			for _, sub := range subdirs {
+				if !sub.IsDir() {
+					continue
+				}
+				caminho := "internal/" + dominio.Name() + "/" + familia + "/" + sub.Name()
+				usadas, err := acoesEmitidasNoFonte(filepath.Join(raiz, caminho))
+				require.NoError(t, err, "parse dos fontes de %s", caminho)
+				if len(usadas) > 0 {
+					emitentes[caminho] = usadas
+				}
 			}
 		}
 	}
@@ -187,6 +227,10 @@ func TestAgregadorEventosConverteCatalogosNativos(t *testing.T) {
 		{dir: "identidade/user", itens: len(dominioUsuario.CatalogoEventos())},
 		{dir: "identidade/auth", itens: len(aplicacaoauth.CatalogoEventos())},
 		{dir: "identidade/provisionamento", itens: len(aplicacaoprovisionamento.CatalogoEventos())},
+		{dir: "licensing/modulo", itens: len(dominioModulo.CatalogoEventos())},
+		{dir: "licensing/licenca", itens: len(dominioLicenca.CatalogoEventos())},
+		{dir: "licensing/ativacao", itens: len(dominioAtivacao.CatalogoEventos())},
+		{dir: "todolist/tarefa", itens: len(dominioTarefa.CatalogoEventos())},
 	}
 	totalAuditados := 0
 	for _, nativo := range nativos {

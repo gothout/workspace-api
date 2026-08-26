@@ -61,6 +61,7 @@
   "cache": {
     "ttl_resolucao_seg": 30,
     "ttl_permissoes_seg": 60,
+    "ttl_aplicacoes_seg": 60,
     "login_lockout": {
       "max_tentativas": 5,
       "janela_seg": 300,

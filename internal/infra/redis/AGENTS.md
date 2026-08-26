@@ -28,6 +28,7 @@ obrigado a tratar a ausência.
 | `lock:` | `lock:c:{hash}` / `lock:b:{hash}` | contador de falhas e marcador de bloqueio do lockout de login; e-mail+IP hasheados (PII não repousa crua) |
 | `idempot:` | `idempot:{chave}` | RESERVADO — nenhum código grava hoje |
 | `jwt:deny:` | `jwt:deny:{jti}` | denylist do refresh; só POSITIVO é cacheado (revogação é permanente), negativos seguem ao Postgres — logout/rotação valem na hora |
+| `app:` | `app:{org}:{ws}` | módulos liberados do par (organization, workspace) — licença ∩ ativação ∩ módulo ativo; TTL `cache.ttl_aplicacoes_seg`; invalidado nas escritas de licença (`app:{org}:*` grosseiro), ativação (`app:{org}:{ws}` exato) e módulo (`app:*` global, evento raro) |
 
 ## Peças
 

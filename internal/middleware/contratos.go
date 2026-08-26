@@ -98,3 +98,12 @@ type ResolvedorPermissoes interface {
 	// no workspace ativo — curingas inclusos (identidade:user:* e *:*).
 	PermissoesEfetivas(ctx context.Context, usuarioUUID, organizationUUID, workspaceUUID uuid.UUID) ([]string, error)
 }
+
+// ResolvedorAplicacoes pergunta ao domínio licensing quais módulos o par
+// (organization, workspace) tem liberados — licença viva ∩ ativação viva ∩
+// módulo ativo. Alimenta o passo RequireAplicacao da cadeia.
+type ResolvedorAplicacoes interface {
+	// Liberadas devolve os SLUGS dos módulos usáveis no par. Falha de
+	// infraestrutura sobe INTACTA (nunca vira negativa: 500, não 403).
+	Liberadas(ctx context.Context, organizationUUID, workspaceUUID uuid.UUID) ([]string, error)
+}

@@ -27,6 +27,7 @@ type Dependencias struct {
 	DominiosCustom ProvedorDominiosCustom // white-label (F2 liga)
 	Permissoes     ResolvedorPermissoes   // vínculo + permissões efetivas
 	ApiKeys        ResolvedorApiKeys      // X-Api-Key (F2 liga; até lá 401)
+	Aplicacoes     ResolvedorAplicacoes   // módulos liberados do par (org, ws) — RequireAplicacao
 }
 
 var (
@@ -123,3 +124,6 @@ func ResolveWorkspace() gin.HandlerFunc { return Use().ResolveWorkspace() }
 
 // RequirePermission exige a permissão granular exata da rota.
 func RequirePermission(permissao string) gin.HandlerFunc { return Use().RequirePermission(permissao) }
+
+// RequireAplicacao exige o módulo declarado na rota via header Application.
+func RequireAplicacao(slug string) gin.HandlerFunc { return Use().RequireAplicacao(slug) }

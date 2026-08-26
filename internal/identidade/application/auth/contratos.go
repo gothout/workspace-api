@@ -16,6 +16,7 @@ import (
 	"github.com/google/uuid"
 
 	modeluser "workspace-api/internal/identidade/model/user"
+	modelativacao "workspace-api/internal/licensing/model/ativacao"
 	"workspace-api/internal/infra/jwt"
 )
 
@@ -65,6 +66,23 @@ type EmissorToken interface {
 // resolvido=false SEM erro: para o cliente isso vira o MESMO 401 genérico.
 type ResolvedorOrganization interface {
 	Resolver(ctx context.Context, host string) (organizationUUID uuid.UUID, resolvido bool, err error)
+}
+
+// ResolvedorParLogin resolve organization E workspace do Host — usado pelo
+// seletor de aplicações dentro do LOGIN (as aplicações liberadas são do par
+// (org, ws), não da organização sozinha). Host de white-label raiz (sem
+// rótulo) resolve só a organization: workspace devolve uuid.Nil e a lista
+// sai vazia — o painel do parceiro é core, não módulo.
+type ResolvedorParLogin interface {
+	ResolverPar(ctx context.Context, host string) (organizationUUID, workspaceUUID uuid.UUID, resolvido bool, err error)
+}
+
+// ProvedorAcessos responde quais módulos o par (organization, workspace) tem
+// liberados — DECORATIVO no login: falha do provedor NUNCA derruba a sessão
+// (lista vazia + log); o endpoint /minhas-aplicacoes é a revalidação
+// autoritativa. Nil = feature desligada.
+type ProvedorAcessos interface {
+	Aplicacoes(ctx context.Context, organizationUUID, workspaceUUID uuid.UUID) ([]modelativacao.AplicacaoDisponivelDto, error)
 }
 
 // VitalidadeOrganization pergunta se a organization DONA da sessão segue

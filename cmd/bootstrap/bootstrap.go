@@ -20,6 +20,14 @@ import (
 	dominioUsuario "workspace-api/internal/identidade/domain/user"
 	dominioWorkspace "workspace-api/internal/identidade/domain/workspace"
 
+	dominioLicenca "workspace-api/internal/licensing/domain/licenca"
+	dominioModulo "workspace-api/internal/licensing/domain/modulo"
+	dominioAtivacao "workspace-api/internal/licensing/domain/ativacao"
+
+	aplicacaoaplicacoes "workspace-api/internal/licensing/application/aplicacoes"
+
+	dominioTarefa "workspace-api/internal/todolist/domain/tarefa"
+
 	aplicacaoauth "workspace-api/internal/identidade/application/auth"
 	aplicacaocatalogo "workspace-api/internal/identidade/application/catalogo"
 	aplicacaologs "workspace-api/internal/identidade/application/logs"
@@ -170,6 +178,53 @@ func Serve(caminhoConfig string) error {
 	}
 	slog.Info("[BOOTSTRAP-DI] Contêiner Identidade/User inicializado.")
 
+	// Domínio licensing — catálogo de módulos, licenças por organization e
+	// ativações por workspace. Ordem: módulo (catálogo) → licença (lê o
+	// catálogo) → ativação (lê licença + catálogo + workspace). Os contratos
+	// entre irmãos entram pelos adaptadores de licensing.go, resolvidos NA
+	// CHAMADA; a trilha de auditoria (#9) entra nos três e a invalidação do
+	// cache app:* observa as escritas dos três.
+	if _, err := dominioModulo.New(db, verificadorLicencasDoModulo{},
+		dominioModulo.ComTrilha(trilhasLog.auditoria),
+		dominioModulo.ComInvalidadorAcessos(cacheAplicacoesRedis{})); err != nil {
+		return fmt.Errorf("boot: %w", err)
+	}
+	slog.Info("[BOOTSTRAP-DI] Contêiner Licensing/Modulo inicializado.")
+
+	if _, err := dominioLicenca.New(db, buscadorModulosDaLicenca{},
+		dominioLicenca.ComTrilha(trilhasLog.auditoria),
+		dominioLicenca.ComInvalidadorAcessos(cacheAplicacoesRedis{})); err != nil {
+		return fmt.Errorf("boot: %w", err)
+	}
+	slog.Info("[BOOTSTRAP-DI] Contêiner Licensing/Licenca inicializado.")
+
+	if _, err := dominioAtivacao.New(db,
+		buscadorModulosDaAtivacao{},
+		verificadorLicencasDaAtivacao{},
+		validadorWorkspacesDaAtivacao{},
+		dominioAtivacao.ComTrilha(trilhasLog.auditoria),
+		dominioAtivacao.ComInvalidadorAcessos(cacheAplicacoesRedis{})); err != nil {
+		return fmt.Errorf("boot: %w", err)
+	}
+	slog.Info("[BOOTSTRAP-DI] Contêiner Licensing/Ativacao inicializado.")
+
+	// Aplicação aplicacoes — o seletor de módulos do front: orquestra só o
+	// subdomínio ativação pelo contrato resolvedor NA CHAMADA.
+	if _, err := aplicacaoaplicacoes.New(aplicacaoaplicacoes.Dependencias{
+		Provedor: provedorAcessosAplicacoes{},
+	}); err != nil {
+		return fmt.Errorf("boot: %w", err)
+	}
+	slog.Info("[BOOTSTRAP-DI] Contêiner Licensing/Aplicacoes inicializado.")
+
+	// Módulo todolist (F10) — o PRIMEIRO app do monolito: prova o licensing
+	// ponta a ponta. Nada de especial aqui: domínio irmão comum, com as
+	// rotas protegidas por RequireAplicacao no próprio controller.
+	if _, err := dominioTarefa.New(db, dominioTarefa.ComTrilha(trilhasLog.auditoria)); err != nil {
+		return fmt.Errorf("boot: %w", err)
+	}
+	slog.Info("[BOOTSTRAP-DI] Contêiner Todolist/Tarefa inicializado.")
+
 	// Aplicações — orquestrações que cruzam os subdomínios acima. O auth
 	// recebe os contratos ligados por adaptadores que resolvem os singletons
 	// NA CHAMADA (usuario.go) — inclusive a vitalidade da organization dona
@@ -181,6 +236,8 @@ func Serve(caminhoConfig string) error {
 		Organizacoes: resolvedorOrganizacao{},
 		Vitalidade:   vitalidadeOrganizacao{},
 		Limite:       limitadorLoginAuth{},
+		Par:          resolvedorOrganizacao{},
+		Acessos:      provedorAcessosAuth{},
 		Trilha:       trilhasLog.auditoria,
 	}); err != nil {
 		return fmt.Errorf("boot: %w", err)

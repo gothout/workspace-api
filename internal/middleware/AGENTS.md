@@ -10,11 +10,16 @@ Cadeia de autenticação, resolução de workspace e autorização da plataforma
 |---|---|---|
 | `SetContextAuthorization` | quem está falando? (JWT Bearer ou `X-Api-Key`) | 401 |
 | `ResolveWorkspace` | qual workspace? (Host; `X-Workspace-Id` fora de subdomínio) | 400 / 404 / 403 |
+| `RequireAplicacao(slug)` | em qual MÓDULO? (header `Application` × liberados do par) | 403 |
 | `RequirePermission` | pode fazer ISTO? (permissão granular) | 403 |
 
 A ordem é sempre essa: `ResolveWorkspace` precisa da identidade que o
-`SetContextAuthorization` injetou, e a exigência de permissão precisa das
+`SetContextAuthorization` injetou, `RequireAplicacao` precisa do par
+(organization, workspace) resolvido e a exigência de permissão precisa das
 duas. Declarada **rota a rota** pelos controllers, nunca no grupo.
+`RequireAplicacao` é exigido SÓ pelas rotas de módulo (ex.: `todolist`); as
+rotas core (`identidade`, `licensing` administrativo) rodam sem ele — o
+header ausente nelas é irrelevante.
 
 ## Regra que define o desenho: NÃO importa nenhum `internal/{dominio}/domain`
 
@@ -50,6 +55,11 @@ para montar rotas — um import de volta fecharia ciclo. Então:
 - **Cadeia não inicializada = rota FECHADA.** Sem `middleware.New` no boot,
   toda rota protegida responde **403** — nunca aberta. Peça faltando é erro
   de boot, não 501 em runtime.
+- **`RequireAplicacao` fail-closed e indistinguível**: header `Application`
+  ausente, divergente do slug da rota, sem licença/ativação viva ou módulo
+  desconhecido respondem o MESMO 403 genérico — não vaza existência de
+  módulo. Falha do resolvedor sobe 500 (infra não vira negativa). Sucesso
+  injeta `orgctx.WithAplicacao` para as camadas abaixo.
 - **`RequirePermission` rota a rota** com a string exata
   `dominio:subdominio:acao` (ex.: `identidade:workspace:editar`). Exigência
   vazia **nega** — exigência que não sabe o que exigir nunca vira liberação.

@@ -27,6 +27,11 @@ import (
 	organizacao "workspace-api/internal/identidade/domain/organization"
 	usuario "workspace-api/internal/identidade/domain/user"
 	workspace "workspace-api/internal/identidade/domain/workspace"
+	licenca "workspace-api/internal/licensing/domain/licenca"
+	modulo "workspace-api/internal/licensing/domain/modulo"
+	ativacao "workspace-api/internal/licensing/domain/ativacao"
+	aplicacaoaplicacoes "workspace-api/internal/licensing/application/aplicacoes"
+	tarefa "workspace-api/internal/todolist/domain/tarefa"
 	"workspace-api/internal/pkg/config"
 	"workspace-api/internal/pkg/log/access_log"
 	"workspace-api/internal/pkg/orgctx"
@@ -137,8 +142,23 @@ func registrarConhecidos(engine *gin.Engine, dominio, aplicacao *gin.RouterGroup
 	registrarRotas("identidade.user", dominio, func() (Controlador, error) {
 		return usuario.Use()
 	})
+	registrarRotas("licensing.modulo", dominio, func() (Controlador, error) {
+		return modulo.Use()
+	})
+	registrarRotas("licensing.licenca", dominio, func() (Controlador, error) {
+		return licenca.Use()
+	})
+	registrarRotas("licensing.ativacao", dominio, func() (Controlador, error) {
+		return ativacao.Use()
+	})
+	registrarRotas("todolist.tarefa", dominio, func() (Controlador, error) {
+		return tarefa.Use()
+	})
 	registrarRotas("identidade.auth", aplicacao, func() (Controlador, error) {
 		return aplicacaoauth.Use()
+	})
+	registrarRotas("licensing.aplicacoes", aplicacao, func() (Controlador, error) {
+		return aplicacaoaplicacoes.Use()
 	})
 	registrarRotas("identidade.logs", aplicacao, func() (Controlador, error) {
 		return aplicacaologs.Use()
@@ -233,7 +253,7 @@ func politicaCors(opcoes Opcoes) gin.HandlerFunc {
 			return origemEmDominioCustom(opcoes, c.Request.Context(), host)
 		},
 		AllowMethods:     []string{http.MethodGet, http.MethodPost, http.MethodPatch, http.MethodPut, http.MethodDelete, http.MethodOptions},
-		AllowHeaders:     []string{"Authorization", "X-Api-Key", "X-Workspace-Id", "X-Request-Id", "Content-Type"},
+		AllowHeaders:     []string{"Authorization", "X-Api-Key", "X-Workspace-Id", "X-Request-Id", "Content-Type", "Application"},
 		ExposeHeaders:    []string{"X-Request-Id"},
 		AllowCredentials: false,
 		MaxAge:           12 * time.Hour,

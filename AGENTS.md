@@ -26,12 +26,12 @@ go test -race ./...
 ## Estrutura e regras de dependência
 
 Layout de pastas e regras invioláveis: `agents/01`. O **domínio é pasta direta
-de `internal/`** (hoje só `identidade`): os modelos expostos (entidades, VOs,
-invariantes) moram em `internal/identidade/model/{subdominio}` (folha,
-importável por qualquer camada), os subdomínios em
-`internal/identidade/domain/{subdominio}` e as orquestrações que atravessam
-2+ subdomínios em `internal/identidade/application/{nome}`. Resumo do fluxo
-permitido:
+de `internal/`** (hoje `identidade` e `licensing`): os modelos expostos
+(entidades, VOs, invariantes) moram em
+`internal/{dominio}/model/{subdominio}` (folha, importável por qualquer
+camada), os subdomínios em `internal/{dominio}/domain/{subdominio}` e as
+orquestrações que atravessam 2+ subdomínios em
+`internal/{dominio}/application/{nome}`. Resumo do fluxo permitido:
 
 ```
 pkg ← infra ← {dominio}/model ← {dominio}/domain ← {dominio}/application ← cmd
@@ -81,7 +81,7 @@ do processo** (detalhes e templates em `agents/05`):
 ## Migrations
 
 SQL puro em `db/migrations/NNNN_{dominio}_{subdominio}_{desc}.{up,down}.sql`
-(hoje `{dominio}` = `identidade`).
+(hoje `{dominio}` = `identidade` e `licensing`).
 **Todo `up` tem `down`** no mesmo commit, exercitado por `up → down → up` em
 banco efêmero; migration aplicada nunca é editada (correção = migration nova);
 `up` roda automaticamente no boot (advisory lock), rollback é manual via CLI.
