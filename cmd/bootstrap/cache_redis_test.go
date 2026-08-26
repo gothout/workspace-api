@@ -347,6 +347,7 @@ func TestAtribuirERemoverPapelInvalidamCacheViaObservador(t *testing.T) {
 		validadorSemprePertence{}, dominioUsuario.NovasCredenciaisBcrypt(),
 		dominioUsuario.ComObservadorAtribuicoes(invalidadorPermissoesRedis{}))
 
+	require.NoError(t, semearPapeis(amb.ctx, amb.db))
 	o, err := semearOrganizationPura(t, amb, "Org Cache "+uuid.NewString())
 	require.NoError(t, err)
 	ctxOrg := orgctx.WithOrganization(amb.ctx, o.UUID)
@@ -369,19 +370,22 @@ func TestAtribuirERemoverPapelInvalidamCacheViaObservador(t *testing.T) {
 	// Aquece o cache como se já houvesse permissões lá.
 	require.NoError(t, cliente.Set(ctx, chave, `["identidade:user:ler"]`, time.Minute).Err())
 
+	operador := criarSuperAdminRaw(t, amb, o.UUID, "super-cache@plataforma.teste")
+	ctxOperador := orgctx.WithUser(ctxOrg, operador)
+
 	// Atribuir papel (escrita real) dispara o observador → chave some.
-	_, err = svcUser.AtribuirPapel(ctxOrg, ana.UUID, ws.UUID, papel)
+	_, err = svcUser.AtribuirPapel(ctxOperador, ana.UUID, ws.UUID, papel)
 	require.NoError(t, err)
 	existe, err := cliente.Exists(ctx, chave).Result()
 	require.NoError(t, err)
 	require.Zero(t, existe, "atribuição nova invalida o cache do par")
 
 	// Remoção usa a invalidação GROSSEIRA (todas as entradas do usuário).
-	atribuicoes, err := svcUser.Atribuicoes(ctxOrg, ana.UUID)
+	atribuicoes, err := svcUser.Atribuicoes(ctxOperador, ana.UUID)
 	require.NoError(t, err)
 	require.Len(t, atribuicoes, 1)
 	require.NoError(t, cliente.Set(ctx, chave, `["identidade:user:ler"]`, time.Minute).Err())
-	require.NoError(t, svcUser.RemoverAtribuicao(ctxOrg, ana.UUID, atribuicoes[0].UUID))
+	require.NoError(t, svcUser.RemoverAtribuicao(ctxOperador, ana.UUID, atribuicoes[0].UUID))
 	existe, err = cliente.Exists(ctx, chave).Result()
 	require.NoError(t, err)
 	require.Zero(t, existe, "remoção invalida as entradas do usuário (grosseira)")

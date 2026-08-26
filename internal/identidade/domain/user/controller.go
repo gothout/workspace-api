@@ -32,6 +32,7 @@ type Controller interface {
 	AtribuirPapel(c *gin.Context)
 	RemoverAtribuicao(c *gin.Context)
 	Papeis(c *gin.Context)
+	AlterarSenha(c *gin.Context)
 }
 
 type controllerImpl struct{ service Service }
@@ -47,6 +48,7 @@ func (ctrl *controllerImpl) Routes(routes gin.IRouter) {
 	g.GET("", middleware.SetContextAuthorization(), middleware.ResolveWorkspace(), middleware.RequirePermission(PermLer), ctrl.List)
 	g.GET("/:uuid", middleware.SetContextAuthorization(), middleware.ResolveWorkspace(), middleware.RequirePermission(PermLer), ctrl.Read)
 	g.PATCH("/:uuid", middleware.SetContextAuthorization(), middleware.ResolveWorkspace(), middleware.RequirePermission(PermEditar), ctrl.Update)
+	g.PUT("/:uuid/senha", middleware.SetContextAuthorization(), middleware.ResolveWorkspace(), middleware.RequirePermission(PermEditar), ctrl.AlterarSenha)
 	g.DELETE("/:uuid", middleware.SetContextAuthorization(), middleware.ResolveWorkspace(), middleware.RequirePermission(PermRemover), ctrl.Delete)
 	g.GET("/:uuid/atribuicoes", middleware.SetContextAuthorization(), middleware.ResolveWorkspace(), middleware.RequirePermission(PermLer), ctrl.Atribuicoes)
 	g.POST("/:uuid/atribuicoes", middleware.SetContextAuthorization(), middleware.ResolveWorkspace(), middleware.RequirePermission(PermAtribuirPapel), ctrl.AtribuirPapel)
@@ -175,6 +177,38 @@ func (ctrl *controllerImpl) Update(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, NovoUserResponseDto(u))
+}
+
+// @Summary      Altera a senha do usuário
+// @Description  O próprio usuário informa a senha atual; um administrador hierarquicamente superior troca sem ela. Ao trocar, todas as sessões abertas são encerradas
+// @Tags         Identidade · Usuário
+// @Accept       json
+// @Produce      json
+// @Security     BearerAuth
+// @Param        X-Workspace-Id header string false "UUID do workspace (fallback quando o host não tem subdomínio)"
+// @Param        uuid path string true "UUID do usuário"
+// @Param        request body AlterarSenhaRequestDto true "Senha atual (se for o próprio) e nova senha"
+// @Success      204
+// @Failure      400 {object} rest_err.RestErr
+// @Failure      401 {object} rest_err.RestErr "Senha atual incorreta ou operador não identificado"
+// @Failure      403 {object} rest_err.RestErr "Hierarquia insuficiente"
+// @Failure      404 {object} rest_err.RestErr
+// @Router       /api/domain/identidade/users/{uuid}/senha [put]
+func (ctrl *controllerImpl) AlterarSenha(c *gin.Context) {
+	id, ok := uuidDoPath(c, "uuid")
+	if !ok {
+		return
+	}
+	var dto AlterarSenhaRequestDto
+	if err := c.ShouldBindJSON(&dto); err != nil {
+		rest_err.WriteError(c, traduzir(ErrInvalidInput))
+		return
+	}
+	if err := ctrl.service.AlterarSenha(c.Request.Context(), id, dto.SenhaAtual, dto.NovaSenha); err != nil {
+		rest_err.WriteError(c, traduzir(err))
+		return
+	}
+	c.Status(http.StatusNoContent)
 }
 
 // @Summary      Remove um usuário
@@ -341,6 +375,8 @@ func traduzir(err error) *rest_err.RestErr {
 		errors.Is(err, ErrAtribuicaoNaoEncontrada),
 		errors.Is(err, ErrWorkspaceInvalido),
 		errors.Is(err, ErrRefreshTokenInvalido),
+		errors.Is(err, ErrHierarquiaInsufficiente),
+		errors.Is(err, ErrOperadorNaoIdentificado),
 		errors.Is(err, modeluser.ErrEmailInvalido),
 		errors.Is(err, modeluser.ErrNomeInvalido),
 		errors.Is(err, modeluser.ErrSenhaInvalida),

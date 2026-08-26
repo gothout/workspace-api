@@ -244,7 +244,7 @@ func provisionarBootstrap(ctx context.Context, db *gorm.DB, prov Provisionamento
 	if err != nil {
 		return err
 	}
-	return garantirAtribuicaoSuperAdmin(ctx, servicoUsuario, db, usuarioUUID, workspaceUUID)
+	return garantirAtribuicaoSuperAdmin(ctx, db, usuarioUUID, workspaceUUID)
 }
 
 // garantirWorkspaceInicial resolve o slug GLOBALMENTE (mesmo finder do Host):
@@ -295,19 +295,22 @@ func garantirSuperAdmin(ctx context.Context, servico dominioUsuario.Service, rep
 	}
 }
 
-// garantirAtribuicaoSuperAdmin liga super_admin × workspace inicial pelo
-// service (validação do tripé + auditoria); já existente = idempotência.
-func garantirAtribuicaoSuperAdmin(ctx context.Context, servico dominioUsuario.Service, db *gorm.DB, usuarioUUID, workspaceUUID uuid.UUID) error {
-	atribuicoes, err := servico.Atribuicoes(ctx, usuarioUUID)
-	if err != nil {
+// garantirAtribuicaoSuperAdmin liga super_admin × workspace inicial.
+// Como este é o primeiro usuário da plataforma, a atribuição é feita direta
+// no banco: não há operador hierarquicamente superior para validar pelo
+// service, e inserir raw evita bypassar a regra de hierarquia no domínio.
+// Já existente = idempotência.
+func garantirAtribuicaoSuperAdmin(ctx context.Context, db *gorm.DB, usuarioUUID, workspaceUUID uuid.UUID) error {
+	var existentes int64
+	if err := db.WithContext(ctx).Table("identidade_user_atribuicao").
+		Where("user_uuid = ? AND workspace_uuid = ? AND deleted_at IS NULL", usuarioUUID, workspaceUUID).
+		Count(&existentes).Error; err != nil {
 		return err
 	}
-	for _, a := range atribuicoes {
-		if a.PapelNome == papelSuperAdmin && a.WorkspaceUUID == workspaceUUID {
-			slog.Info("[SEED] atribuição do super_admin já existe",
-				"user_uuid", usuarioUUID.String(), "workspace_uuid", workspaceUUID.String())
-			return nil
-		}
+	if existentes > 0 {
+		slog.Info("[SEED] atribuição do super_admin já existe",
+			"user_uuid", usuarioUUID.String(), "workspace_uuid", workspaceUUID.String())
+		return nil
 	}
 	var papel struct {
 		UUID uuid.UUID
@@ -319,7 +322,10 @@ func garantirAtribuicaoSuperAdmin(ctx context.Context, servico dominioUsuario.Se
 	if papel.UUID == uuid.Nil {
 		return errors.New("provisionamento: papel super_admin ausente — rode o seed antes do provisionamento")
 	}
-	if _, err := servico.AtribuirPapel(ctx, usuarioUUID, workspaceUUID, papel.UUID); err != nil {
+	if err := db.WithContext(ctx).Exec(
+		`INSERT INTO identidade_user_atribuicao (uuid, organization_uuid, workspace_uuid, user_uuid, papel_uuid, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, now(), now())`,
+		uuid.New(), orgctx.OrganizationUUID(ctx), workspaceUUID, usuarioUUID, papel.UUID).Error; err != nil {
 		return fmt.Errorf("provisionamento: atribuição do super_admin recusada: %w", err)
 	}
 	slog.Info("[SEED] super_admin atribuído ao workspace inicial",

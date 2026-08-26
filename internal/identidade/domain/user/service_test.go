@@ -18,12 +18,6 @@ import (
 
 // --- Dublês (regra: testes de service NUNCA passam pelo singleton) ----------
 
-// Nomes canônicos dos papéis seed (mesmos do bootstrap/agents/03).
-const (
-	papelAdminWorkspace   = "admin_workspace"
-	papelUsuarioWorkspace = "usuario_workspace"
-)
-
 type repoFake struct {
 	mu           sync.Mutex
 	porUUID      map[uuid.UUID]*modeluser.User
@@ -316,17 +310,26 @@ func (a *atrFake) TemAtribuicaoDireta(_ context.Context, usuarioUUID, workspaceU
 	return a.diretas[usuarioUUID.String()+"|"+workspaceUUID.String()], nil
 }
 
-func (a *atrFake) TemPapelNaOrganization(_ context.Context, _ uuid.UUID, papelNome string) (bool, error) {
+func (a *atrFake) TemPapelNaOrganization(_ context.Context, usuarioUUID uuid.UUID, papelNome string) (bool, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	// Dublê simplificado: papel exercido em algum lugar da organization.
-	return len(a.papelPorNome[papelNome]) > 0, nil
+	for _, atrib := range a.atribuicoes {
+		if atrib.UserUUID == usuarioUUID && a.papeis[atrib.PapelUUID] == papelNome {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
-func (a *atrFake) TemPapelEmQualquerOrganization(_ context.Context, _ uuid.UUID, papelNome string) (bool, error) {
+func (a *atrFake) TemPapelEmQualquerOrganization(_ context.Context, usuarioUUID uuid.UUID, papelNome string) (bool, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return len(a.papelPorNome[papelNome]) > 0, nil
+	for _, atrib := range a.atribuicoes {
+		if atrib.UserUUID == usuarioUUID && a.papeis[atrib.PapelUUID] == papelNome {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (a *atrFake) PapelPorUUID(_ context.Context, papelUUID uuid.UUID) (*modeluser.Papel, error) {
@@ -352,6 +355,19 @@ func (a *atrFake) PermissoesEfetivas(_ context.Context, _ uuid.UUID, _ uuid.UUID
 	return []string{}, nil
 }
 
+func (a *atrFake) MaiorPapel(_ context.Context, usuarioUUID uuid.UUID) (string, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	nomes := make([]string, 0)
+	for _, atrib := range a.atribuicoes {
+		if atrib.UserUUID != usuarioUUID {
+			continue
+		}
+		nomes = append(nomes, a.papeis[atrib.PapelUUID])
+	}
+	return maiorPapelPorNome(nomes), nil
+}
+
 // seedPapel registra um papel no dublê e devolve o uuid dele.
 func (a *atrFake) seedPapel(id uuid.UUID, nome string) {
 	a.mu.Lock()
@@ -365,6 +381,22 @@ func (a *atrFake) seedCatalogo(papeis ...modeluser.Papel) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.catalogo = append(a.catalogo, papeis...)
+}
+
+// seedAtribuicao cria uma atribuição diretamente no dublê, sem passar pelas
+// validações de hierarquia do service — útil para montar cenários de teste.
+func (a *atrFake) seedAtribuicao(usuarioUUID, workspaceUUID, papelUUID uuid.UUID) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	atrib := &modeluser.Atribuicao{
+		UUID:             uuid.New(),
+		OrganizationUUID: uuid.Nil,
+		WorkspaceUUID:    workspaceUUID,
+		UserUUID:         usuarioUUID,
+		PapelUUID:        papelUUID,
+	}
+	a.atribuicoes[atrib.UUID] = atrib
+	a.diretas[usuarioUUID.String()+"|"+workspaceUUID.String()] = true
 }
 
 type validadorFake struct{ pertence bool }
@@ -509,7 +541,7 @@ func TestAutenticarEIndistinguivel(t *testing.T) {
 
 	// Inativo também vira credencial inválida — estado não se revela.
 	inativo := modeluser.StatusInativo
-	_, err = svc.Update(ctx, ana.UUID, modeluser.UpdateInput{Status: &inativo})
+	_, err = svc.Update(orgctx.WithUser(ctx, ana.UUID), ana.UUID, modeluser.UpdateInput{Status: &inativo})
 	require.NoError(t, err)
 	_, err = svc.Autenticar(ctx, "ana@exemplo.com", "senha-segura-123")
 	assert.ErrorIs(t, err, ErrCredenciaisInvalidas)
@@ -525,7 +557,8 @@ func TestUpdateInativarRevogaSessoesAbertas(t *testing.T) {
 	require.NoError(t, svc.RegistrarSessao(ctx, ana.UUID, jti, time.Now().Add(time.Hour).UTC()))
 
 	inativo := modeluser.StatusInativo
-	atualizado, err := svc.Update(ctx, ana.UUID, modeluser.UpdateInput{Status: &inativo})
+	ctxComoAna := orgctx.WithUser(ctx, ana.UUID)
+	atualizado, err := svc.Update(ctxComoAna, ana.UUID, modeluser.UpdateInput{Status: &inativo})
 	require.NoError(t, err)
 	assert.Equal(t, modeluser.StatusInativo, atualizado.Status)
 	assert.Equal(t, 1, repo.revogacoes, "sessões abertas morrem com a conta")
@@ -536,7 +569,7 @@ func TestUpdateInativarRevogaSessoesAbertas(t *testing.T) {
 
 	// Reativação devolve o acesso (sessões antigas continuam revogadas).
 	ativo := modeluser.StatusAtivo
-	_, err = svc.Update(ctx, ana.UUID, modeluser.UpdateInput{Status: &ativo})
+	_, err = svc.Update(ctxComoAna, ana.UUID, modeluser.UpdateInput{Status: &ativo})
 	require.NoError(t, err)
 }
 
@@ -603,10 +636,17 @@ func TestRevogarSessoesDaOrganizationEscopada(t *testing.T) {
 func TestAtribuirPapelValidaOTripeAntesDeGravar(t *testing.T) {
 	svc, repo, atr, cred := montarServico(t, validadorFake{pertence: true})
 	ctx := ctxDaOrganizacao(uuid.New())
+	operador := criarUser(t, svc, ctx, "operador@exemplo.com")
 	ana := criarUser(t, svc, ctx, "ana@exemplo.com")
+
+	papelSuper := uuid.New()
+	atr.seedPapel(papelSuper, papelSuperAdmin)
 	papelOperador := uuid.New()
 	atr.seedPapel(papelOperador, papelAdminWorkspace)
 	ws := uuid.New()
+	// super_admin no workspace para ter hierarquia suficiente.
+	atr.seedAtribuicao(operador.UUID, ws, papelSuper)
+	ctx = orgctx.WithUser(ctx, operador.UUID)
 
 	a, err := svc.AtribuirPapel(ctx, ana.UUID, ws, papelOperador)
 	require.NoError(t, err)
@@ -641,30 +681,265 @@ func TestAtribuirPapelValidaOTripeAntesDeGravar(t *testing.T) {
 func TestTemVinculoDiretoESuporteAuditado(t *testing.T) {
 	svc, _, atr, _ := montarServico(t, validadorFake{pertence: true})
 	ctx := ctxDaOrganizacao(uuid.New())
-	operador := criarUser(t, svc, ctx, "operador@exemplo.com").UUID
+	operador := criarUser(t, svc, ctx, "operador@exemplo.com")
 	ws := uuid.New()
 
+	superOperador := criarUser(t, svc, ctx, "superoperador@exemplo.com")
+	papelSuperUUID := uuid.New()
+	atr.seedPapel(papelSuperUUID, papelSuperAdmin)
+	atr.seedAtribuicao(superOperador.UUID, ws, papelSuperUUID)
+	ctx = orgctx.WithUser(ctx, superOperador.UUID)
+
 	// Sem nada: sem vínculo.
-	vinculo, err := svc.TemVinculo(ctx, operador, ws)
+	vinculo, err := svc.TemVinculo(ctx, operador.UUID, ws)
 	require.NoError(t, err)
 	assert.False(t, vinculo)
 
 	// Direto: atribuição no workspace.
 	papel := uuid.New()
 	atr.seedPapel(papel, papelUsuarioWorkspace)
-	_, err = svc.AtribuirPapel(ctx, operador, ws, papel)
+	_, err = svc.AtribuirPapel(ctx, operador.UUID, ws, papel)
 	require.NoError(t, err)
-	vinculo, err = svc.TemVinculo(ctx, operador, ws)
+	vinculo, err = svc.TemVinculo(ctx, operador.UUID, ws)
 	require.NoError(t, err)
 	assert.True(t, vinculo)
 
 	// Suporte: papel global de super_admin concede vínculo em qualquer lugar.
 	super := uuid.New()
 	atr.seedPapel(super, papelSuperAdmin)
+	atr.seedAtribuicao(super, uuid.New(), super)
 	outroWs := uuid.New()
 	vinculo, err = svc.TemVinculo(ctx, super, outroWs)
 	require.NoError(t, err)
 	assert.True(t, vinculo, "super_admin atravessa organizations")
+}
+
+func TestUpdateERemoverRecusamUsuarioDeMaiorHierarquia(t *testing.T) {
+	svc, _, atr, _ := montarServico(t, validadorFake{pertence: true})
+	org := uuid.New()
+	ctx := ctxDaOrganizacao(org)
+
+	superOperador := criarUser(t, svc, ctx, "superoperador@exemplo.com")
+	adminWs := criarUser(t, svc, ctx, "adminws@exemplo.com")
+	super := criarUser(t, svc, ctx, "super@exemplo.com")
+	usuario := criarUser(t, svc, ctx, "usuario@exemplo.com")
+
+	papelSuperUUID := uuid.New()
+	atr.seedPapel(papelSuperUUID, papelSuperAdmin)
+	ws := uuid.New()
+	atr.seedAtribuicao(superOperador.UUID, ws, papelSuperUUID)
+	ctx = orgctx.WithUser(ctx, superOperador.UUID)
+
+	atribuirPapel(t, svc, atr, ctx, superOperador.UUID, adminWs.UUID, papelAdminWorkspace)
+	atribuirPapel(t, svc, atr, ctx, superOperador.UUID, super.UUID, papelSuperAdmin)
+	atribuirPapel(t, svc, atr, ctx, superOperador.UUID, usuario.UUID, papelUsuarioWorkspace)
+
+	ctxAdmin := orgctx.WithUser(ctx, adminWs.UUID)
+	inativo := modeluser.StatusInativo
+
+	_, err := svc.Update(ctxAdmin, super.UUID, modeluser.UpdateInput{Status: &inativo})
+	assert.ErrorIs(t, err, ErrHierarquiaInsufficiente, "admin_workspace não inativa super_admin")
+
+	outroAdmin := criarUser(t, svc, ctx, "outroadmin@exemplo.com")
+	atribuirPapel(t, svc, atr, ctx, superOperador.UUID, outroAdmin.UUID, papelAdminWorkspace)
+	_, err = svc.Update(ctxAdmin, outroAdmin.UUID, modeluser.UpdateInput{Status: &inativo})
+	assert.ErrorIs(t, err, ErrHierarquiaInsufficiente, "admin_workspace não inativa par")
+
+	_, err = svc.Update(ctxAdmin, usuario.UUID, modeluser.UpdateInput{Status: &inativo})
+	assert.NoError(t, err, "admin_workspace inativa usuário de hierarquia menor")
+
+	err = svc.Delete(ctxAdmin, super.UUID)
+	assert.ErrorIs(t, err, ErrHierarquiaInsufficiente, "admin_workspace não remove super_admin")
+}
+
+func TestUpdatePermiteAutoGerenciamento(t *testing.T) {
+	svc, _, atr, _ := montarServico(t, validadorFake{pertence: true})
+	org := uuid.New()
+	ctx := ctxDaOrganizacao(org)
+	superOperador := criarUser(t, svc, ctx, "superoperador@exemplo.com")
+	adminWs := criarUser(t, svc, ctx, "adminws@exemplo.com")
+
+	papelSuperUUID := uuid.New()
+	atr.seedPapel(papelSuperUUID, papelSuperAdmin)
+	ws := uuid.New()
+	atr.seedAtribuicao(superOperador.UUID, ws, papelSuperUUID)
+	ctx = orgctx.WithUser(ctx, superOperador.UUID)
+
+	atribuirPapel(t, svc, atr, ctx, superOperador.UUID, adminWs.UUID, papelAdminWorkspace)
+
+	ctxAdmin := orgctx.WithUser(ctx, adminWs.UUID)
+	inativo := modeluser.StatusInativo
+	_, err := svc.Update(ctxAdmin, adminWs.UUID, modeluser.UpdateInput{Status: &inativo})
+	assert.NoError(t, err, "usuário pode se inativar")
+}
+
+func TestUpdateSemOperadorNoContextoRecusa(t *testing.T) {
+	svc, _, _, _ := montarServico(t, validadorFake{})
+	org := uuid.New()
+	ctx := ctxDaOrganizacao(org)
+	ana := criarUser(t, svc, ctx, "ana@exemplo.com")
+
+	inativo := modeluser.StatusInativo
+	_, err := svc.Update(ctx, ana.UUID, modeluser.UpdateInput{Status: &inativo})
+	assert.ErrorIs(t, err, ErrOperadorNaoIdentificado)
+}
+
+func TestAlterarSenhaPeloProprioUsuario(t *testing.T) {
+	svc, repo, _, cred := montarServico(t, validadorFake{})
+	org := uuid.New()
+	ctx := ctxDaOrganizacao(org)
+	ana := criarUser(t, svc, ctx, "ana@exemplo.com")
+
+	err := svc.AlterarSenha(orgctx.WithUser(ctx, ana.UUID), ana.UUID, "senha-segura-123", "nova-senha-456")
+	require.NoError(t, err)
+
+	u, err := repo.BuscarPorUUID(ctx, ana.UUID)
+	require.NoError(t, err)
+	assert.True(t, cred.Comparar(u.SenhaHash, "nova-senha-456"), "hash novo gravado")
+
+	err = svc.AlterarSenha(orgctx.WithUser(ctx, ana.UUID), ana.UUID, "senha-errada", "outra-senha-789")
+	assert.ErrorIs(t, err, ErrCredenciaisInvalidas, "senha atual errada recusa")
+}
+
+func TestAlterarSenhaPorOperadorSuperior(t *testing.T) {
+	svc, repo, atr, cred := montarServico(t, validadorFake{pertence: true})
+	org := uuid.New()
+	ctx := ctxDaOrganizacao(org)
+	superOperador := criarUser(t, svc, ctx, "super@exemplo.com")
+	adminWs := criarUser(t, svc, ctx, "adminws@exemplo.com")
+	usuario := criarUser(t, svc, ctx, "usuario@exemplo.com")
+
+	papelSuperUUID := uuid.New()
+	atr.seedPapel(papelSuperUUID, papelSuperAdmin)
+	ws := uuid.New()
+	atr.seedAtribuicao(superOperador.UUID, ws, papelSuperUUID)
+	ctx = orgctx.WithUser(ctx, superOperador.UUID)
+
+	atribuirPapel(t, svc, atr, ctx, superOperador.UUID, adminWs.UUID, papelAdminWorkspace)
+	atribuirPapel(t, svc, atr, ctx, superOperador.UUID, usuario.UUID, papelUsuarioWorkspace)
+
+	// admin_workspace troca senha de usuario_workspace sem senha atual.
+	err := svc.AlterarSenha(orgctx.WithUser(ctx, adminWs.UUID), usuario.UUID, "", "senha-do-usuario-999")
+	require.NoError(t, err)
+	u, err := repo.BuscarPorUUID(ctx, usuario.UUID)
+	require.NoError(t, err)
+	assert.True(t, cred.Comparar(u.SenhaHash, "senha-do-usuario-999"))
+
+	// usuario_workspace NÃO troca senha de admin_workspace (hierarquia maior).
+	err = svc.AlterarSenha(orgctx.WithUser(ctx, usuario.UUID), adminWs.UUID, "", "senha-roubada-000")
+	assert.ErrorIs(t, err, ErrHierarquiaInsufficiente)
+
+	// super_admin troca senha de admin_workspace.
+	err = svc.AlterarSenha(orgctx.WithUser(ctx, superOperador.UUID), adminWs.UUID, "", "senha-do-admin-111")
+	require.NoError(t, err)
+	u, err = repo.BuscarPorUUID(ctx, adminWs.UUID)
+	require.NoError(t, err)
+	assert.True(t, cred.Comparar(u.SenhaHash, "senha-do-admin-111"))
+}
+
+func TestAlterarSenhaInvalidaERevogaSessoes(t *testing.T) {
+	svc, _, _, _ := montarServico(t, validadorFake{})
+	org := uuid.New()
+	ctx := ctxDaOrganizacao(org)
+	ana := criarUser(t, svc, ctx, "ana@exemplo.com")
+
+	// Sessões abertas antes da troca.
+	require.NoError(t, svc.RegistrarSessao(ctx, ana.UUID, "jti-1", time.Now().Add(time.Hour)))
+	require.NoError(t, svc.RegistrarSessao(ctx, ana.UUID, "jti-2", time.Now().Add(time.Hour)))
+
+	err := svc.AlterarSenha(orgctx.WithUser(ctx, ana.UUID), ana.UUID, "senha-segura-123", "nova-senha-456")
+	require.NoError(t, err)
+
+	ativa, err := svc.SessaoAtiva(ctx, ana.UUID, "jti-1")
+	require.NoError(t, err)
+	assert.False(t, ativa, "sessão jti-1 encerrada")
+	ativa, err = svc.SessaoAtiva(ctx, ana.UUID, "jti-2")
+	require.NoError(t, err)
+	assert.False(t, ativa, "sessão jti-2 encerrada")
+
+	// Política de senha: abaixo do mínimo recusa.
+	err = svc.AlterarSenha(orgctx.WithUser(ctx, ana.UUID), ana.UUID, "nova-senha-456", "curta")
+	assert.ErrorIs(t, err, modeluser.ErrSenhaInvalida)
+}
+
+func TestAlterarSenhaSemOperadorRecusa(t *testing.T) {
+	svc, _, _, _ := montarServico(t, validadorFake{})
+	org := uuid.New()
+	ctx := ctxDaOrganizacao(org)
+	ana := criarUser(t, svc, ctx, "ana@exemplo.com")
+
+	err := svc.AlterarSenha(ctx, ana.UUID, "senha-segura-123", "nova-senha-456")
+	assert.ErrorIs(t, err, ErrOperadorNaoIdentificado)
+}
+
+func TestAtribuirPapelERemoverRespeitamHierarquia(t *testing.T) {
+	svc, _, atr, _ := montarServico(t, validadorFake{pertence: true})
+	org := uuid.New()
+	ctx := ctxDaOrganizacao(org)
+
+	superOperador := criarUser(t, svc, ctx, "superoperador@exemplo.com")
+	adminWs := criarUser(t, svc, ctx, "adminws@exemplo.com")
+	usuario := criarUser(t, svc, ctx, "usuario@exemplo.com")
+
+	papelSuperUUID := uuid.New()
+	atr.seedPapel(papelSuperUUID, papelSuperAdmin)
+	ws := uuid.New()
+	atr.seedAtribuicao(superOperador.UUID, ws, papelSuperUUID)
+	ctx = orgctx.WithUser(ctx, superOperador.UUID)
+
+	atribuirPapel(t, svc, atr, ctx, superOperador.UUID, adminWs.UUID, papelAdminWorkspace)
+
+	ctxAdmin := orgctx.WithUser(ctx, adminWs.UUID)
+	ctxSuper := orgctx.WithUser(ctx, superOperador.UUID)
+
+	// admin_workspace NÃO pode atribuir papéis acima dele.
+	papelAdminOrg := uuid.New()
+	atr.seedPapel(papelAdminOrg, papelAdminOrganization)
+	_, err := svc.AtribuirPapel(ctxAdmin, usuario.UUID, uuid.New(), papelAdminOrg)
+	assert.ErrorIs(t, err, ErrHierarquiaInsufficiente, "admin_workspace não atribui admin_organization")
+
+	papelSuper := uuid.New()
+	atr.seedPapel(papelSuper, papelSuperAdmin)
+	_, err = svc.AtribuirPapel(ctxAdmin, usuario.UUID, uuid.New(), papelSuper)
+	assert.ErrorIs(t, err, ErrHierarquiaInsufficiente, "admin_workspace não atribui super_admin")
+
+	// admin_workspace PODE atribuir papéis iguais ou inferiores a ele.
+	papelUsuario := uuid.New()
+	atr.seedPapel(papelUsuario, papelUsuarioWorkspace)
+	atrib, err := svc.AtribuirPapel(ctxAdmin, usuario.UUID, uuid.New(), papelUsuario)
+	require.NoError(t, err, "admin_workspace atribui usuario_workspace")
+
+	// admin_workspace PODE remover atribuição de papel inferior a ele de um
+	// usuário cuja hierarquia seja menor.
+	err = svc.RemoverAtribuicao(ctxAdmin, usuario.UUID, atrib.UUID)
+	assert.NoError(t, err, "admin_workspace remove usuario_workspace de usuário inferior")
+
+	papelAdminWs := uuid.New()
+	atr.seedPapel(papelAdminWs, papelAdminWorkspace)
+	atribAdminWs, err := svc.AtribuirPapel(ctxAdmin, usuario.UUID, uuid.New(), papelAdminWs)
+	require.NoError(t, err, "admin_workspace atribui admin_workspace a usuário inferior")
+
+	// admin_workspace NÃO pode remover atribuição de um par (mesmo papel).
+	outroAdmin := criarUser(t, svc, ctx, "outroadmin@exemplo.com")
+	atribuirPapel(t, svc, atr, ctx, superOperador.UUID, outroAdmin.UUID, papelAdminWorkspace)
+	itensPar, err := svc.Atribuicoes(ctxAdmin, outroAdmin.UUID)
+	require.NoError(t, err)
+	require.Len(t, itensPar, 1)
+	err = svc.RemoverAtribuicao(ctxAdmin, outroAdmin.UUID, itensPar[0].UUID)
+	assert.ErrorIs(t, err, ErrHierarquiaInsufficiente, "admin_workspace não remove atribuição de par")
+
+	// super_admin pode remover qualquer atribuição.
+	err = svc.RemoverAtribuicao(ctxSuper, usuario.UUID, atribAdminWs.UUID)
+	assert.NoError(t, err, "super_admin remove atribuição de admin_workspace")
+}
+
+func atribuirPapel(t *testing.T, svc Service, atr *atrFake, ctx context.Context, operadorUUID, usuarioUUID uuid.UUID, papelNome string) {
+	t.Helper()
+	papelUUID := uuid.New()
+	atr.seedPapel(papelUUID, papelNome)
+	ws := uuid.New()
+	_, err := svc.AtribuirPapel(orgctx.WithUser(ctx, operadorUUID), usuarioUUID, ws, papelUUID)
+	require.NoError(t, err)
 }
 
 // ListarOpcoes emula a projeção real: workspace vence (via atribuições do

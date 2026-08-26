@@ -24,6 +24,13 @@ import (
 	"workspace-api/internal/pkg/errobserve"
 	"workspace-api/internal/pkg/log/access_log"
 	"workspace-api/internal/pkg/log/audit_log"
+
+	dominioLicenca "workspace-api/internal/licensing/domain/licenca"
+	dominioModulo "workspace-api/internal/licensing/domain/modulo"
+	dominioAtivacao "workspace-api/internal/licensing/domain/ativacao"
+	dominioTarefa "workspace-api/internal/todolist/domain/tarefa"
+
+	aplicacaoaplicacoes "workspace-api/internal/licensing/application/aplicacoes"
 )
 
 // --- Cobertura Swagger (fase F6) --------------------------------------------
@@ -101,6 +108,26 @@ func TestSwaggerCobreExatamenteAsRotasRegistradas(t *testing.T) {
 		Workspaces:   workspacesProvisionamento{},
 		Usuarios:     usuariosProvisionamento{},
 		Papeis:       papeisProvisionamento{},
+	})
+	require.NoError(t, err)
+
+	// Domínio licensing (F8) — catálogo, licenças e ativações. Os contratos
+	// entre irmãos são dublês locais para o teste de cobertura.
+	_, err = dominioModulo.New(amb.db, verificadorLicencasDoModulo{})
+	require.NoError(t, err)
+	_, err = dominioLicenca.New(amb.db, buscadorModulosDaLicenca{})
+	require.NoError(t, err)
+	_, err = dominioAtivacao.New(amb.db, buscadorModulosDaAtivacao{},
+		verificadorLicencasDaAtivacao{}, validadorWorkspacesDaAtivacao{})
+	require.NoError(t, err)
+
+	// Domínio todolist (F10) — primeiro app do monolito.
+	_, err = dominioTarefa.New(amb.db)
+	require.NoError(t, err)
+
+	// Aplicação licensing/aplicacoes — seletor de módulos do front.
+	_, err = aplicacaoaplicacoes.New(aplicacaoaplicacoes.Dependencias{
+		Provedor: provedorAcessosAplicacoes{},
 	})
 	require.NoError(t, err)
 

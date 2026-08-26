@@ -208,11 +208,13 @@ func TestResolvedorPermissoesViaServiceDoUserSobreEsquemaReal(t *testing.T) {
 	super := criarUsuario("super@exemplo.com")
 
 	ctxOrg := orgctx.WithOrganization(amb.ctx, orgA)
-	_, err := svc.AtribuirPapel(ctxOrg, operador, wsA, uuidDoPapel(papelUsuarioWorkspace))
+	operadorAtribuicao := criarSuperAdminRaw(t, amb, orgA, "super-atribuicao@plataforma.teste")
+	ctxAtribuicao := orgctx.WithUser(ctxOrg, operadorAtribuicao)
+	_, err := svc.AtribuirPapel(ctxAtribuicao, operador, wsA, uuidDoPapel(papelUsuarioWorkspace))
 	require.NoError(t, err)
-	_, err = svc.AtribuirPapel(ctxOrg, dono, wsA, uuidDoPapel(papelAdminOrganization))
+	_, err = svc.AtribuirPapel(ctxAtribuicao, dono, wsA, uuidDoPapel(papelAdminOrganization))
 	require.NoError(t, err)
-	_, err = svc.AtribuirPapel(ctxOrg, super, wsA, uuidDoPapel(papelSuperAdmin))
+	_, err = svc.AtribuirPapel(ctxAtribuicao, super, wsA, uuidDoPapel(papelSuperAdmin))
 	require.NoError(t, err)
 
 	// Atribuição direta: permissões do papel no workspace.
@@ -323,7 +325,7 @@ func TestInativacaoRevogaSessoesAbertas(t *testing.T) {
 	require.NoError(t, svc.RegistrarSessao(ctx, ana.UUID, "jti-bruno-1", time.Now().UTC().Add(time.Hour)))
 
 	inativo := modeluser.StatusInativo
-	_, err = svc.Update(ctx, ana.UUID, modeluser.UpdateInput{Status: &inativo})
+	_, err = svc.Update(orgctx.WithUser(ctx, ana.UUID), ana.UUID, modeluser.UpdateInput{Status: &inativo})
 	require.NoError(t, err)
 
 	ativa, err := svc.SessaoAtiva(ctx, ana.UUID, "jti-bruno-1")
