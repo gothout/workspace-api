@@ -54,7 +54,7 @@ encerramento limpo. Detalhes do desenho em `agents/01` e `agents/05`.
   catálogos de permissões e eventos da aplicação `catalogo`) é ligada
   **aqui** — um arquivo por frente (`middleware.go`, `organizacao.go`,
   `workspace.go`, `usuario.go`, `catalogo.go`, `seed.go`, `cache_redis.go`,
-  `logs.go`, `errobserve.go`, `mapa_erros.go`).
+  `logs.go`, `errobserve.go`, `mapa_erros.go`, `provisionamento_app.go`).
 - **Namespace reservado da plataforma**: só este pacote registra eventos em
   `sistema.*` (observador de plataforma em `errobserve.go`) — migrations
   falha e dependência degradada viram eventos; subdomínio de negócio NUNCA.

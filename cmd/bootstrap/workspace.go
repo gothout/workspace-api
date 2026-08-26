@@ -17,7 +17,9 @@ import (
 
 	dominioOrganizacao "workspace-api/internal/identidade/domain/organization"
 	dominioWorkspace "workspace-api/internal/identidade/domain/workspace"
+	orgmodel "workspace-api/internal/identidade/model/organization"
 	"workspace-api/internal/middleware"
+	"workspace-api/internal/pkg/orgctx"
 )
 
 // --- Contrato ResolvedorWorkspaces -------------------------------------------
@@ -78,3 +80,26 @@ func (suspendedorWorkspaces) SuspenderPorOrganization(ctx context.Context, organ
 }
 
 var _ dominioOrganizacao.SuspendedorWorkspaces = suspendedorWorkspaces{}
+
+// --- Contrato ResolvedorEstadoOrganization (UX4: gestão cross-tenant) ---------
+
+// estadoOrganizacaoAlvo responde existência+vitalidade da organization PEDIDA
+// por um chamador PLATAFORMA ao criar/listar cross-tenant — resolve o
+// singleton da organization NA CHAMADA. A leitura é global por natureza (a
+// plataforma atravessa tenants); o ctx escopado na própria pedida é o que
+// mantém a consulta do irmão fail-closed e honesta (inexistente = ErrNotFound).
+type estadoOrganizacaoAlvo struct{}
+
+func (estadoOrganizacaoAlvo) Estado(ctx context.Context, organizationUUID uuid.UUID) (bool, bool, error) {
+	o, err := dominioOrganizacao.MustUse().Service.Read(
+		orgctx.WithOrganization(ctx, organizationUUID), organizationUUID)
+	if err != nil {
+		if errors.Is(err, dominioOrganizacao.ErrNotFound) {
+			return false, false, nil // inexistente/removida — sem erro
+		}
+		return false, false, err
+	}
+	return true, o.Status == orgmodel.StatusAtivo, nil
+}
+
+var _ dominioWorkspace.ResolvedorEstadoOrganization = estadoOrganizacaoAlvo{}

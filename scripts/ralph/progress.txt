@@ -836,3 +836,213 @@ Started: 2026-08-22
     sync.Once é do processo e o swagger_cobertura_test já bootou com outro
     dublê.
 ---
+
+## 2026-08-23 - UX1
+- Endpoint de listagem de papéis (issue #28) completo: GET /api/domain/
+  identidade/user/papeis devolve {uuid, nome, descricao} dos 5 papéis globais
+  seed, ordenado por nome. `ListarPapeis` no RepositorioAtribuicoes (consulta
+  GLOBAL — mesma exceção documentada do PapelPorUUID; lista vazia = fatia
+  vazia), `Service.Papeis` delegando (leitura: sem auditoria, sem escopo) com
+  override no service_observado; `PapelResponseDto`; rota registrada FORA da
+  árvore /users/{uuid} com cadeia completa rota a rota e exigência
+  PermAtribuirPapel (quem atribui papel é quem monta o Select); Catalogo()
+  ganhou o par rota+método — seed intacto (curinga identidade:user:* dos
+  admins já concede, provado por teste com middleware.Atende nos 5 papéis);
+  Swagger regenerado; AGENTS.md do subdomínio atualizado.
+- Files changed: internal/identidade/domain/user/{repository,service,
+  service_observado,dto_response,permissions,controller}.go + papeis_test.go
+  (NOVO) + service_test.go (atrFake.ListarPapeis + seedCatalogo);
+  cmd/bootstrap/papeis_leitura_test.go (NOVO); internal/identidade/domain/
+  user/AGENTS.md; docs/* (swag init); prd.json; agents/06; progress.txt.
+- Docs read: issue #28 (gh api), agents/README, agents/04-convencoes-api.md,
+  agents/05-padroes-codigo.md, AGENTS.md de domain/user (+domain, identidade,
+  model/user via system-reminders), cmd/bootstrap, cmd/server/routes, seed.go.
+- Checks: build/vet/test verdes (30 pacotes, integrações testcontainers
+  reais incluídas); CGO_ENABLED=1 go test -race verde em user+bootstrap;
+  arch-go segue compliance/coverage 100 pelo gate do go test; cobertura
+  Swagger verde com o path novo nos dois sentidos.
+- **Learnings for future iterations:**
+  - Path de recurso auxiliar FORA da árvore do CRUD (/user/papeis vs
+    /users/{uuid}) evita colisão de rota gin entre segmento estático e
+    parâmetro — e casa com o contrato escrito na issue/PRD (seguir o texto
+    delas quando especificam path literal).
+  - Reusar permissão existente (atribuir_papel) em vez de criar
+    "listar_papeis": catálogo menor, seed ZERO mudança — mas registrar o par
+    rota+método novo no RotaMeta da permissão para a árvore do front.
+  - Método novo em interface EXISTENTE (RepositorioAtribuicoes) ripple só
+    para os implementadores (impl + atrFake) — build pega; Service ganha
+    override no service_observado mesmo sendo leitura (contrato errobserve:
+    TODO erro observado).
+  - Ordenação por nome no SQL já resolve determinismo do Select; assert
+    alfabético no teste integração garante que não regredir.
+  - uuid.MustParse aceita só hex: sufixos mnemônicos ("pa01") panicam no
+    teste — usar hex válido ("ba01").
+---
+
+## 2026-08-23 - UX2
+- DTOs de log enriquecidos com user_nome/user_email (issue #29): contrato
+  opcional ResolvedorUsuarios (UsuarioLog uuid/nome/email) declarado na
+  aplicação logs e implementado no bootstrap sobre o REPOSITÓRIO do user —
+  trilha mora no ClickHouse, usuário no Postgres: join entre bases não
+  existe, resolução EM LOTE por uuids DISTINTOS da página sim (uma consulta
+  por resposta, genérico coletarUserUUIDs). BuscarPorUUIDs novo no repo do
+  user (escopada quando o ctx carrega org; global = caminho plataforma,
+  exceção documentada). Enriquecimento é COMPLEMENTAR: falha do resolvedor
+  nunca derruba a consulta (warn + campos vazios); linha sem usuário
+  (sistema/anônimo/fantasma) sai vazia. OpcaoServico variadic mantém
+  chamadores existentes intactos. Swagger regenerado (3 schemas).
+- Files changed: internal/identidade/application/logs/{contratos,service,
+  dto_response,singleton}.go + usuarios_logs_test.go(NOVO) + AGENTS.md;
+  internal/identidade/domain/user/{repository.go,service_test.go(atrFake/
+  repoFake)}; cmd/bootstrap/{logs.go,bootstrap.go,logs_usuarios_test.go(NOVO)};
+  docs/*; prd.json; agents/06; progress.txt.
+- Docs read: issue #29 (gh api), AGENTS.md de application/logs (+application),
+  internal/pkg/log, service/contratos/dto da aplicação logs, repository do
+  user, cmd/bootstrap/logs.go; agents/04 (já lido na UX1).
+- Checks: build/vet/test verdes (30 pacotes, integrações testcontainers
+  reais); CGO_ENABLED=1 go test -race verde em logs+user+bootstrap; arch-go
+  100/100 pelo gate; cobertura Swagger verde com os schemas novos.
+- **Learnings for future iterations:**
+  - Enriquecimento entre bases de dados (CH × PG): declare a interface no
+    consumidor (application), implemente o adaptador no bootstrap resolvendo
+    NA CHAMADA com função de repo INJETÁVEL — integração usa construtor puro
+    sem bootar singleton (mesmo padrão validadorWorkspacesSeed).
+  - Recorte do ctx VALE para o resolvedor também: BuscarPorUUIDs escopa pela
+    organization quando ela existe no ctx; ctx vazio = caminho plataforma
+    (global). Teste prova alheio NÃO resolvido mesmo com uuid na mão.
+  - Falha de leitura complementar degrada (log warn + campos vazios), nunca
+    derruba a resposta principal — mesma filosofia das dependências
+    degradáveis; dublê do resolver com err prova isso.
+  - O recorte fail-closed da aplicação logs EXIGE workspace no ctx para o
+    recorte básico: teste ponta a ponta precisa montar org+ws+PermLer (org
+    sozinha = ErrForaDoEscopo antes de chegar ao consultor).
+---
+
+## 2026-08-23 - UX3
+- Opções de filtro de logs + filtros método/status (issue #30): GET /api/
+  application/identidade/logs/opcoes-filtro devolve {organizacoes, workspaces,
+  usuarios} (uuid+nome) JÁ recortados pelo MESMO recorte em 3 níveis da
+  leitura — plataforma tudo, organization a própria inteira, workspace os
+  usuários COM ATRIBUIÇÃO viva nele e ele como workspace único; fail-closed =
+  ErrForaDoEscopo. Contrato ProvedorOpcoes EXIGIDO no boot, implementado no
+  bootstrap sobre repositórios PUROS dos 3 subdomínios resolvendo NA CHAMADA
+  (funções injetáveis p/ integração). Trilha de acesso ganha query `metodo`
+  (normalizado) e `status_classe` (2xx–5xx → faixa SQL); auditoria/erros
+  ZERAM os campos (colunas só existem lá); PermLer basta para as opções.
+  ListarOpcoes novo nos 3 repos (organization nil=TODAS raiz; workspace por
+  org; user por org OU EXISTS atribuição com deleted_at explícito).
+  Swagger regenerado; agents/04 + AGENTS.md atualizados.
+- Files changed: internal/identidade/application/logs/{contratos,service,
+  dto_request,dto_response,singleton,controller,permissions}.go +
+  opcoes_filtro_test.go(NOVO) + filtros_acesso_test.go(NOVO) + AGENTS.md;
+  internal/infra/clickhouse/{consultor.go,escritor_test.go};
+  internal/identidade/domain/{organization,workspace,user}/repository.go
+  (+fakes de teste dos 4 pacotes); cmd/bootstrap/{logs.go,bootstrap.go,
+  logs_opcoes_test.go(NOVO),logs_leitura_test.go,swagger_cobertura_test.go};
+  agents/04; docs/*; prd.json; agents/06; progress.txt.
+- Docs read: issue #30 (gh api), AGENTS.md de application/logs, infra/
+  clickhouse, domain/organization (+model), permissions.go da aplicação;
+  consultor.go e dto_request.go como referência do padrão E5.
+- Checks: build/vet/test verdes (30 pacotes, integrações testcontainers
+  reais); CGO_ENABLED=1 go test -race verde em logs/clickhouse/user/org/ws/
+  config/bootstrap; arch-go 100/100 pelo gate; Swagger com o path novo.
+- **Learnings for future iterations:**
+  - config.Init é sync.Once: SEGUNDO Init no processo é NO-OP silencioso —
+    sintomei como "flake de infra" (connection refused no porto do CH antigo)
+    antes de achar: helper de config de teste DEVE ResetarParaTeste antes do
+    Init e o teste deve resetar no defer (padrão já usado no cache_redis).
+  - Teste passando sozinho e falhando na suíte = suspeitar de singleton de
+    PACOTE compartilhado (config/clickhouse/jwt), não de infraestrutura.
+  - Projeções uuid+nome nos repos: Select("uuid","nome") + Find(Model) herda
+    soft delete; subquery de atribuição continua precisando deleted_at IS
+    NULL explícito (Table() cru não herda).
+  - Filtros exclusivos de UMA trilha (metodo/status só no acesso): zerar no
+    service ANTES do consultor evita virarem SQL contra coluna inexistente —
+    regra de negócio na aplicação, consultor continua sem regra.
+  - Genérico opcoesDe[T](itens, chave func(T)(uuid,string)) eliminou três
+    loops idênticos de mapeamento entidade→OpcaoFiltro no adaptador.
+---
+
+## 2026-08-24 - UX4
+- Gestão cross-tenant fechada (issue #32): GET /api/domain/identidade/workspaces aceita
+  organization_uuid SÓ para plataforma (posse EXATA de *:* — mesma exceção de R1/E5) e
+  POST aceita organization_uuid explícito no corpo para criar workspace em outra
+  organization (primeiro workspace de org nova). Autorização no service (`ehPlataforma`);
+  criação confere existência/vitalidade do pai pelo NOVO contrato
+  `ResolvedorEstadoOrganization` (adaptador no bootstrap resolvendo MustUse NA CHAMADA),
+  REESCOPEIA o ctx na organização ALVO antes de persistir e audita com cross_tenant=true.
+  Não-plataforma apontando alheia = ErrForaDoEscopo 404 (não vaza existência; própria =
+  aceita, equivalente ao escopo). +3 sentinelas catalogadas (fora_do_escopo 404,
+  organization_nao_encontrada 404, organization_inativa 422), severidade error na recusa
+  de escopo. Sem filtro/pedido: comportamento anterior intacto (inclusive fail-closed).
+- Files changed: internal/identidade/model/workspace/model.go;
+  internal/identidade/domain/workspace/{contratos,errors,singleton,service,controller,
+  dto_request,events}.go + service_test.go; cmd/bootstrap/{workspace.go,bootstrap.go,
+  cross_tenant_test.go(NOVO)}; internal/identidade/domain/workspace/AGENTS.md;
+  agents/06; docs/* (swag init); prd.json; progress.txt.
+- Docs read: issue #32 (gh api), agents/03, agents/04, AGENTS.md de domain/workspace
+  (+model/workspace, domain, identidade, internal), application/logs (referência do
+  recorte E5), application/auth (contrato VitalidadeOrganization), cmd/bootstrap,
+  pkg/orgctx, middleware/autorizacao.go.
+- Checks: build/vet/test verdes (29 pacotes, integrações testcontainers reais);
+  CGO_ENABLED=1 go test -race ./... VERDE completo (slug é invariante disputada);
+  arch-go segue compliance/coverage 100 pelo gate do go test; Swagger regenerado
+  (params/respostas novos nos dois handlers).
+- **Learnings for future iterations:**
+  - GORM IGNORA Where() em INSERT: o fail-closed real do Create vem do ERRO ACUMULADO
+    (comErroAcumulado) quando falta escopo — operação "em nome de outro tenant" precisa
+    REESCOPEIAR o ctx (orgctx.WithOrganization(ctx, alvo)) depois da autorização, senão
+    nem a plataforma consegue gravar. O dublê de repo tem que emular isso (Criar recusa
+    ctx sem org) — sem isso o teste valida um comportamento que não existe.
+  - crossTenant flag tem que ser calculada ANTES do reescopo do ctx (depois da troca,
+    ctx org == alvo sempre e a comparação vira tautologia — quase cometi o bug com || true).
+  - Sem restrição "só o primeiro workspace" da criação explícita: seria inaplicável sob
+    concorrência sem transação serializável; slug único GLOBAL + auditoria cobrem o risco
+    (decisão documentada no PR e no AGENTS.md).
+  - Binding de query gin não cobre uuid: parse manual no controller com c.Query +
+    uuid.Parse (inválido = 400); no CORPO json, *uuid.UUID funciona nativamente
+    (encoding/json usa UnmarshalText do google/uuid) com binding omitempty,uuid.
+---
+
+## 2026-08-24 - UX5
+- Provisionamento de admin inicial por organization (issue #33) completo: aplicação NOVA
+  `internal/identidade/application/provisionamento` orquestrando os 3 subdomínios —
+  POST /api/domain/identidade/organizations/{uuid}/provisionamento cria o admin inicial
+  (nome/e-mail/senha do chamador; senha nunca gerada em claro nem devolvida) + workspace
+  inicial (slug), atribuindo admin_organization. Restrito à plataforma DUAS vezes:
+  RequirePermission(identidade:provisionamento:executar) na rota e re-conferência da
+  posse de *:* dentro do subdomínio workspace na criação cross-tenant (UX4). Ordem
+  fail-closed: VOs cedo → alvo existe+ativa → já-provisionada=409 (idempotente) →
+  workspace pelo subdomínio → ctx REESCOPEIADO na alvo → admin criado OU reconhecido
+  (recuperação de tentativa interrompida) → papel seed atribuído (duplicata engolida).
+  Auditado como evento próprio com e-mail MASCARADO. Adaptadores no bootstrap traduzem
+  o vocabulário dos irmãos; agregadores de permissões/eventos e cobertura de eventos
+  atualizados para o 5º emissor.
+- Files changed: internal/identidade/application/provisionamento/* (NOVO, 10 arquivos +
+  service_test.go); cmd/bootstrap/{provisionamento_app.go(NOVO),bootstrap.go,catalogo.go,
+  eventos_cobertura_test.go,swagger_cobertura_test.go,provisionamento_endpoint_test.go(NOVO)};
+  cmd/server/routes/routes.go; internal/identidade/application/AGENTS.md;
+  cmd/bootstrap/AGENTS.md; agents/03; agents/06; docs/* (swag init); prd.json;
+  progress.txt.
+- Docs read: issue #33 (gh api), AGENTS.md de application (+auth como template),
+  cmd/bootstrap, cmd/server{,/routes}, domain/workspace (UX4 recém-feita), model/user,
+  pkg/pii, pkg/log/audit_log, errobserve.
+- Checks: build/vet/test verdes (30 pacotes, integrações testcontainers reais);
+  CGO_ENABLED=1 go test -race ./... VERDE completo; arch-go segue compliance/coverage
+  100 pelo gate do go test; Swagger regenerado com o path novo e cobertura verde.
+- **Learnings for future iterations:**
+  - Aplicação nova = atualizar OS TRÊS gates codificados em teste: emissoresConhecidos
+    (eventos_cobertura_test), nativos[] do agregador (contagem) e boot no
+    swagger_cobertura_test (senão a rota existe nos docs mas não no engine — sentido 2
+    reprova).
+  - Sentinelas de irmão NUNCA são recatalogadas: rest_err pânica code duplicado no init
+    (pegou no primeiro run). Direção certa: adaptador do bootstrap TRADUZ a sentinela do
+    subdomínio para o vocabulário da aplicação; sentinelas de VOs já catalogadas pelo
+    dono são resolvidas via registro global no traduzir().
+  - DoCatalogo deriva entradas DO errorCatalog: sentinela no catálogo sem severidade no
+    singleton pânica no IMPORT (segunda direção do fail-fast) — manter os dois mapas em
+    par quando uma sentinela própria entra.
+  - FK real derruba atalho de teste: criar workspace numa org inexistente para "tomar
+    slug" viola a FK da migration 0005 — usar org real criada no cenário.
+  - uuid.MustParse aceita só hex (2ª vez): sufixos mnemônicos ("pa01") panicam no teste.
+---

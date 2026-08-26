@@ -46,7 +46,7 @@ func (ctrl *controllerImpl) Routes(routes gin.IRouter) {
 // Handlers finos: bind → service → c.JSON. Erro sai SÓ por rest_err.WriteError.
 
 // @Summary      Cria um workspace
-// @Description  Cria workspace na organization autenticada, validando slug único global e reservados
+// @Description  Cria workspace na organization autenticada, validando slug único global e reservados. Chamador PLATAFORMA (super_admin) pode apontar organization_uuid explícito para criar o primeiro workspace de outra organization — criação cross-tenant auditada; para os demais, organization alheia recusa com 404
 // @Tags         Identidade · Workspace
 // @Accept       json
 // @Produce      json
@@ -56,8 +56,9 @@ func (ctrl *controllerImpl) Routes(routes gin.IRouter) {
 // @Success      201 {object} WorkspaceResponseDto
 // @Failure      400 {object} rest_err.RestErr
 // @Failure      403 {object} rest_err.RestErr
+// @Failure      404 {object} rest_err.RestErr "Organization pedida não encontrada ou fora do escopo"
 // @Failure      409 {object} rest_err.RestErr "Slug em uso"
-// @Failure      422 {object} rest_err.RestErr "Slug reservado pela plataforma"
+// @Failure      422 {object} rest_err.RestErr "Slug reservado ou organization alvo inativa"
 // @Router       /api/domain/identidade/workspaces [post]
 func (ctrl *controllerImpl) Create(c *gin.Context) {
 	var dto CreateWorkspaceRequestDto
@@ -99,7 +100,7 @@ func (ctrl *controllerImpl) Read(c *gin.Context) {
 }
 
 // @Summary      Lista workspaces
-// @Description  Lista paginada dos workspaces da organization, com filtros
+// @Description  Lista paginada dos workspaces da organization, com filtros. A PLATAFORMA (super_admin) pode filtrar por organization_uuid para listar os workspaces de qualquer organization; para os demais chamadores o filtro apontando organization alheia recusa com 404
 // @Tags         Identidade · Workspace
 // @Produce      json
 // @Security     BearerAuth
@@ -108,9 +109,11 @@ func (ctrl *controllerImpl) Read(c *gin.Context) {
 // @Param        pageSize query int false "Itens por página (teto 100)"
 // @Param        nome query string false "Filtro por nome"
 // @Param        status query string false "Filtro por status (ativo|inativo)"
+// @Param        organization_uuid query string false "UUID da organization (SÓ a plataforma; demais recusam alheia com 404)"
 // @Success      200 {object} pagination.Response[WorkspaceResponseDto]
 // @Failure      400 {object} rest_err.RestErr
 // @Failure      403 {object} rest_err.RestErr
+// @Failure      404 {object} rest_err.RestErr "organization_uuid alheia ao chamador"
 // @Router       /api/domain/identidade/workspaces [get]
 func (ctrl *controllerImpl) List(c *gin.Context) {
 	var f modelworkspace.ListFilter
@@ -119,6 +122,16 @@ func (ctrl *controllerImpl) List(c *gin.Context) {
 		return
 	}
 	f.Pagination = pagination.DoQuery(c) // lê page/pageSize aplicando o teto de 100 (doc 04)
+	// UX4: filtro de plataforma — parse manual porque o binding de form não
+	// cobre uuid; inválido = 400 (doc 04), nunca ignorado silenciosamente.
+	if bruto := c.Query("organization_uuid"); bruto != "" {
+		id, err := uuid.Parse(bruto)
+		if err != nil {
+			rest_err.WriteError(c, traduzir(ErrInvalidInput))
+			return
+		}
+		f.OrganizationUUID = &id
+	}
 	items, total, err := ctrl.service.List(c.Request.Context(), f)
 	if err != nil {
 		rest_err.WriteError(c, traduzir(err))
@@ -234,6 +247,9 @@ func traduzir(err error) *rest_err.RestErr {
 		errors.Is(err, ErrInvalidInput),
 		errors.Is(err, ErrSlugEmUso),
 		errors.Is(err, ErrSlugReservado),
+		errors.Is(err, ErrForaDoEscopo),
+		errors.Is(err, ErrOrganizacaoNaoEncontrada),
+		errors.Is(err, ErrOrganizacaoInativa),
 		errors.Is(err, modelworkspace.ErrSlugInvalido),
 		errors.Is(err, modelworkspace.ErrNomeInvalido),
 		errors.Is(err, modelworkspace.ErrJaInativo),

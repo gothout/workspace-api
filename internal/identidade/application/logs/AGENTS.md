@@ -11,6 +11,17 @@ CONSULTA delas para o front-end.
 completa rota a rota (`SetContextAuthorization → ResolveWorkspace →
 RequirePermission(identidade:logs:ler)`).
 
+`GET /api/application/identidade/logs/opcoes-filtro` (UX3, issue #30) —
+mesma cadeia; `PermLer` BASTA: devolve `{organizacoes, workspaces, usuarios}`
+(uuid+nome) JÁ recortados pelo escopo do chamador (plataforma tudo;
+organization a própria inteira; workspace os usuários COM ATRIBUIÇÃO nele e
+ele como workspace único). Fonte: contrato `ProvedorOpcoes` ligado no
+bootstrap sobre os repositórios puros dos três subdomínios — quem lê logs
+não precisa dos `:ler` de user/organization/workspace para montar Selects.
+Filtros novos na trilha de ACESSO (UX3): `metodo` (verbo exato) e
+`status_classe` (`2xx`…`5xx`); nas demais trilhas os campos são ZERADOS pelo
+service (as colunas só existem em `log_acesso`).
+
 ## Modelo de escopo em 3 recortes (decisão da issue #27)
 
 Derivado SEMPRE do ctx — o query param nunca escolhe escopo:
@@ -56,6 +67,16 @@ Derivado SEMPRE do ctx — o query param nunca escolhe escopo:
 - A trilha de acesso só é recortável porque o E5 adicionou as colunas de
   tenancy a `log_acesso` (`db/logs/0004`) — o middleware global preenche
   DEPOIS da cadeia rodar.
+- **Enriquecimento de usuário (UX2, issue #29)**: os três DTOs carregam
+  `user_nome`/`user_email`, resolvidos EM LOTE por uuids DISTINTOS da página
+  via contrato opcional `ResolvedorUsuarios` (`Dependencias.Usuarios`),
+  implementado no bootstrap sobre o repositório do subdomínio user
+  (`identidade_user_user` mora no Postgres; a trilha no ClickHouse — join
+  entre bancos não existe, lote sim). O resolvedor ESCOPA pela organization
+  do ctx quando ela existe (recortes org/workspace); ctx sem organization é
+  o caminho da plataforma. Falha do resolvedor NUNCA derruba a consulta —
+  linhas seguem com os campos vazios (log warn). Linhas sem usuário
+  (sistema/anônimo/removido) saem com `user_nome`/`user_email` vazios.
 
 ## Definição de pronto
 
@@ -63,3 +84,5 @@ Derivado SEMPRE do ctx — o query param nunca escolhe escopo:
   sem escopo e paginação propagada (dublê de `ConsultaTrilhas`).
 - Integração real (postgres+clickhouse efêmeros) prova escrita→leitura com
   recorte, filtro, ordenação e o caminho degradado 503.
+- Enriquecimento: unitários provam lote distinto, fantasma vazio, degradação;
+  integração real prova o join com Postgres e o recorte do resolvedor.

@@ -71,3 +71,24 @@ func NovasAtribuicoesResponseDto(itens []modeluser.AtribuicaoComPapel) []Atribui
 	}
 	return dtos
 }
+
+// PapelResponseDto — saída da listagem de papéis globais da plataforma: o
+// trio que o painel precisa para montar o Select de atribuição (uuid para
+// enviar na atribuição, nome/descricao para exibir).
+type PapelResponseDto struct {
+	UUID      uuid.UUID `json:"uuid"`
+	Nome      string    `json:"nome"`
+	Descricao string    `json:"descricao"`
+}
+
+func NovoPapelResponseDto(p *modeluser.Papel) PapelResponseDto {
+	return PapelResponseDto{UUID: p.UUID, Nome: p.Nome, Descricao: p.Descricao}
+}
+
+func NovosPapeisResponseDto(itens []modeluser.Papel) []PapelResponseDto {
+	dtos := make([]PapelResponseDto, 0, len(itens))
+	for i := range itens {
+		dtos = append(dtos, NovoPapelResponseDto(&itens[i]))
+	}
+	return dtos
+}

@@ -31,6 +31,11 @@ type Repository interface {
 	Atualizar(ctx context.Context, o *orgmodel.Organization) error
 	Remover(ctx context.Context, id uuid.UUID) error
 	ListarDominiosAtivos(ctx context.Context) ([]LinhaDominioAtivo, error)
+	// ListarOpcoes devolve uuid+nome das organizations para os Selects do
+	// painel de logs (issue #30): ponteiro nil = TODAS (caminho da
+	// plataforma — a tabela raiz não tem escopo acima, exceção documentada);
+	// preenchido = só a pedida. Leitura de referência, sem paginação.
+	ListarOpcoes(ctx context.Context, organizacaoUUID *uuid.UUID) ([]orgmodel.Organization, error)
 }
 
 // RepositorioApiKeys opera o registro-filho do agregado — sempre amarrado à
@@ -225,4 +230,19 @@ func traduzirErroDriver(err error, conflito error) error {
 		return conflito
 	}
 	return err
+}
+
+// ListarOpcoes devolve uuid+nome das organizations (issue #30). Ponteiro nil
+// = TODAS (caminho da plataforma); preenchido = só a pedida. Find com Model()
+// herda o soft delete do gorm — removida não aparece como opção.
+func (r *repositoryImpl) ListarOpcoes(ctx context.Context, organizacaoUUID *uuid.UUID) ([]orgmodel.Organization, error) {
+	q := r.db.WithContext(ctx).
+		Model(&orgmodel.Organization{}).
+		Select("uuid", "nome")
+	if organizacaoUUID != nil {
+		q = q.Where("uuid = ?", *organizacaoUUID)
+	}
+	var itens []orgmodel.Organization
+	err := q.Order("nome ASC").Find(&itens).Error
+	return itens, err
 }

@@ -96,3 +96,8 @@ func (s serviceObservado) Atribuicoes(ctx context.Context, usuarioUUID uuid.UUID
 func (s serviceObservado) RemoverAtribuicao(ctx context.Context, usuarioUUID, atribuicaoUUID uuid.UUID) error {
 	return s.observar(ctx, s.Service.RemoverAtribuicao(ctx, usuarioUUID, atribuicaoUUID))
 }
+
+func (s serviceObservado) Papeis(ctx context.Context) ([]modeluser.Papel, error) {
+	papeis, err := s.Service.Papeis(ctx)
+	return papeis, s.observar(ctx, err)
+}

@@ -23,6 +23,7 @@ import (
 	aplicacaoauth "workspace-api/internal/identidade/application/auth"
 	aplicacaocatalogo "workspace-api/internal/identidade/application/catalogo"
 	aplicacaologs "workspace-api/internal/identidade/application/logs"
+	aplicacaoprovisionamento "workspace-api/internal/identidade/application/provisionamento"
 
 	"workspace-api/cmd/server"
 	"workspace-api/cmd/server/routes"
@@ -150,8 +151,12 @@ func Serve(caminhoConfig string) error {
 
 	// Cache de resolução por slug (#8): contrato CacheResolucao do subdomínio
 	// com implementação Redis — sem Redis o adaptador vira no-op (consulta
-	// direta à fonte, operação normal).
-	_, err = dominioWorkspace.New(db, cacheResolucaoRedis{}, dominioWorkspace.ComTrilha(trilhasLog.auditoria))
+	// direta à fonte, operação normal). O resolvedor de organizations (UX4)
+	// habilita a gestão cross-tenant da plataforma: criar o primeiro workspace
+	// de uma organization nova e listar os workspaces dela por filtro.
+	_, err = dominioWorkspace.New(db, cacheResolucaoRedis{},
+		dominioWorkspace.ComTrilha(trilhasLog.auditoria),
+		dominioWorkspace.ComEstadoOrganizacao(estadoOrganizacaoAlvo{}))
 	if err != nil {
 		return fmt.Errorf("boot: %w", err)
 	}
@@ -182,11 +187,30 @@ func Serve(caminhoConfig string) error {
 	}
 	slog.Info("[BOOTSTRAP-DI] Contêiner Identidade/Auth inicializado.")
 
+	// Aplicação provisionamento (UX5): admin inicial + workspace inicial de
+	// uma organization pela PLATAFORMA — orquestração entre os três
+	// subdomínios acima, com os contratos resolvidos NA CHAMADA.
+	if _, err := aplicacaoprovisionamento.New(aplicacaoprovisionamento.Dependencias{
+		Organizacoes: estadoOrganizacaoAlvo{},
+		Workspaces:   workspacesProvisionamento{},
+		Usuarios:     usuariosProvisionamento{},
+		Papeis:       papeisProvisionamento{},
+		Trilha:       trilhasLog.auditoria,
+	}); err != nil {
+		return fmt.Errorf("boot: %w", err)
+	}
+	slog.Info("[BOOTSTRAP-DI] Contêiner Identidade/Provisionamento inicializado.")
+
 	// Aplicação logs (E5) — leitura das trilhas do ClickHouse com recorte em
 	// 3 níveis; o adaptador resolve o consultor NA CHAMADA, então ClickHouse
-	// degradado não impede o boot (as rotas respondem 503 padronizado).
+	// degradado não impede o boot (as rotas respondem 503 padronizado). O
+	// enriquecimento user_nome/user_email (UX2) e as opções de filtro
+	// recortadas (UX3) ligam os repositórios dos subdomínios pelos MESMOS
+	// adaptadores de resolução na chamada.
 	if _, err := aplicacaologs.New(aplicacaologs.Dependencias{
-		Trilhas: consultorLogs{},
+		Trilhas:  consultorLogs{},
+		Usuarios: novoResolvedorUsuariosLogs(),
+		Opcoes:   novoProvedorOpcoesLogs(),
 	}); err != nil {
 		return fmt.Errorf("boot: %w", err)
 	}

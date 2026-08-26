@@ -168,3 +168,7 @@ func silenciarSlog(t *testing.T) {
 	slog.SetDefault(slog.New(slog.NewTextHandler(io.Discard, nil)))
 	t.Cleanup(func() { slog.SetDefault(anterior) })
 }
+
+func (r *repoWorkspaceObservavel) ListarOpcoes(context.Context, *uuid.UUID) ([]modelworkspace.Workspace, error) {
+	return nil, nil
+}

@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	aplicacaoauth "workspace-api/internal/identidade/application/auth"
+	aplicacaoprovisionamento "workspace-api/internal/identidade/application/provisionamento"
 	dominioOrganizacao "workspace-api/internal/identidade/domain/organization"
 	dominioUsuario "workspace-api/internal/identidade/domain/user"
 	dominioWorkspace "workspace-api/internal/identidade/domain/workspace"
@@ -53,6 +54,7 @@ var emissoresConhecidos = []struct {
 	{dir: "internal/identidade/domain/workspace", grupo: "identidade/workspace", catalogo: metaWorkspace},
 	{dir: "internal/identidade/domain/user", grupo: "identidade/user", catalogo: metaUsuario},
 	{dir: "internal/identidade/application/auth", grupo: "identidade/auth", catalogo: metaAuth},
+	{dir: "internal/identidade/application/provisionamento", grupo: "identidade/provisionamento", catalogo: metaProvisionamento},
 }
 
 // Conversões dos catálogos NATIVOS (tipos homônimos por pacote) para a forma
@@ -77,6 +79,12 @@ func metaUsuario() []metaEvento {
 
 func metaAuth() []metaEvento {
 	return converterMeta(aplicacaoauth.CatalogoEventos(), func(m aplicacaoauth.EventoMeta) metaEvento {
+		return metaEvento{Acao: m.Acao, Descricao: m.Descricao, Campos: m.Campos}
+	})
+}
+
+func metaProvisionamento() []metaEvento {
+	return converterMeta(aplicacaoprovisionamento.CatalogoEventos(), func(m aplicacaoprovisionamento.EventoMeta) metaEvento {
 		return metaEvento{Acao: m.Acao, Descricao: m.Descricao, Campos: m.Campos}
 	})
 }
@@ -178,6 +186,7 @@ func TestAgregadorEventosConverteCatalogosNativos(t *testing.T) {
 		{dir: "identidade/workspace", itens: len(dominioWorkspace.CatalogoEventos())},
 		{dir: "identidade/user", itens: len(dominioUsuario.CatalogoEventos())},
 		{dir: "identidade/auth", itens: len(aplicacaoauth.CatalogoEventos())},
+		{dir: "identidade/provisionamento", itens: len(aplicacaoprovisionamento.CatalogoEventos())},
 	}
 	totalAuditados := 0
 	for _, nativo := range nativos {

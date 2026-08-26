@@ -29,10 +29,17 @@ import (
 type Repository interface {
 	Criar(ctx context.Context, u *modeluser.User) error
 	BuscarPorUUID(ctx context.Context, id uuid.UUID) (*modeluser.User, error)
+	BuscarPorUUIDs(ctx context.Context, ids []uuid.UUID) ([]modeluser.User, error)
 	BuscarPorEmail(ctx context.Context, email modeluser.Email) (*modeluser.User, error)
 	Listar(ctx context.Context, f modeluser.ListFilter) ([]modeluser.User, int64, error)
 	Atualizar(ctx context.Context, u *modeluser.User) error
 	Remover(ctx context.Context, id uuid.UUID) error
+
+	// ListarOpcoes devolve uuid+nome para os Selects do painel de logs
+	// (issue #30): workspace preenchido = usuários COM ATRIBUIÇÃO viva nele;
+	// senão organization preenchida = usuários da própria; senão = todos
+	// (caminho da plataforma). Leitura de referência, sem paginação.
+	ListarOpcoes(ctx context.Context, organizacaoUUID, workspaceUUID *uuid.UUID) ([]modeluser.User, error)
 
 	RegistrarRefreshToken(ctx context.Context, t *modeluser.RefreshToken) error
 	BuscarRefreshToken(ctx context.Context, usuarioUUID uuid.UUID, jti string) (*modeluser.RefreshToken, error)
@@ -61,6 +68,28 @@ func (r *repositoryImpl) BuscarPorUUID(ctx context.Context, id uuid.UUID) (*mode
 		return nil, err
 	}
 	return &u, nil
+}
+
+// BuscarPorUUIDs devolve EM LOTE os usuários pedidos (issue #29 —
+// enriquecimento das trilhas de log). ESCOPADA quando o ctx carrega
+// organization (recortes organization/workspace da aplicação logs);
+// GLOBAL quando não carrega (caminho da plataforma, que atravessa
+// organizations por natureza). Devolve só os encontrados: uuid sem linha
+// (anônimo/sistema/removido/alheio) simplesmente falta no resultado.
+func (r *repositoryImpl) BuscarPorUUIDs(ctx context.Context, ids []uuid.UUID) ([]modeluser.User, error) {
+	if len(ids) == 0 {
+		return []modeluser.User{}, nil
+	}
+	q := r.db.WithContext(ctx)
+	if orgctx.OrganizationUUID(ctx) != uuid.Nil {
+		q = orgctx.ScopeOrganization(r.db.WithContext(ctx), ctx)
+	}
+	var usuarios []modeluser.User
+	err := q.Where("uuid IN ?", ids).Find(&usuarios).Error
+	if err != nil {
+		return nil, err
+	}
+	return usuarios, nil
 }
 
 // BuscarPorEmail é a porta do login: escopada pela organization resolvida
@@ -221,6 +250,7 @@ type RepositorioAtribuicoes interface {
 	TemPapelNaOrganization(ctx context.Context, usuarioUUID uuid.UUID, papelNome string) (bool, error)
 	TemPapelEmQualquerOrganization(ctx context.Context, usuarioUUID uuid.UUID, papelNome string) (bool, error)
 	PapelPorUUID(ctx context.Context, papelUUID uuid.UUID) (*modeluser.Papel, error)
+	ListarPapeis(ctx context.Context) ([]modeluser.Papel, error)
 	PermissoesEfetivas(ctx context.Context, usuarioUUID, workspaceUUID uuid.UUID) ([]string, error)
 }
 
@@ -318,6 +348,24 @@ func (r *repositorioAtribuicoesImpl) PapelPorUUID(ctx context.Context, papelUUID
 	return &p, nil
 }
 
+// ListarPapeis devolve TODOS os papéis globais da plataforma (seed da F1) —
+// MESMA EXCEÇÃO de escopo do PapelPorUUID: as tabelas de papéis não têm
+// coluna de escopo (agents/03). Lista de referência para o painel montar o
+// Select de atribuição; ordenada por nome para saída determinística.
+func (r *repositorioAtribuicoesImpl) ListarPapeis(ctx context.Context) ([]modeluser.Papel, error) {
+	var papeis []modeluser.Papel
+	err := r.db.WithContext(ctx).
+		Order("nome ASC").
+		Find(&papeis).Error
+	if err != nil {
+		return nil, err
+	}
+	if papeis == nil {
+		papeis = []modeluser.Papel{}
+	}
+	return papeis, nil
+}
+
 // PermissoesEfetivas devolve a UNIÃO das permissões dos papéis do usuário no
 // workspace (atribuição direta) mais as dos papéis de suporte que ele exerce
 // — curingas inclusos. Sem cache no núcleo (Redis é evolução futura).
@@ -359,4 +407,29 @@ WHERE p.nome = ?
 		permissoes = []string{}
 	}
 	return permissoes, nil
+}
+
+// ListarOpcoes devolve uuid+nome dos usuários na granularidade pedida
+// (issue #30): workspace vence sobre organization — atribuição viva no
+// workspace (a tabela de usuário não tem workspace_uuid); organization
+// sozinha escopa pela própria; nenhum ponteiro = todos (caminho da
+// plataforma). Find com Model herda o soft delete da raiz; a subquery de
+// atribuição leva `deleted_at IS NULL` EXPLÍCITO (Table() cru não herda).
+func (r *repositoryImpl) ListarOpcoes(ctx context.Context, organizacaoUUID, workspaceUUID *uuid.UUID) ([]modeluser.User, error) {
+	q := r.db.WithContext(ctx).
+		Model(&modeluser.User{}).
+		Select("uuid", "nome")
+	switch {
+	case workspaceUUID != nil:
+		q = q.Where(`EXISTS (
+			SELECT 1 FROM identidade_user_atribuicao a
+			WHERE a.user_uuid = identidade_user_user.uuid
+			  AND a.workspace_uuid = ?
+			  AND a.deleted_at IS NULL)`, *workspaceUUID)
+	case organizacaoUUID != nil:
+		q = q.Where("organization_uuid = ?", *organizacaoUUID)
+	}
+	var itens []modeluser.User
+	err := q.Order("nome ASC").Find(&itens).Error
+	return itens, err
 }

@@ -17,7 +17,7 @@ import (
 // o auditar() chama validarAcaoCatalogada e PANICA — evento fora do catálogo
 // é vocabulário que o front não conhece, nunca pode nascer silencioso.
 var catalogoEventos = []EventoMeta{
-	{Acao: "criar", Descricao: "Workspace criado na organization.", Campos: []string{"slug"}},
+	{Acao: "criar", Descricao: "Workspace criado; criação cross-tenant da plataforma indicada em cross_tenant (UX4).", Campos: []string{"slug", "cross_tenant"}},
 	{Acao: "editar", Descricao: "Dados do workspace alterados; inativação indicada no campo opcional inativo.", Campos: []string{"slug", "inativo"}},
 	{Acao: "reativar", Descricao: "Workspace reativado; resolução pelo Host volta imediatamente (cache invalidado).", Campos: []string{"slug"}},
 	{Acao: "remover", Descricao: "Workspace removido; o slug NÃO se libera para outro tenant.", Campos: []string{"slug"}},

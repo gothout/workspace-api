@@ -19,6 +19,12 @@ var (
 	ErrInvalidInput  = errors.New("dados de entrada inválidos")
 	ErrSlugEmUso     = errors.New("slug já está em uso por outro workspace")
 	ErrSlugReservado = errors.New("slug reservado pela plataforma")
+
+	// Gestão cross-tenant (UX4): filtro/criação apontando organization fora
+	// do recorte do chamador e alvo inválido da criação da plataforma.
+	ErrForaDoEscopo              = errors.New("recurso fora do escopo resolvido")
+	ErrOrganizacaoNaoEncontrada  = errors.New("organization não encontrada")
+	ErrOrganizacaoInativa        = errors.New("organization está inativa")
 )
 
 // errorCatalog é o contrato público de cada sentinela: código estável,
@@ -36,6 +42,13 @@ var errorCatalog = map[error]rest_err.ErroCatalogado{
 	modelworkspace.ErrNomeInvalido: {Codigo: "identidade.workspace.nome_invalido", Mensagem: "Nome do workspace fora do formato esperado.", Status: http.StatusBadRequest},
 	modelworkspace.ErrJaInativo:    {Codigo: "identidade.workspace.ja_inativo", Mensagem: "Workspace já está inativo.", Status: http.StatusUnprocessableEntity},
 	modelworkspace.ErrJaAtivo:      {Codigo: "identidade.workspace.ja_ativo", Mensagem: "Workspace já está ativo.", Status: http.StatusUnprocessableEntity},
+
+	// Gestão cross-tenant (UX4): 404 sem confirmar existência de organization
+	// alheia (mesma regra do recorte dos logs, E5); alvo inválido da criação
+	// da plataforma distingue inexistente (404) de inativa (422).
+	ErrForaDoEscopo:             {Codigo: "identidade.workspace.fora_do_escopo", Mensagem: "Recurso fora do escopo resolvido.", Status: http.StatusNotFound},
+	ErrOrganizacaoNaoEncontrada: {Codigo: "identidade.workspace.organization_nao_encontrada", Mensagem: "Organization não encontrada.", Status: http.StatusNotFound},
+	ErrOrganizacaoInativa:       {Codigo: "identidade.workspace.organization_inativa", Mensagem: "A organization informada está inativa.", Status: http.StatusUnprocessableEntity},
 }
 
 func init() {

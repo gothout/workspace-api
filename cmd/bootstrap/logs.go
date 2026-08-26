@@ -13,12 +13,20 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/google/uuid"
+
 	"workspace-api/internal/infra/clickhouse"
 	"workspace-api/internal/pkg/config"
 	"workspace-api/internal/pkg/errobserve"
 	"workspace-api/internal/pkg/log/access_log"
 	"workspace-api/internal/pkg/log/audit_log"
 
+	dominioOrganizacao "workspace-api/internal/identidade/domain/organization"
+	dominioUsuario "workspace-api/internal/identidade/domain/user"
+	dominioWorkspace "workspace-api/internal/identidade/domain/workspace"
+	orgmodel "workspace-api/internal/identidade/model/organization"
+	modeluser "workspace-api/internal/identidade/model/user"
+	modelworkspace "workspace-api/internal/identidade/model/workspace"
 	aplicacaologs "workspace-api/internal/identidade/application/logs"
 )
 
@@ -141,3 +149,112 @@ func consultadorAtivo() (*clickhouse.Consultor, error) {
 }
 
 var _ aplicacaologs.ConsultaTrilhas = consultorLogs{}
+
+// --- Enriquecimento das linhas com o usuário (UX2, issue #29) ---------------
+
+// resolvedorUsuariosLogs liga o contrato ResolvedorUsuarios da aplicação logs
+// ao repositório do subdomínio user (identidade_user_user mora no Postgres; a
+// trilha no ClickHouse — join entre bancos não existe, lote sim). Resolve o
+// singleton NA CHAMADA; a função de acesso é injetável para testes de
+// integração usarem construtores puros.
+type resolvedorUsuariosLogs struct {
+	repositorio func() dominioUsuario.Repository // nil = singleton do processo
+}
+
+func novoResolvedorUsuariosLogs() resolvedorUsuariosLogs {
+	return resolvedorUsuariosLogs{
+		repositorio: func() dominioUsuario.Repository { return dominioUsuario.MustUse().Repository },
+	}
+}
+
+func (r resolvedorUsuariosLogs) Resolver(ctx context.Context, uuidsTexto []string) (map[string]aplicacaologs.UsuarioLog, error) {
+	ids := make([]uuid.UUID, 0, len(uuidsTexto))
+	for _, texto := range uuidsTexto {
+		id, err := uuid.Parse(texto)
+		if err != nil {
+			continue // lixo na trilha nunca derruba o enriquecimento
+		}
+		ids = append(ids, id)
+	}
+	if len(ids) == 0 {
+		return map[string]aplicacaologs.UsuarioLog{}, nil
+	}
+	repo := r.repositorio()
+	usuarios, err := repo.BuscarPorUUIDs(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	mapa := make(map[string]aplicacaologs.UsuarioLog, len(usuarios))
+	for _, u := range usuarios {
+		mapa[u.UUID.String()] = aplicacaologs.UsuarioLog{
+			UUID: u.UUID.String(), Nome: u.Nome, Email: u.Email.String(),
+		}
+	}
+	return mapa, nil
+}
+
+var _ aplicacaologs.ResolvedorUsuarios = resolvedorUsuariosLogs{}
+
+// --- Opções de filtro dos Selects (UX3, issue #30) ---------------------------
+
+// provedorOpcoesLogs liga o contrato ProvedorOpcoes da aplicação logs aos
+// repositórios puros dos três subdomínios (organization, workspace, user),
+// resolvendo os singletons NA CHAMADA; as funções de acesso são injetáveis
+// para testes de integração usarem construtores puros. Cada lista mapeia a
+// entidade do domínio para a opção mínima (uuid+nome) — nada mais atravessa.
+type provedorOpcoesLogs struct {
+	repoOrganizacao func() dominioOrganizacao.Repository
+	repoWorkspace   func() dominioWorkspace.Repository
+	repoUsuario     func() dominioUsuario.Repository
+}
+
+func novoProvedorOpcoesLogs() provedorOpcoesLogs {
+	return provedorOpcoesLogs{
+		repoOrganizacao: func() dominioOrganizacao.Repository { return dominioOrganizacao.MustUse().Repository },
+		repoWorkspace:   func() dominioWorkspace.Repository { return dominioWorkspace.MustUse().Repository },
+		repoUsuario:     func() dominioUsuario.Repository { return dominioUsuario.MustUse().Repository },
+	}
+}
+
+func (p provedorOpcoesLogs) Organizacoes(ctx context.Context, organizationUUID *uuid.UUID) ([]aplicacaologs.OpcaoFiltro, error) {
+	itens, err := p.repoOrganizacao().ListarOpcoes(ctx, organizationUUID)
+	if err != nil {
+		return nil, err
+	}
+	return opcoesDe(itens, func(o orgmodel.Organization) (uuid.UUID, string) {
+		return o.UUID, o.Nome
+	}), nil
+}
+
+func (p provedorOpcoesLogs) Workspaces(ctx context.Context, organizationUUID *uuid.UUID) ([]aplicacaologs.OpcaoFiltro, error) {
+	itens, err := p.repoWorkspace().ListarOpcoes(ctx, organizationUUID)
+	if err != nil {
+		return nil, err
+	}
+	return opcoesDe(itens, func(w modelworkspace.Workspace) (uuid.UUID, string) {
+		return w.UUID, w.Nome
+	}), nil
+}
+
+func (p provedorOpcoesLogs) Usuarios(ctx context.Context, organizationUUID, workspaceUUID *uuid.UUID) ([]aplicacaologs.OpcaoFiltro, error) {
+	itens, err := p.repoUsuario().ListarOpcoes(ctx, organizationUUID, workspaceUUID)
+	if err != nil {
+		return nil, err
+	}
+	return opcoesDe(itens, func(u modeluser.User) (uuid.UUID, string) {
+		return u.UUID, u.Nome
+	}), nil
+}
+
+// opcoesDe converte qualquer projeção uuid+nome nas opções mínimas da
+// aplicação — genérico evita três cópias do mesmo loop de mapeamento.
+func opcoesDe[T any](itens []T, chave func(T) (uuid.UUID, string)) []aplicacaologs.OpcaoFiltro {
+	opcoes := make([]aplicacaologs.OpcaoFiltro, 0, len(itens))
+	for _, item := range itens {
+		id, nome := chave(item)
+		opcoes = append(opcoes, aplicacaologs.OpcaoFiltro{UUID: id.String(), Nome: nome})
+	}
+	return opcoes
+}
+
+var _ aplicacaologs.ProvedorOpcoes = provedorOpcoesLogs{}

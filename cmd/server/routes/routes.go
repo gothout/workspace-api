@@ -23,6 +23,7 @@ import (
 	aplicacaoauth "workspace-api/internal/identidade/application/auth"
 	aplicacaocatalogo "workspace-api/internal/identidade/application/catalogo"
 	aplicacaologs "workspace-api/internal/identidade/application/logs"
+	aplicacaoprovisionamento "workspace-api/internal/identidade/application/provisionamento"
 	organizacao "workspace-api/internal/identidade/domain/organization"
 	usuario "workspace-api/internal/identidade/domain/user"
 	workspace "workspace-api/internal/identidade/domain/workspace"
@@ -141,6 +142,13 @@ func registrarConhecidos(engine *gin.Engine, dominio, aplicacao *gin.RouterGroup
 	})
 	registrarRotas("identidade.logs", aplicacao, func() (Controlador, error) {
 		return aplicacaologs.Use()
+	})
+	// Provisionamento (UX5) pendura a AÇÃO de negócio na árvore das
+	// organizations (POST /identidade/organizations/{uuid}/provisionamento),
+	// mas o controller é da aplicação — a orquestração atravessa os três
+	// subdomínios.
+	registrarRotas("identidade.provisionamento", dominio, func() (Controlador, error) {
+		return aplicacaoprovisionamento.Use()
 	})
 	// A aplicação catalogo pendura rotas nas DUAS casas: o grupo
 	// /api/application e a rota de sistema /api/system/errors direto no

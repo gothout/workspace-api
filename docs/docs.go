@@ -540,6 +540,54 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/application/identidade/logs/opcoes-filtro": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Referência para o painel montar os Selects de filtro (usuários, organizations e workspaces: uuid+nome), JÁ recortada pelo escopo do chamador — plataforma lista tudo; organization, a própria inteira; workspace, o próprio recorte (usuários atribuídos ao workspace). Identidade:logs:ler basta",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Identidade · Logs"
+                ],
+                "summary": "Lista as opções de filtro dos logs",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "UUID do workspace (fallback quando o host não tem subdomínio)",
+                        "name": "X-Workspace-Id",
+                        "in": "header"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/logs.OpcoesFiltroResponseDto"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "404": {
+                        "description": "Chamador sem escopo derivável do ctx",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    }
+                }
+            }
+        },
         "/api/domain/identidade/organizations": {
             "get": {
                 "security": [
@@ -1227,6 +1275,130 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/domain/identidade/organizations/{uuid}/provisionamento": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Função da PLATAFORMA (super_admin): cria o admin inicial (nome, e-mail e senha definidos pelo chamador; a senha nunca é gerada nem devolvida em claro) e o workspace inicial com o slug informado, atribuindo o papel admin_organization. Idempotente: organization que já possui workspace responde 409 ja_provisionado; peças de tentativa anterior interrompida são reconhecidas, não duplicadas",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Identidade · Provisionamento"
+                ],
+                "summary": "Provisiona o admin inicial e o workspace inicial de uma organization",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "UUID do workspace (fallback quando o host não tem subdomínio)",
+                        "name": "X-Workspace-Id",
+                        "in": "header"
+                    },
+                    {
+                        "type": "string",
+                        "description": "UUID da organization",
+                        "name": "uuid",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Dados do admin e do workspace inicial",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/provisionamento.ProvisionamentoRequestDto"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/provisionamento.ProvisionamentoResponseDto"
+                        }
+                    },
+                    "400": {
+                        "description": "Entrada inválida",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "403": {
+                        "description": "Restrito à plataforma",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "404": {
+                        "description": "Organization não encontrada",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "409": {
+                        "description": "Já provisionada / slug ou e-mail em uso",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "422": {
+                        "description": "Organization inativa",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/domain/identidade/user/papeis": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Referência para o painel montar o Select de atribuição de papéis: uuid, nome e descrição dos papéis seed (super_admin, admin_organization, admin_workspace, usuario_workspace, somente_leitura)",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Identidade · Usuário"
+                ],
+                "summary": "Lista os papéis globais da plataforma",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "UUID do workspace (fallback quando o host não tem subdomínio)",
+                        "name": "X-Workspace-Id",
+                        "in": "header"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/user.PapelResponseDto"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    }
+                }
+            }
+        },
         "/api/domain/identidade/users": {
             "get": {
                 "security": [
@@ -1764,7 +1936,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Lista paginada dos workspaces da organization, com filtros",
+                "description": "Lista paginada dos workspaces da organization, com filtros. A PLATAFORMA (super_admin) pode filtrar por organization_uuid para listar os workspaces de qualquer organization; para os demais chamadores o filtro apontando organization alheia recusa com 404",
                 "produces": [
                     "application/json"
                 ],
@@ -1802,6 +1974,12 @@ const docTemplate = `{
                         "description": "Filtro por status (ativo|inativo)",
                         "name": "status",
                         "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "UUID da organization (SÓ a plataforma; demais recusam alheia com 404)",
+                        "name": "organization_uuid",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -1822,6 +2000,12 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/rest_err.RestErr"
                         }
+                    },
+                    "404": {
+                        "description": "organization_uuid alheia ao chamador",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
                     }
                 }
             },
@@ -1831,7 +2015,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Cria workspace na organization autenticada, validando slug único global e reservados",
+                "description": "Cria workspace na organization autenticada, validando slug único global e reservados. Chamador PLATAFORMA (super_admin) pode apontar organization_uuid explícito para criar o primeiro workspace de outra organization — criação cross-tenant auditada; para os demais, organization alheia recusa com 404",
                 "consumes": [
                     "application/json"
                 ],
@@ -1878,6 +2062,12 @@ const docTemplate = `{
                             "$ref": "#/definitions/rest_err.RestErr"
                         }
                     },
+                    "404": {
+                        "description": "Organization pedida não encontrada ou fora do escopo",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
                     "409": {
                         "description": "Slug em uso",
                         "schema": {
@@ -1885,7 +2075,7 @@ const docTemplate = `{
                         }
                     },
                     "422": {
-                        "description": "Slug reservado pela plataforma",
+                        "description": "Slug reservado ou organization alvo inativa",
                         "schema": {
                             "$ref": "#/definitions/rest_err.RestErr"
                         }
@@ -2392,6 +2582,12 @@ const docTemplate = `{
                 "user_agent": {
                     "type": "string"
                 },
+                "user_email": {
+                    "type": "string"
+                },
+                "user_nome": {
+                    "type": "string"
+                },
                 "user_uuid": {
                     "type": "string"
                 },
@@ -2429,6 +2625,12 @@ const docTemplate = `{
                 },
                 "sucesso": {
                     "type": "boolean"
+                },
+                "user_email": {
+                    "type": "string"
+                },
+                "user_nome": {
+                    "type": "string"
                 },
                 "user_uuid": {
                     "type": "string"
@@ -2468,11 +2670,51 @@ const docTemplate = `{
                 "subdominio": {
                     "type": "string"
                 },
+                "user_email": {
+                    "type": "string"
+                },
+                "user_nome": {
+                    "type": "string"
+                },
                 "user_uuid": {
                     "type": "string"
                 },
                 "workspace_uuid": {
                     "type": "string"
+                }
+            }
+        },
+        "logs.OpcaoDto": {
+            "type": "object",
+            "properties": {
+                "nome": {
+                    "type": "string"
+                },
+                "uuid": {
+                    "type": "string"
+                }
+            }
+        },
+        "logs.OpcoesFiltroResponseDto": {
+            "type": "object",
+            "properties": {
+                "organizacoes": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/logs.OpcaoDto"
+                    }
+                },
+                "usuarios": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/logs.OpcaoDto"
+                    }
+                },
+                "workspaces": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/logs.OpcaoDto"
+                    }
                 }
             }
         },
@@ -2799,6 +3041,56 @@ const docTemplate = `{
                 }
             }
         },
+        "provisionamento.ProvisionamentoRequestDto": {
+            "type": "object",
+            "required": [
+                "email",
+                "nome",
+                "senha",
+                "slug"
+            ],
+            "properties": {
+                "email": {
+                    "type": "string"
+                },
+                "nome": {
+                    "type": "string",
+                    "maxLength": 120,
+                    "minLength": 2
+                },
+                "senha": {
+                    "type": "string",
+                    "maxLength": 72,
+                    "minLength": 8
+                },
+                "slug": {
+                    "description": "slugdns: tag do pkg/validator",
+                    "type": "string",
+                    "maxLength": 63,
+                    "minLength": 3
+                }
+            }
+        },
+        "provisionamento.ProvisionamentoResponseDto": {
+            "type": "object",
+            "properties": {
+                "admin_uuid": {
+                    "type": "string"
+                },
+                "email": {
+                    "type": "string"
+                },
+                "organization_uuid": {
+                    "type": "string"
+                },
+                "slug": {
+                    "type": "string"
+                },
+                "workspace_uuid": {
+                    "type": "string"
+                }
+            }
+        },
         "rest_err.EntradaErro": {
             "type": "object",
             "properties": {
@@ -2909,6 +3201,20 @@ const docTemplate = `{
                 }
             }
         },
+        "user.PapelResponseDto": {
+            "type": "object",
+            "properties": {
+                "descricao": {
+                    "type": "string"
+                },
+                "nome": {
+                    "type": "string"
+                },
+                "uuid": {
+                    "type": "string"
+                }
+            }
+        },
         "user.UpdateUserRequestDto": {
             "type": "object",
             "properties": {
@@ -2963,6 +3269,9 @@ const docTemplate = `{
                     "type": "string",
                     "maxLength": 120,
                     "minLength": 2
+                },
+                "organization_uuid": {
+                    "type": "string"
                 },
                 "slug": {
                     "description": "slugdns: tag do pkg/validator",

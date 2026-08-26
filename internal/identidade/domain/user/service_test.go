@@ -2,6 +2,7 @@ package user
 
 import (
 	"context"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -81,6 +82,26 @@ func (r *repoFake) BuscarPorUUID(ctx context.Context, id uuid.UUID) (*modeluser.
 	}
 	copia := *u
 	return &copia, nil
+}
+
+// BuscarPorUUIDs emula o lote real: escopado quando o ctx carrega
+// organization, global caso contrário; ausentes simplesmente faltam.
+func (r *repoFake) BuscarPorUUIDs(ctx context.Context, ids []uuid.UUID) ([]modeluser.User, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	encontrados := make([]modeluser.User, 0, len(ids))
+	for _, id := range ids {
+		u, ok := r.porUUID[id]
+		if !ok {
+			continue
+		}
+		org := orgctx.OrganizationUUID(ctx)
+		if org != uuid.Nil && u.OrganizationUUID != org {
+			continue // alheio não existe para este escopo
+		}
+		encontrados = append(encontrados, *u)
+	}
+	return encontrados, nil
 }
 
 func (r *repoFake) BuscarPorEmail(ctx context.Context, email modeluser.Email) (*modeluser.User, error) {
@@ -229,6 +250,7 @@ type atrFake struct {
 	papeis       map[uuid.UUID]string
 	papelPorNome map[string][]uuid.UUID
 	permissoes   map[uuid.UUID][]string
+	catalogo     []modeluser.Papel // papéis globais devolvidos por ListarPapeis
 	erroAoSalvar error
 }
 
@@ -317,6 +339,15 @@ func (a *atrFake) PapelPorUUID(_ context.Context, papelUUID uuid.UUID) (*modelus
 	return &modeluser.Papel{UUID: papelUUID, Nome: nome}, nil
 }
 
+func (a *atrFake) ListarPapeis(_ context.Context) ([]modeluser.Papel, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	itens := make([]modeluser.Papel, 0, len(a.catalogo))
+	itens = append(itens, a.catalogo...)
+	sort.Slice(itens, func(i, j int) bool { return itens[i].Nome < itens[j].Nome })
+	return itens, nil
+}
+
 func (a *atrFake) PermissoesEfetivas(_ context.Context, _ uuid.UUID, _ uuid.UUID) ([]string, error) {
 	return []string{}, nil
 }
@@ -327,6 +358,13 @@ func (a *atrFake) seedPapel(id uuid.UUID, nome string) {
 	defer a.mu.Unlock()
 	a.papeis[id] = nome
 	a.papelPorNome[nome] = append(a.papelPorNome[nome], id)
+}
+
+// seedCatalogo popula o catálogo global devolvido por ListarPapeis.
+func (a *atrFake) seedCatalogo(papeis ...modeluser.Papel) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.catalogo = append(a.catalogo, papeis...)
 }
 
 type validadorFake struct{ pertence bool }
@@ -627,4 +665,24 @@ func TestTemVinculoDiretoESuporteAuditado(t *testing.T) {
 	vinculo, err = svc.TemVinculo(ctx, super, outroWs)
 	require.NoError(t, err)
 	assert.True(t, vinculo, "super_admin atravessa organizations")
+}
+
+// ListarOpcoes emula a projeção real: workspace vence (via atribuições do
+// dublê de atribuições quando disponível — aqui só org/sem filtro), org
+// escopa, nenhum ponteiro devolve todos.
+func (r *repoFake) ListarOpcoes(_ context.Context, organizacaoUUID, workspaceUUID *uuid.UUID) ([]modeluser.User, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	itens := make([]modeluser.User, 0)
+	for _, u := range r.porUUID {
+		switch {
+		case workspaceUUID != nil:
+			// atribuição não vive neste dublê — sem dado, ninguém casa
+			continue
+		case organizacaoUUID != nil && u.OrganizationUUID != *organizacaoUUID:
+			continue
+		}
+		itens = append(itens, *u)
+	}
+	return itens, nil
 }

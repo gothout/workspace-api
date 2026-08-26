@@ -33,6 +33,7 @@ type Repository interface {
 	Atualizar(ctx context.Context, w *modelworkspace.Workspace) error
 	Remover(ctx context.Context, id uuid.UUID) error
 	SuspenderPorOrganization(ctx context.Context, organizationUUID uuid.UUID) (int64, error)
+	ListarOpcoes(ctx context.Context, organizacaoUUID *uuid.UUID) ([]modelworkspace.Workspace, error)
 }
 
 type repositoryImpl struct{ db *gorm.DB }
@@ -147,4 +148,20 @@ func traduzirErroDriver(err error) error {
 		return ErrSlugEmUso
 	}
 	return err
+}
+
+// ListarOpcoes devolve uuid+nome dos workspaces para os Selects do painel de
+// logs (issue #30): ponteiro nil = TODOS os workspaces (caminho da
+// plataforma); preenchido = só os da organization pedida. Leitura de
+// referência, sem paginação; Find com Model herda o soft delete.
+func (r *repositoryImpl) ListarOpcoes(ctx context.Context, organizacaoUUID *uuid.UUID) ([]modelworkspace.Workspace, error) {
+	q := r.db.WithContext(ctx).
+		Model(&modelworkspace.Workspace{}).
+		Select("uuid", "nome")
+	if organizacaoUUID != nil {
+		q = q.Where("organization_uuid = ?", *organizacaoUUID)
+	}
+	var itens []modelworkspace.Workspace
+	err := q.Order("nome ASC").Find(&itens).Error
+	return itens, err
 }

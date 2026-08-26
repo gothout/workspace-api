@@ -9,8 +9,19 @@ Tabela `identidade_workspace_workspace`, rotas em
 - **Escopo por organization**: o repository usa `orgctx.ScopeOrganization`,
   nunca `Scope` — esta tabela está *acima* do workspace que ela define.
   Consulta sem organization no contexto **falha** (fail-closed).
-- **`organization_uuid` vem do contexto, nunca do corpo** — aceitar do
-  cliente deixaria um admin criar workspace na organization alheia.
+- **`organization_uuid` vem do contexto** — com UMA exceção controlada
+  (UX4, gestão cross-tenant da plataforma): quem possui `*:*` por
+  PERTENCIMENTO EXATO (super_admin) pode apontar `organization_uuid`
+  explícito em `POST /workspaces` (criar o primeiro workspace de uma
+  organization nova) e filtrar `GET /workspaces?organization_uuid=` para
+  listar os workspaces de qualquer organization. A autorização mora no
+  service (`ehPlataforma`); a criação confere existência/vitalidade do pai
+  pelo contrato `ResolvedorEstadoOrganization` (ligado no bootstrap — filho
+  nunca fica mais vivo que o pai), reescopo o ctx na ALVO e audita com
+  `cross_tenant=true`. Não-plataforma apontando alheia = `fora_do_escopo`
+  (404, sem vazar existência); apontando a própria é aceito (equivalente ao
+  escopo do ctx). Sem o contrato ligado, a criação cross-tenant falha
+  FECHADA. Sem filtro/pedido, o comportamento é exatamente o de antes.
 - **Slug único GLOBAL** — necessário porque `{slug}.{base_domain}` é o
   endereço da plataforma inteira (e `*.{dominio-custom}` o do parceiro).
   Regex de formato + **lista de reservados**: `www`, `api`, `app`, `admin`,

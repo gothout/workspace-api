@@ -35,6 +35,11 @@ const grupoMenu = "Identidade · Usuários"
 
 const prefixoPublico = "/api/domain/identidade/users"
 
+// prefixoPublicoPapeis é o path da listagem de papéis globais (fora do CRUD
+// de usuários) — exigida por PermAtribuirPapel: quem atribui papel precisa da
+// referência para montar o Select.
+const prefixoPublicoPapeis = "/api/domain/identidade/user/papeis"
+
 // Catalogo devolve TODAS as permissões do subdomínio com metadados.
 // Sem ele o subdomínio não aparece no endpoint de permissões e o checklist não fecha.
 func Catalogo() []PermissaoMeta {
@@ -69,10 +74,11 @@ func Catalogo() []PermissaoMeta {
 		},
 		{
 			Permissao: PermAtribuirPapel,
-			Descricao: "Atribuir e remover papéis do usuário em workspaces — dar poder não é editar um campo",
+			Descricao: "Atribuir e remover papéis do usuário em workspaces e listar os papéis disponíveis — dar poder a alguém não é editar um campo",
 			Rotas: []RotaMeta{
 				{Rota: prefixoPublico + "/{uuid}/atribuicoes", Metodo: http.MethodPost},
 				{Rota: prefixoPublico + "/{uuid}/atribuicoes/{atribuicaoUuid}", Metodo: http.MethodDelete},
+				{Rota: prefixoPublicoPapeis, Metodo: http.MethodGet},
 			},
 			GrupoMenu: grupoMenu,
 		},

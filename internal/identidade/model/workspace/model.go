@@ -145,11 +145,15 @@ func (w *Workspace) Reativar() error {
 }
 
 // CreateInput e UpdateInput carregam só o que a regra permite escrever.
-// OrganizationUUID é preenchido pelo SERVICE a partir do ctx, NUNCA do corpo.
+// OrganizationUUID é preenchido pelo SERVICE a partir do ctx; a EXCEÇÃO é a
+// gestão cross-tenant da plataforma (UX4): OrganizationPedida chega do corpo,
+// e o service só a honra para chamador com posse exata de `*:*` (super_admin)
+// — para os demais ela vira recusa fora_do_escopo ou é equivalente ao escopo.
 type CreateInput struct {
-	OrganizationUUID uuid.UUID
-	Nome             string
-	Slug             string
+	OrganizationUUID   uuid.UUID
+	OrganizationPedida *uuid.UUID
+	Nome               string
+	Slug               string
 }
 
 type UpdateInput struct {
@@ -158,8 +162,14 @@ type UpdateInput struct {
 }
 
 // ListFilter — filtros de listagem; o escopo vem do ctx, nunca do filtro.
+// EXCEÇÃO (UX4): OrganizationUUID é o filtro de PLATAFORMA (posse exata de
+// `*:*`) para listar os workspaces de qualquer organization — o service
+// valida o chamador antes de aplicá-lo; não-plataforma apontando alheia é
+// recusado. form:"-" porque entra parseado pelo controller (query string),
+// nunca pelo binding automático.
 type ListFilter struct {
-	Nome   string
-	Status *StatusWorkspace
+	Nome             string
+	Status           *StatusWorkspace
+	OrganizationUUID *uuid.UUID `form:"-"`
 	pagination.Pagination
 }

@@ -19,6 +19,7 @@ type Controller interface {
 	Auditoria(c *gin.Context)
 	Acesso(c *gin.Context)
 	Erros(c *gin.Context)
+	OpcoesFiltro(c *gin.Context)
 }
 
 type controllerImpl struct{ service Service }
@@ -39,6 +40,9 @@ func (ctrl *controllerImpl) Routes(routes gin.IRouter) {
 	g.GET("/auditoria", append(cadeia, ctrl.Auditoria)...)
 	g.GET("/acesso", append(cadeia, ctrl.Acesso)...)
 	g.GET("/erros", append(cadeia, ctrl.Erros)...)
+	// Opções de filtro (UX3): PermLer BASTA — as opções já saem recortadas
+	// pelo escopo derivado do ctx (o mesmo do service de leitura).
+	g.GET("/opcoes-filtro", append(cadeia, ctrl.OpcoesFiltro)...)
 }
 
 // filtroDoPedido centraliza bind+paginação dos handlers: query inválida =
@@ -164,6 +168,26 @@ func (ctrl *controllerImpl) Erros(c *gin.Context) {
 		return
 	}
 	resp, err := ctrl.service.Erros(c.Request.Context(), filtro, paginacao)
+	if err != nil {
+		rest_err.WriteError(c, traduzir(err))
+		return
+	}
+	c.JSON(http.StatusOK, resp)
+}
+
+// @Summary      Lista as opções de filtro dos logs
+// @Description  Referência para o painel montar os Selects de filtro (usuários, organizations e workspaces: uuid+nome), JÁ recortada pelo escopo do chamador — plataforma lista tudo; organization, a própria inteira; workspace, o próprio recorte (usuários atribuídos ao workspace). Identidade:logs:ler basta
+// @Tags         Identidade · Logs
+// @Produce      json
+// @Security     BearerAuth
+// @Security     ApiKeyAuth
+// @Param        X-Workspace-Id header string false "UUID do workspace (fallback quando o host não tem subdomínio)"
+// @Success      200 {object} OpcoesFiltroResponseDto
+// @Failure      403 {object} rest_err.RestErr
+// @Failure      404 {object} rest_err.RestErr "Chamador sem escopo derivável do ctx"
+// @Router       /api/application/identidade/logs/opcoes-filtro [get]
+func (ctrl *controllerImpl) OpcoesFiltro(c *gin.Context) {
+	resp, err := ctrl.service.OpcoesFiltro(c.Request.Context())
 	if err != nil {
 		rest_err.WriteError(c, traduzir(err))
 		return

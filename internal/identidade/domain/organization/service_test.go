@@ -554,3 +554,7 @@ func TestCriarApiKeyNaoEscalaPrivilegio(t *testing.T) {
 
 func ptrTexto(s string) *string       { return &s }
 func ptrTempo(t time.Time) *time.Time { return &t }
+
+func (r *repoFake) ListarOpcoes(_ context.Context, organizacaoUUID *uuid.UUID) ([]orgmodel.Organization, error) {
+	return nil, nil
+}

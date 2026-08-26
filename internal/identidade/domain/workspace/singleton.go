@@ -35,6 +35,12 @@ var severidadesErros = map[error]errobserve.Severidade{
 	modelworkspace.ErrNomeInvalido: errobserve.SeveridadeWarn,
 	modelworkspace.ErrJaInativo:    errobserve.SeveridadeWarn,
 	modelworkspace.ErrJaAtivo:      errobserve.SeveridadeWarn,
+	// UX4: tentativa de alcançar organization alheia é sinal de segurança —
+	// mesma classificação do recorte dos logs (E5); alvo inválido da criação
+	// da plataforma é recusa esperada.
+	ErrForaDoEscopo:             errobserve.SeveridadeError,
+	ErrOrganizacaoNaoEncontrada: errobserve.SeveridadeWarn,
+	ErrOrganizacaoInativa:       errobserve.SeveridadeWarn,
 }
 
 // observadorErros observa TODO erro devolvido pelo service deste subdomínio.
