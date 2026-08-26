@@ -22,6 +22,7 @@ var catalogoEventos = []EventoMeta{
 	{Acao: "criar", Descricao: "Usuário criado na organization.", Campos: []string{"email"}},
 	{Acao: "editar", Descricao: "Dados do usuário alterados; inativação encerra as sessões abertas.", Campos: []string{"status", "sessoes_encerradas"}},
 	{Acao: "remover", Descricao: "Usuário removido com sessões encerradas.", Campos: []string{"email", "sessoes_encerradas"}},
+	{Acao: "alterar_senha", Descricao: "Senha do usuário alterada; todas as sessões abertas são encerradas.", Campos: []string{"sessoes_encerradas"}},
 	{Acao: "encerrar_sessao", Descricao: "Sessão (refresh token) revogada por jti — logout, rotação ou cascata.", Campos: []string{"jti"}},
 	{Acao: "atribuir_papel", Descricao: "Papel atribuído ao usuário num workspace da organization.", Campos: []string{"atribuicao_uuid", "workspace_uuid", "papel_uuid"}},
 	{Acao: "remover_atribuicao", Descricao: "Atribuição de papel removida do usuário.", Campos: []string{"atribuicao_uuid"}},

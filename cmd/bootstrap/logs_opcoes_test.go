@@ -70,8 +70,10 @@ func TestOpcoesFiltroSobreEsquemaReal(t *testing.T) {
 	var idTexto string
 	require.NoError(t, amb.db.Raw(`SELECT uuid::text FROM identidade_user_papel WHERE nome = ?`, papelAdminWorkspace).
 		Scan(&idTexto).Error)
-	_, err = svcUsuario.AtribuirPapel(orgctx.WithOrganization(amb.ctx, orgA), ana.UUID, wsMatriz, uuid.MustParse(idTexto))
-	require.NoError(t, err)
+	require.NoError(t, amb.db.Exec(
+		`INSERT INTO identidade_user_atribuicao (uuid, organization_uuid, workspace_uuid, user_uuid, papel_uuid, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, now(), now())`,
+		uuid.New(), orgA, wsMatriz, ana.UUID, uuid.MustParse(idTexto)).Error)
 
 	provedor := provedorOpcoesLogs{
 		repoOrganizacao: func() dominioOrganizacao.Repository { return dominioOrganizacao.NewRepository(amb.db) },

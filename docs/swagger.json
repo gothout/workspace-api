@@ -577,6 +577,49 @@
                 }
             }
         },
+        "/api/application/licensing/minhas-aplicacoes": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Módulos usáveis no workspace resolvido (licença ∩ ativação ∩ módulo ativo) — alimenta o seletor de aplicações do front",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Licensing · Aplicações"
+                ],
+                "summary": "Lista as aplicações liberadas",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/aplicacoes.MinhasAplicacoesResponseDto"
+                        }
+                    },
+                    "400": {
+                        "description": "Escopo ausente",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    }
+                }
+            }
+        },
         "/api/domain/identidade/organizations": {
             "get": {
                 "security": [
@@ -1918,6 +1961,79 @@
                 }
             }
         },
+        "/api/domain/identidade/users/{uuid}/senha": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "O próprio usuário informa a senha atual; um administrador hierarquicamente superior troca sem ela. Ao trocar, todas as sessões abertas são encerradas",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Identidade · Usuário"
+                ],
+                "summary": "Altera a senha do usuário",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "UUID do workspace (fallback quando o host não tem subdomínio)",
+                        "name": "X-Workspace-Id",
+                        "in": "header"
+                    },
+                    {
+                        "type": "string",
+                        "description": "UUID do usuário",
+                        "name": "uuid",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Senha atual (se for o próprio) e nova senha",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/user.AlterarSenhaRequestDto"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "401": {
+                        "description": "Senha atual incorreta ou operador não identificado",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "403": {
+                        "description": "Hierarquia insuficiente",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    }
+                }
+            }
+        },
         "/api/domain/identidade/workspaces": {
             "get": {
                 "security": [
@@ -2321,6 +2437,957 @@
                 }
             }
         },
+        "/api/domain/licensing/modulos": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Lista paginada do catálogo de aplicações da plataforma, com filtros",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Licensing · Módulos"
+                ],
+                "summary": "Lista módulos",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Página (default 1)",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Itens por página (teto 100)",
+                        "name": "pageSize",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filtro por nome",
+                        "name": "nome",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/pagination.Response-modulo_ModuloResponseDto"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Registra uma aplicação no catálogo global da plataforma (super_admin)",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Licensing · Módulos"
+                ],
+                "summary": "Cria um módulo",
+                "parameters": [
+                    {
+                        "description": "Dados do módulo",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/modulo.CreateModuloRequestDto"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/modulo.ModuloResponseDto"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "409": {
+                        "description": "Slug em uso",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/domain/licensing/modulos/{uuid}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Devolve o módulo do catálogo pelo uuid",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Licensing · Módulos"
+                ],
+                "summary": "Consulta um módulo",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "UUID do módulo",
+                        "name": "uuid",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/modulo.ModuloResponseDto"
+                        }
+                    },
+                    "400": {
+                        "description": "UUID malformado",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Remoção lógica; recusada enquanto houver licenças vivas (desative em vez de remover)",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Licensing · Módulos"
+                ],
+                "summary": "Remove um módulo",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "UUID do módulo",
+                        "name": "uuid",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "400": {
+                        "description": "UUID malformado",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "409": {
+                        "description": "Módulo com licenças vivas",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    }
+                }
+            },
+            "patch": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Atualização parcial; ativo/inativo passa pelos métodos de comportamento do agregado",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Licensing · Módulos"
+                ],
+                "summary": "Atualiza um módulo",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "UUID do módulo",
+                        "name": "uuid",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Campos a atualizar",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/modulo.UpdateModuloRequestDto"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/modulo.ModuloResponseDto"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/domain/licensing/organizations/{organization_uuid}/licencas": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Própria organization exige licensing:licenca:ler; alheia exige ler_plataforma (super_admin)",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Licensing · Licenças"
+                ],
+                "summary": "Lista as licenças de uma organization",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "UUID da organization",
+                        "name": "organization_uuid",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/licenca.LicencaResponseDto"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "403": {
+                        "description": "Organization alheia sem permissão de plataforma",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Concede ao módulo informado uma licença viva para a organization alvo (super_admin)",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Licensing · Licenças"
+                ],
+                "summary": "Atribui uma licença de módulo",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "UUID da organization alvo",
+                        "name": "organization_uuid",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Módulo a licenciar",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/licenca.AtribuirLicencaRequestDto"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/licenca.LicencaResponseDto"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "404": {
+                        "description": "Organization ou módulo inexistente",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "409": {
+                        "description": "Licença já concedida",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/domain/licensing/organizations/{organization_uuid}/licencas/{uuid}": {
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Remove a licença viva (super_admin); ativações do módulo ficam inertes até nova concessão",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Licensing · Licenças"
+                ],
+                "summary": "Revoga uma licença",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "UUID da organization alvo",
+                        "name": "organization_uuid",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "UUID da licença",
+                        "name": "uuid",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/domain/licensing/workspaces/{workspace_uuid}/modulos": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Ativações vivas do workspace alvo com o resumo de cada módulo",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Licensing · Ativações"
+                ],
+                "summary": "Lista os módulos ativados no workspace",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "UUID do workspace (fallback quando o host não tem subdomínio)",
+                        "name": "X-Workspace-Id",
+                        "in": "header"
+                    },
+                    {
+                        "type": "string",
+                        "description": "UUID do workspace alvo",
+                        "name": "workspace_uuid",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/ativacao.AtivacaoResponseDto"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "404": {
+                        "description": "Workspace fora da organization",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Aplica um módulo licenciado da organization ao workspace alvo (exige licença viva)",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Licensing · Ativações"
+                ],
+                "summary": "Ativa um módulo no workspace",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "UUID do workspace (fallback quando o host não tem subdomínio)",
+                        "name": "X-Workspace-Id",
+                        "in": "header"
+                    },
+                    {
+                        "type": "string",
+                        "description": "UUID do workspace alvo",
+                        "name": "workspace_uuid",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Módulo a ativar",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/ativacao.AtivarModuloRequestDto"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/ativacao.AtivacaoResponseDto"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "404": {
+                        "description": "Workspace ou módulo inexistente",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "409": {
+                        "description": "Já ativado",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "422": {
+                        "description": "Sem licença do módulo",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/domain/licensing/workspaces/{workspace_uuid}/modulos/{uuid}": {
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Remove a ativação viva; usuários perdem o acesso pela resolução na hora",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Licensing · Ativações"
+                ],
+                "summary": "Desativa um módulo no workspace",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "UUID do workspace (fallback quando o host não tem subdomínio)",
+                        "name": "X-Workspace-Id",
+                        "in": "header"
+                    },
+                    {
+                        "type": "string",
+                        "description": "UUID do workspace alvo",
+                        "name": "workspace_uuid",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "UUID da ativação",
+                        "name": "uuid",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/domain/todolist/tasks": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Lista paginada das tarefas do workspace, com filtro de conclusão",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Todolist"
+                ],
+                "summary": "Lista tarefas",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Módulo ativo (todolist)",
+                        "name": "Application",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Página (default 1)",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Itens por página (teto 100)",
+                        "name": "pageSize",
+                        "in": "query"
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "Filtro por conclusão",
+                        "name": "concluida",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/pagination.Response-tarefa_TarefaResponseDto"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Cria tarefa no todolist do workspace resolvido",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Todolist"
+                ],
+                "summary": "Cria uma tarefa",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Módulo ativo (todolist)",
+                        "name": "Application",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "description": "Dados da tarefa",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/tarefa.CreateTarefaRequestDto"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/tarefa.TarefaResponseDto"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/domain/todolist/tasks/{uuid}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Devolve a tarefa do todolist no escopo resolvido",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Todolist"
+                ],
+                "summary": "Consulta uma tarefa",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Módulo ativo (todolist)",
+                        "name": "Application",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "UUID da tarefa",
+                        "name": "uuid",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/tarefa.TarefaResponseDto"
+                        }
+                    },
+                    "400": {
+                        "description": "UUID malformado",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Remoção lógica da tarefa no escopo resolvido",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Todolist"
+                ],
+                "summary": "Remove uma tarefa",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Módulo ativo (todolist)",
+                        "name": "Application",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "UUID da tarefa",
+                        "name": "uuid",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "400": {
+                        "description": "UUID malformado",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    }
+                }
+            },
+            "patch": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Atualização parcial; concluir/reabrir passam pelos métodos de comportamento do agregado",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Todolist"
+                ],
+                "summary": "Atualiza uma tarefa",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Módulo ativo (todolist)",
+                        "name": "Application",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "UUID da tarefa",
+                        "name": "uuid",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Campos a atualizar",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/tarefa.UpdateTarefaRequestDto"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/tarefa.TarefaResponseDto"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    },
+                    "422": {
+                        "description": "Transição de estado proibida",
+                        "schema": {
+                            "$ref": "#/definitions/rest_err.RestErr"
+                        }
+                    }
+                }
+            }
+        },
         "/api/system/errors": {
             "get": {
                 "description": "Todos os erros possíveis, agrupados por domínio/subdomínio com code estável, mensagem PT-BR e status — mapping de tradução/listagem do front-end. Rota pública de sistema por decisão",
@@ -2363,6 +3430,57 @@
         }
     },
     "definitions": {
+        "aplicacoes.MinhasAplicacoesResponseDto": {
+            "type": "object",
+            "properties": {
+                "aplicacoes": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/workspace-api_internal_licensing_model_ativacao.AplicacaoDisponivelDto"
+                    }
+                }
+            }
+        },
+        "ativacao.AtivacaoResponseDto": {
+            "type": "object",
+            "properties": {
+                "ativado_por": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "modulo_nome": {
+                    "type": "string"
+                },
+                "modulo_slug": {
+                    "type": "string"
+                },
+                "modulo_uuid": {
+                    "type": "string"
+                },
+                "organization_uuid": {
+                    "type": "string"
+                },
+                "uuid": {
+                    "type": "string"
+                },
+                "workspace_uuid": {
+                    "type": "string"
+                }
+            }
+        },
+        "ativacao.AtivarModuloRequestDto": {
+            "type": "object",
+            "required": [
+                "modulo_slug"
+            ],
+            "properties": {
+                "modulo_slug": {
+                    "type": "string"
+                }
+            }
+        },
         "auth.LoginRequestDto": {
             "type": "object",
             "required": [
@@ -2386,6 +3504,13 @@
             "properties": {
                 "access_token": {
                     "type": "string"
+                },
+                "aplicacoes": {
+                    "description": "Aplicacoes lista os módulos liberados do par (org, ws) resolvido pelo\nHost — o front decide seletor (2+) ou entrada direta (1). Vazia = sem\nmódulo liberado (painel core). Só o LOGIN carrega: refresh não conhece\nHost; o front revalida por /minhas-aplicacoes.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/workspace-api_internal_licensing_model_ativacao.AplicacaoDisponivelDto"
+                    }
                 },
                 "refresh_token": {
                     "type": "string"
@@ -2534,6 +3659,43 @@
                     }
                 },
                 "subdominio": {
+                    "type": "string"
+                }
+            }
+        },
+        "licenca.AtribuirLicencaRequestDto": {
+            "type": "object",
+            "required": [
+                "modulo_slug"
+            ],
+            "properties": {
+                "modulo_slug": {
+                    "type": "string"
+                }
+            }
+        },
+        "licenca.LicencaResponseDto": {
+            "type": "object",
+            "properties": {
+                "concedida_por": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "modulo_nome": {
+                    "type": "string"
+                },
+                "modulo_slug": {
+                    "type": "string"
+                },
+                "modulo_uuid": {
+                    "type": "string"
+                },
+                "organization_uuid": {
+                    "type": "string"
+                },
+                "uuid": {
                     "type": "string"
                 }
             }
@@ -2704,6 +3866,72 @@
                     "items": {
                         "$ref": "#/definitions/logs.OpcaoDto"
                     }
+                }
+            }
+        },
+        "modulo.CreateModuloRequestDto": {
+            "type": "object",
+            "required": [
+                "nome",
+                "slug"
+            ],
+            "properties": {
+                "descricao": {
+                    "type": "string",
+                    "maxLength": 500
+                },
+                "nome": {
+                    "type": "string",
+                    "maxLength": 120,
+                    "minLength": 2
+                },
+                "slug": {
+                    "type": "string",
+                    "maxLength": 63,
+                    "minLength": 3
+                }
+            }
+        },
+        "modulo.ModuloResponseDto": {
+            "type": "object",
+            "properties": {
+                "ativo": {
+                    "type": "boolean"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "descricao": {
+                    "type": "string"
+                },
+                "nome": {
+                    "type": "string"
+                },
+                "slug": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "uuid": {
+                    "type": "string"
+                }
+            }
+        },
+        "modulo.UpdateModuloRequestDto": {
+            "type": "object",
+            "properties": {
+                "ativo": {
+                    "type": "boolean"
+                },
+                "descricao": {
+                    "type": "string",
+                    "maxLength": 500
+                },
+                "nome": {
+                    "type": "string",
+                    "maxLength": 120,
+                    "minLength": 2
                 }
             }
         },
@@ -2950,6 +4178,26 @@
                 }
             }
         },
+        "pagination.Response-modulo_ModuloResponseDto": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/modulo.ModuloResponseDto"
+                    }
+                },
+                "page": {
+                    "type": "integer"
+                },
+                "page_size": {
+                    "type": "integer"
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
         "pagination.Response-organization_ApiKeyResponseDto": {
             "type": "object",
             "properties": {
@@ -2977,6 +4225,26 @@
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/organization.OrganizationResponseDto"
+                    }
+                },
+                "page": {
+                    "type": "integer"
+                },
+                "page_size": {
+                    "type": "integer"
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "pagination.Response-tarefa_TarefaResponseDto": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/tarefa.TarefaResponseDto"
                     }
                 },
                 "page": {
@@ -3128,6 +4396,81 @@
                 }
             }
         },
+        "tarefa.CreateTarefaRequestDto": {
+            "type": "object",
+            "required": [
+                "titulo"
+            ],
+            "properties": {
+                "descricao": {
+                    "type": "string",
+                    "maxLength": 1000
+                },
+                "titulo": {
+                    "type": "string",
+                    "maxLength": 200,
+                    "minLength": 2
+                }
+            }
+        },
+        "tarefa.TarefaResponseDto": {
+            "type": "object",
+            "properties": {
+                "concluida": {
+                    "type": "boolean"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "descricao": {
+                    "type": "string"
+                },
+                "titulo": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "uuid": {
+                    "type": "string"
+                }
+            }
+        },
+        "tarefa.UpdateTarefaRequestDto": {
+            "type": "object",
+            "properties": {
+                "concluida": {
+                    "type": "boolean"
+                },
+                "descricao": {
+                    "type": "string",
+                    "maxLength": 1000
+                },
+                "titulo": {
+                    "type": "string",
+                    "maxLength": 200,
+                    "minLength": 2
+                }
+            }
+        },
+        "user.AlterarSenhaRequestDto": {
+            "type": "object",
+            "required": [
+                "nova_senha"
+            ],
+            "properties": {
+                "nova_senha": {
+                    "type": "string",
+                    "maxLength": 72,
+                    "minLength": 8
+                },
+                "senha_atual": {
+                    "type": "string",
+                    "maxLength": 72,
+                    "minLength": 8
+                }
+            }
+        },
         "user.AtribuicaoResponseDto": {
             "type": "object",
             "properties": {
@@ -3243,6 +4586,17 @@
                     "type": "string"
                 },
                 "uuid": {
+                    "type": "string"
+                }
+            }
+        },
+        "workspace-api_internal_licensing_model_ativacao.AplicacaoDisponivelDto": {
+            "type": "object",
+            "properties": {
+                "nome": {
+                    "type": "string"
+                },
+                "slug": {
                     "type": "string"
                 }
             }

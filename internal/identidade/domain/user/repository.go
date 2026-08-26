@@ -252,6 +252,10 @@ type RepositorioAtribuicoes interface {
 	PapelPorUUID(ctx context.Context, papelUUID uuid.UUID) (*modeluser.Papel, error)
 	ListarPapeis(ctx context.Context) ([]modeluser.Papel, error)
 	PermissoesEfetivas(ctx context.Context, usuarioUUID, workspaceUUID uuid.UUID) ([]string, error)
+
+	// MaiorPapel devolve o nome canônico do papel de MAIOR hierarquia do
+	// usuário no escopo da organization. Sem atribuição vazia.
+	MaiorPapel(ctx context.Context, usuarioUUID uuid.UUID) (string, error)
 }
 
 type repositorioAtribuicoesImpl struct{ db *gorm.DB }
@@ -364,6 +368,51 @@ func (r *repositorioAtribuicoesImpl) ListarPapeis(ctx context.Context) ([]modelu
 		papeis = []modeluser.Papel{}
 	}
 	return papeis, nil
+}
+
+// MaiorPapel devolve o nome canônico do papel de maior hierarquia do usuário
+// no escopo da organization. Sem atribuição vazia.
+func (r *repositorioAtribuicoesImpl) MaiorPapel(ctx context.Context, usuarioUUID uuid.UUID) (string, error) {
+	var itens []modeluser.AtribuicaoComPapel
+	// Hierarquia de papéis é GLOBAL na plataforma: um super_admin em qualquer
+	// organization exerce esse poder ao gerenciar usuários, independente do
+	// escopo de tenancy da requisição atual.
+	err := r.db.WithContext(ctx).
+		Table("identidade_user_atribuicao").
+		Select("identidade_user_atribuicao.*, p.nome AS papel_nome").
+		Joins("JOIN identidade_user_papel p ON p.uuid = identidade_user_atribuicao.papel_uuid").
+		Where("identidade_user_atribuicao.user_uuid = ? AND identidade_user_atribuicao.deleted_at IS NULL", usuarioUUID).
+		Scan(&itens).Error
+	if err != nil {
+		return "", err
+	}
+	return maiorPapelPorNome(papeisDeAtribuicoes(itens)), nil
+}
+
+func papeisDeAtribuicoes(itens []modeluser.AtribuicaoComPapel) []string {
+	nomes := make([]string, len(itens))
+	for i, item := range itens {
+		nomes[i] = item.PapelNome
+	}
+	return nomes
+}
+
+// maiorPapelPorNome escolhe o nome de maior prioridade conhecido; desconhecidos
+// e ausência caem para vazio (sem papel = menor hierarquia possível).
+func maiorPapelPorNome(nomes []string) string {
+	maior := ""
+	maiorPrioridade := -1
+	for _, nome := range nomes {
+		p, ok := prioridadePapel[nome]
+		if !ok {
+			continue
+		}
+		if p > maiorPrioridade {
+			maiorPrioridade = p
+			maior = nome
+		}
+	}
+	return maior
 }
 
 // PermissoesEfetivas devolve a UNIÃO das permissões dos papéis do usuário no

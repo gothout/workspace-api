@@ -21,7 +21,20 @@ import (
 const (
 	papelSuperAdmin        = "super_admin"
 	papelAdminOrganization = "admin_organization"
+	papelAdminWorkspace    = "admin_workspace"
+	papelUsuarioWorkspace  = "usuario_workspace"
+	papelSomenteLeitura    = "somente_leitura"
 )
+
+// prioridadePapel define a hierarquia de papéis: quem gerencia usuários só
+// pode alterar/remover quem está estritamente abaixo. Sem papel = -1.
+var prioridadePapel = map[string]int{
+	papelSuperAdmin:        40,
+	papelAdminOrganization: 30,
+	papelAdminWorkspace:    20,
+	papelUsuarioWorkspace:  10,
+	papelSomenteLeitura:    0,
+}
 
 // Credenciais é a fronteira da CRIPTOGRAFIA dentro do subdomínio: gerar hash
 // na escrita e comparar na autenticação. A implementação real usa bcrypt
@@ -80,6 +93,12 @@ type Service interface {
 	// montar o Select de atribuição. Leitura de referência: não escopa (as
 	// tabelas de papéis são globais — exceção documentada) e não audita.
 	Papeis(ctx context.Context) ([]modeluser.Papel, error)
+
+	// AlterarSenha troca a senha do usuário. Regra de posse:
+	//   - o próprio usuário informa a senha atual (revalidação);
+	//   - um operador hierarquicamente superior a troca sem a atual.
+	// Ao trocar, todas as sessões abertas do alvo são encerradas.
+	AlterarSenha(ctx context.Context, id uuid.UUID, senhaAtual, novaSenha string) error
 }
 
 type serviceImpl struct {
@@ -136,10 +155,80 @@ func (s *serviceImpl) List(ctx context.Context, f modeluser.ListFilter) ([]model
 	return s.repo.Listar(ctx, f)
 }
 
+// podeGerenciarUsuario fail-closed: operador precisa ter hierarquia
+// estritamente maior que o alvo. Próprio usuário pode se gerenciar.
+// Contextos de PLATAFORMA (*:* por pertencimento, ex.: provisionamento
+// automatizado) bypassam a checagem — quem emite esse contexto já passou pela
+// autorização do middleware e equivale a super_admin global.
+func (s *serviceImpl) podeGerenciarUsuario(ctx context.Context, alvoUUID uuid.UUID) error {
+	if orgctx.TemPermissao(ctx, "*:*") {
+		return nil
+	}
+	operadorUUID := orgctx.UserUUID(ctx)
+	if operadorUUID == uuid.Nil {
+		return ErrOperadorNaoIdentificado
+	}
+	if operadorUUID == alvoUUID {
+		return nil
+	}
+	prioridadeOperador, err := s.prioridadeDoUsuario(ctx, operadorUUID)
+	if err != nil {
+		return err
+	}
+	prioridadeAlvo, err := s.prioridadeDoUsuario(ctx, alvoUUID)
+	if err != nil {
+		return err
+	}
+	if prioridadeOperador <= prioridadeAlvo {
+		return ErrHierarquiaInsufficiente
+	}
+	return nil
+}
+
+// podeGerenciarPapel estende a proteção de hierarquia para atribuição/remoção
+// de papéis: o operador precisa ser estritamente maior que o alvo E que o
+// papel sendo manipulado. Próprio usuário pode se auto-gerenciar desde que o
+// papel seja inferior ao dele. Contextos de PLATAFORMA (*:*) bypassam.
+func (s *serviceImpl) podeGerenciarPapel(ctx context.Context, alvoUUID uuid.UUID, papelNome string) error {
+	if orgctx.TemPermissao(ctx, "*:*") {
+		return nil
+	}
+	if err := s.podeGerenciarUsuario(ctx, alvoUUID); err != nil {
+		return err
+	}
+	operadorUUID := orgctx.UserUUID(ctx)
+	prioridadeOperador, err := s.prioridadeDoUsuario(ctx, operadorUUID)
+	if err != nil {
+		return err
+	}
+	prioridadePapelAlvo := prioridadePapel[papelNome]
+	if prioridadeOperador < prioridadePapelAlvo {
+		return ErrHierarquiaInsufficiente
+	}
+	return nil
+}
+
+// prioridadeDoUsuario consulta o maior papel do usuário e devolve sua
+// prioridade na hierarquia. Sem papel ou papel desconhecido = -1.
+func (s *serviceImpl) prioridadeDoUsuario(ctx context.Context, usuarioUUID uuid.UUID) (int, error) {
+	papel, err := s.atribuicoes.MaiorPapel(ctx, usuarioUUID)
+	if err != nil {
+		return -1, err
+	}
+	if p, ok := prioridadePapel[papel]; ok {
+		return p, nil
+	}
+	return -1, nil
+}
+
 // Update traduz o input em chamadas aos métodos de comportamento. Inativar
 // encerra as sessões abertas (revogação persistida) — sessão não sobrevive
-// à conta.
+// à conta. Alterações só são permitidas se o operador tiver hierarquia
+// estritamente maior que o alvo (ou for o próprio alvo).
 func (s *serviceImpl) Update(ctx context.Context, id uuid.UUID, in modeluser.UpdateInput) (*modeluser.User, error) {
+	if err := s.podeGerenciarUsuario(ctx, id); err != nil {
+		return nil, err
+	}
 	u, err := s.repo.BuscarPorUUID(ctx, id)
 	if err != nil {
 		return nil, err
@@ -173,7 +262,12 @@ func (s *serviceImpl) Update(ctx context.Context, id uuid.UUID, in modeluser.Upd
 }
 
 // Remover é remoção LÓGICA e também encerra as sessões abertas.
+// Só permitida se o operador tiver hierarquia estritamente maior que o alvo
+// (ou for o próprio alvo).
 func (s *serviceImpl) Delete(ctx context.Context, id uuid.UUID) error {
+	if err := s.podeGerenciarUsuario(ctx, id); err != nil {
+		return err
+	}
 	u, err := s.repo.BuscarPorUUID(ctx, id)
 	if err != nil {
 		return err
@@ -186,6 +280,53 @@ func (s *serviceImpl) Delete(ctx context.Context, id uuid.UUID) error {
 		return err
 	}
 	s.auditar(ctx, "remover", u.UUID, true, "email", pii.MascaraEmail(u.Email.String()), "sessoes_encerradas", sessoes)
+	return nil
+}
+
+// AlterarSenha troca a credencial do usuário. O próprio alvo revalida a
+// senha atual; um operador hierarquicamente superior troca sem ela. A nova
+// senha passa pela política do modelo e o hash é gerado aqui — nunca cru.
+// Todas as sessões abertas do alvo são encerradas (nova senha = sessões novas).
+func (s *serviceImpl) AlterarSenha(ctx context.Context, id uuid.UUID, senhaAtual, novaSenha string) error {
+	operadorUUID := orgctx.UserUUID(ctx)
+	if operadorUUID == uuid.Nil && !orgctx.TemPermissao(ctx, "*:*") {
+		return ErrOperadorNaoIdentificado
+	}
+
+	u, err := s.repo.BuscarPorUUID(ctx, id)
+	if err != nil {
+		return err
+	}
+
+	if operadorUUID == u.UUID {
+		// Auto-edição: senha atual obrigatória e válida.
+		if senhaAtual == "" || !s.credenciais.Comparar(u.SenhaHash, senhaAtual) {
+			return ErrCredenciaisInvalidas
+		}
+	} else {
+		// Administração: hierarquia estritamente maior que o alvo.
+		if err := s.podeGerenciarUsuario(ctx, id); err != nil {
+			return err
+		}
+	}
+
+	if err := modeluser.ValidarSenha(novaSenha); err != nil {
+		return err
+	}
+	hash, err := s.credenciais.Gerar(novaSenha)
+	if err != nil {
+		return err
+	}
+	u.SenhaHash = hash
+	if err := s.repo.Atualizar(ctx, u); err != nil {
+		return err
+	}
+
+	sessoes, err := s.repo.RevogarTokensAtivosDoUsuario(ctx, u.UUID)
+	if err != nil {
+		return err
+	}
+	s.auditar(ctx, "alterar_senha", u.UUID, true, "sessoes_encerradas", sessoes)
 	return nil
 }
 
@@ -342,13 +483,17 @@ func (s *serviceImpl) registrarSuporte(ctx context.Context, usuarioUUID, workspa
 
 // AtribuirPapel valida o tripé antes de gravar: papel existe (global),
 // workspace pertence à organization do ctx e está ativo (contrato ligado no
-// bootstrap), e o usuário está no mesmo escopo.
+// bootstrap), o usuário está no mesmo escopo e o operador tem hierarquia
+// suficiente para conceder este papel.
 func (s *serviceImpl) AtribuirPapel(ctx context.Context, usuarioUUID, workspaceUUID, papelUUID uuid.UUID) (*modeluser.AtribuicaoComPapel, error) {
 	if _, err := s.repo.BuscarPorUUID(ctx, usuarioUUID); err != nil {
 		return nil, err
 	}
 	papel, err := s.atribuicoes.PapelPorUUID(ctx, papelUUID)
 	if err != nil {
+		return nil, err
+	}
+	if err := s.podeGerenciarPapel(ctx, usuarioUUID, papel.Nome); err != nil {
 		return nil, err
 	}
 	if s.validador == nil {
@@ -394,6 +539,23 @@ func (s *serviceImpl) Atribuicoes(ctx context.Context, usuarioUUID uuid.UUID) ([
 
 func (s *serviceImpl) RemoverAtribuicao(ctx context.Context, usuarioUUID, atribuicaoUUID uuid.UUID) error {
 	if _, err := s.repo.BuscarPorUUID(ctx, usuarioUUID); err != nil {
+		return err
+	}
+	itens, err := s.atribuicoes.ListarPorUsuario(ctx, usuarioUUID)
+	if err != nil {
+		return err
+	}
+	var papelNome string
+	for _, item := range itens {
+		if item.UUID == atribuicaoUUID {
+			papelNome = item.PapelNome
+			break
+		}
+	}
+	if papelNome == "" {
+		return ErrAtribuicaoNaoEncontrada
+	}
+	if err := s.podeGerenciarPapel(ctx, usuarioUUID, papelNome); err != nil {
 		return err
 	}
 	if err := s.atribuicoes.Remover(ctx, usuarioUUID, atribuicaoUUID); err != nil {

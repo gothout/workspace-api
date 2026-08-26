@@ -127,13 +127,14 @@ func TestProvisionamentoDeOrganizationPontaAPonta(t *testing.T) {
 		Trilha:       trilha,
 	})
 
-	ctxPlat := func() context.Context { return orgctx.WithPermissoes(amb.ctx, []string{"*:*"}) }
 	novaOrg := func(nome string) *orgmodel.Organization {
 		o, err := orgmodel.NewOrganization(orgmodel.CreateInput{Nome: nome})
 		require.NoError(t, err)
 		require.NoError(t, orgRepo.Criar(amb.ctx, o))
 		return o
 	}
+
+	ctxPlat := func() context.Context { return orgctx.WithPermissoes(amb.ctx, []string{"*:*"}) }
 
 	orgNova := novaOrg("Parceiro Endpoint")
 

@@ -54,3 +54,11 @@ type AtribuirPapelRequestDto struct {
 	WorkspaceUUID string `json:"workspace_uuid" binding:"required,uuid4"`
 	PapelUUID     string `json:"papel_uuid" binding:"required,uuid4"`
 }
+
+// AlterarSenhaRequestDto — entrada de PUT .../users/{uuid}/senha. O próprio
+// usuário informa senha_atual; um administrador hierarquicamente superior
+// troca sem ela. A nova senha nunca volta em resposta.
+type AlterarSenhaRequestDto struct {
+	SenhaAtual string `json:"senha_atual" binding:"omitempty,min=8,max=72"`
+	NovaSenha  string `json:"nova_senha" binding:"required,min=8,max=72"`
+}

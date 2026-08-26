@@ -38,6 +38,8 @@ var severidadesErros = map[error]errobserve.Severidade{
 	ErrAtribuicaoNaoEncontrada:      errobserve.SeveridadeWarn,
 	ErrWorkspaceInvalido:            errobserve.SeveridadeWarn,
 	ErrRefreshTokenInvalido:         errobserve.SeveridadeWarn,
+	ErrHierarquiaInsufficiente:      errobserve.SeveridadeWarn,
+	ErrOperadorNaoIdentificado:      errobserve.SeveridadeWarn,
 	modeluser.ErrEmailInvalido:      errobserve.SeveridadeWarn,
 	modeluser.ErrNomeInvalido:       errobserve.SeveridadeWarn,
 	modeluser.ErrSenhaInvalida:      errobserve.SeveridadeWarn,

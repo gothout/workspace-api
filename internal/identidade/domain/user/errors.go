@@ -24,6 +24,8 @@ var (
 	ErrAtribuicaoNaoEncontrada = errors.New("atribuição não encontrada para este usuário")
 	ErrWorkspaceInvalido       = errors.New("workspace inexistente ou inativo nesta organization")
 	ErrRefreshTokenInvalido    = errors.New("refresh token inválido, expirado ou revogado")
+	ErrHierarquiaInsufficiente = errors.New("usuário alvo possui papel igual ou superior ao operador")
+	ErrOperadorNaoIdentificado = errors.New("operador da ação não identificado no contexto")
 )
 
 // errorCatalog é o contrato público de cada sentinela: código estável,
@@ -40,6 +42,8 @@ var errorCatalog = map[error]rest_err.ErroCatalogado{
 	ErrAtribuicaoNaoEncontrada: {Codigo: "identidade.user.atribuicao_nao_encontrada", Mensagem: "Atribuição não encontrada para este usuário.", Status: http.StatusNotFound},
 	ErrWorkspaceInvalido:       {Codigo: "identidade.user.workspace_invalido", Mensagem: "Workspace inexistente ou inativo nesta organization.", Status: http.StatusUnprocessableEntity},
 	ErrRefreshTokenInvalido:    {Codigo: "identidade.user.refresh_token_invalido", Mensagem: "Sessão inválida ou expirada.", Status: http.StatusUnauthorized},
+	ErrHierarquiaInsufficiente: {Codigo: "identidade.user.hierarquia_insuficiente", Mensagem: "Você não pode gerenciar um usuário com papel igual ou superior ao seu.", Status: http.StatusForbidden},
+	ErrOperadorNaoIdentificado: {Codigo: "identidade.user.operador_nao_identificado", Mensagem: "Operador da ação não identificado.", Status: http.StatusUnauthorized},
 
 	// Sentinelas de invariante vindas do pacote model (folha).
 	modeluser.ErrEmailInvalido:      {Codigo: "identidade.user.email_invalido", Mensagem: "E-mail fora do formato esperado.", Status: http.StatusBadRequest},
